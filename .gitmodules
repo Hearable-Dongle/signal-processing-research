@@ -1,0 +1,3 @@
+[submodule "solospeech/SoloSpeech"]
+	path = solospeech/SoloSpeech
+	url = git@github.com:Hearable-Dongle/SoloSpeech.git
