@@ -1,3 +1,6 @@
 [submodule "solospeech/SoloSpeech"]
 	path = solospeech/SoloSpeech
 	url = git@github.com:Hearable-Dongle/SoloSpeech.git
+[submodule "speech_separation/s4m"]
+	path = speech_separation/s4m
+	url = git@github.com:JusperLee/S4M.git
