@@ -7,13 +7,11 @@ from speechbrain.inference.separation import SepformerSeparation
 
 def main(separator: str):
     model = SepformerSeparation.from_hparams(source=separator, savedir=f'pretrained_models/{separator.split("/")[-1]}')
-
-    # for custom file, change path
+    
     est_sources = model.separate_file(path='speechbrain/sepformer-wsj02mix/test_mixture.wav') 
 
     torchaudio.save("source1hat.wav", est_sources[:, :, 0].detach().cpu(), 8000)
     torchaudio.save("source2hat.wav", est_sources[:, :, 1].detach().cpu(), 8000)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
