@@ -3,4 +3,4 @@
 	url = git@github.com:Hearable-Dongle/SoloSpeech.git
 [submodule "speech_separation/s4m"]
 	path = speech_separation/s4m
-	url = git@github.com:JusperLee/S4M.git
+	url = git@github.com:Hearable-Dongle/S4M.git
