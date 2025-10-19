@@ -1,0 +1,47 @@
+# Use the official Python 3.10 image as the base
+FROM python:3.10-slim
+
+# Set non-interactive environment variables
+ENV TZ=UTC
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/root/.local/bin:${PATH}"
+
+# Install system dependencies and clean up in one step
+RUN apt-get update && apt-get install -y \
+        wget \
+        build-essential \
+        cmake \
+        protobuf-compiler \
+        libprotobuf-dev \
+        xxd \
+        file \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip and install required Python packages
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+RUN pip install --no-cache-dir \
+        torch \
+        onnx \
+        onnxsim \
+        numpy
+
+# --- THIS IS THE CORRECTED COMMAND ---
+# Download, install the compatible local wheel AND nncase-kpu, then clean up
+# RUN wget https://github.com/kendryte/nncase/releases/download/v2.10.0/nncase-2.10.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl && \
+#     pip install ./nncase-2.10.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl nncase-kpu && \
+#     rm nncase-2.10.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+
+RUN wget https://github.com/kendryte/nncase/releases/download/v2.6.0/nncase-2.6.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl && \
+    pip install ./nncase-2.6.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl nncase-kpu && \
+    rm nncase-2.6.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+
+RUN ls /usr/local/lib/python3.10/site-packages/
+RUN pip3 list | grep "nncase"
+
+# Verify the installation was successful (this should now pass)
+RUN python3 -c "import nncase; print('nncase and runtime verified successfully!')"
+
+# Set the working directory for your project
+WORKDIR /workspace
+

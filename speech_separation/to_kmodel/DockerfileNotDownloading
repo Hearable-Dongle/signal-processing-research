@@ -1,0 +1,74 @@
+# FROM ubuntu:20.04
+FROM python:3.10-slim
+
+ENV TZ=UTC
+
+ENV DEBIAN_FRONTEND=noninteractive
+# Add the directory for pip-installed executables to the system's PATH.
+# This is still best practice to prevent future issues.
+ENV PATH="/root/.local/bin:${PATH}"
+
+# Install system dependencies
+# RUN apt-get update && apt-get install -y \
+#     wget \
+#     cmake \
+#     build-essential \
+#     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    wget \
+    tar \
+    xz-utils \
+    python3 \
+    python3-pip \
+    python3-dev \
+    cmake \
+    build-essential \
+    protobuf-compiler \
+    libprotobuf-dev \
+    xxd \
+    file \
+    && rm -rf /var/lib/apt/lists/*
+
+
+RUN pip3 install --upgrade pip setuptools wheel
+
+# Upgrade pip
+# RUN pip3 install --upgrade pip
+
+# Install Python packages for your model conversion project
+RUN pip3 install --no-cache-dir \
+    torch \
+    onnx \
+    onnxsim \
+    numpy
+
+# --- THIS IS THE CORRECTED LINE ---
+# Install nncase directly from the URL. This downloads AND installs it.
+# RUN pip install https://github.com/kendryte/nncase/releases/download/v2.10.0/nncase-2.10.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+
+# RUN pip3 install nncase_kpu-2.10.0-py2.py3-none-win_amd64.whl
+# RUN pip3 install nncase nncase-kpu
+# https://github.com/kendryte/nncase/releases/download/v1.9.0/nncase-1.9.0.20230322-cp310-cp310-manylinux_2_24_x86_64.whl
+
+RUN wget https://github.com/kendryte/nncase/releases/download/v1.9.0/nncase-1.9.0.20230322-cp310-cp310-manylinux_2_24_x86_64.whl && \
+    # Install the downloaded wheel
+    pip3 install nncase-1.9.0.20230322-cp310-cp310-manylinux_2_24_x86_64.whl
+    # && \
+    # Clean up the downloaded file
+    #rm nncase-2.10.0-cp38-cp38-manylinux2014_x86_64.whl
+
+
+# RUN wget https://github.com/kendryte/nncase/releases/download/v2.10.0/nncase-2.10.0-cp38-cp38-manylinux2014_x86_64.whl && \
+#     # Install the downloaded wheel and the kpu extension
+#     pip3 install nncase-2.10.0-cp38-cp38-manylinux2014_x86_64.whl nncase-kpu && \
+#     # Clean up the downloaded file (matching the filename)
+#     rm nncase-2.10.0-cp38-cp38-manylinux2014_x86_64.whl
+
+# Verify the installation. This command should now succeed.
+# RUN ncc --version
+# RUN python -m nncase --version
+# RUN python3 -c "import nncase"
+RUN pip3 install nncase-kpu
+RUN python3 -c "import nncase; import nncase.runtime; print('✅ nncase installation verified successfully!')"
+
+WORKDIR /workspace
