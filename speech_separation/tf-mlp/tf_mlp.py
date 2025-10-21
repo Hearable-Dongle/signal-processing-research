@@ -3,6 +3,34 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple
 
+# --- Encoder and Decoder Modules ---
+class Encoder(nn.Module):
+    """Encodes the RI spectrogram into a latent representation."""
+    def __init__(self, latent_channels: int, win_length: int):
+        super().__init__()
+        self.encoder_layers = nn.Sequential(
+            nn.ConstantPad2d((0, 0, 2, 0), 0.0), # Padding for encoder convolution
+            nn.Conv2d(in_channels=2, out_channels=latent_channels, kernel_size=3)
+        )
+    def forward(self, spec_ri: torch.Tensor) -> torch.Tensor:
+        return self.encoder_layers(spec_ri)
+
+class Decoder(nn.Module):
+    """Decodes the processed latent representation back into RI masks."""
+    def __init__(self, latent_channels: int, num_speakers: int):
+        super().__init__()
+        self.decoder_layers = nn.Sequential(
+            nn.ConvTranspose2d(
+                in_channels=latent_channels,
+                out_channels=2 * num_speakers,
+                kernel_size=3
+            ),
+            nn.ConstantPad2d((0, 0, -2, 0), 0.0) # Trim padding from ConvTranspose2d
+        )
+    def forward(self, processed_spec: torch.Tensor) -> torch.Tensor:
+        return self.decoder_layers(processed_spec)
+
+
 class MLP(nn.Module):
     """A simple two-layer MLP with a residual connection."""
     def __init__(self, dim: int, expansion_factor: float = 4.0):
@@ -163,6 +191,56 @@ class TFMLPNet(nn.Module):
         # The decoder will be applied outside this single step model
         return frame, next_h_states, next_c_states
 
+class TFMLPNetFull(nn.Module):
+    """
+    A complete TF-MLPNet model that encapsulates encoding, recurrent processing,
+    and decoding for end-to-end inference.
+    """
+    def __init__(self,
+                 win_length: int,
+                 latent_channels: int,
+                 num_blocks: int,
+                 mixer_repetitions: int,
+                 num_speakers: int):
+        super().__init__()
+        
+        num_freqs = win_length // 2 + 1
+
+        self.encoder = Encoder(latent_channels, win_length)
+        
+        self.recurrent_net = TFMLPNet(
+            latent_channels=latent_channels,
+            num_blocks=num_blocks,
+            mixer_repetitions=mixer_repetitions,
+            num_freqs=num_freqs
+        )
+        
+        self.decoder = Decoder(latent_channels, num_speakers)
+
+    def forward(self, spec_ri_input: torch.Tensor) -> torch.Tensor:
+        # 1. Encoder
+        encoded_spec = self.encoder(spec_ri_input) # (B, C, F', T')
+        B, C, F_prime, T_prime = encoded_spec.shape
+
+        # 2. Recurrent Processing
+        # Initialize states
+        h_states = torch.zeros(self.recurrent_net.num_blocks, B, C, F_prime, device=encoded_spec.device)
+        c_states = torch.zeros(self.recurrent_net.num_blocks, B, C, F_prime, device=encoded_spec.device)
+
+        outputs_over_time = []
+        # This loop will be unrolled or converted to an ONNX Loop operator during export.
+        for t in range(T_prime):
+            frame = encoded_spec[..., t] # (B, C, F')
+            processed_frame, h_states, c_states = self.recurrent_net(frame, h_states, c_states)
+            outputs_over_time.append(processed_frame)
+
+        processed_spec = torch.stack(outputs_over_time, dim=3) # (B, C, F', T')
+        
+        # 3. Decoder
+        mask = self.decoder(processed_spec) # (B, 2*S, F, T)
+        return mask
+
+
 DEFAULT_CONFIG = {
         "win_length": 512,        # Corresponds to 32 ms window
         "hop_length": 128,        # Corresponds to 8 ms hop (75% overlap)
@@ -175,61 +253,23 @@ DEFAULT_CONFIG = {
 
 # Example Usage
 if __name__ == '__main__':
-    # Define Encoder and Decoder as separate modules for demonstration
-    class Encoder(nn.Module):
-        def __init__(self, latent_channels: int, win_length: int):
-            super().__init__()
-            self.num_freqs = win_length // 2 + 1
-            self.encoder_layers = nn.Sequential(
-                nn.ConstantPad2d((0, 0, 2, 0), 0.0), # Padding for encoder convolution
-                nn.Conv2d(in_channels=2, out_channels=latent_channels, kernel_size=3)
-            )
-        def forward(self, spec_ri: torch.Tensor) -> torch.Tensor:
-            return self.encoder_layers(spec_ri)
-
-    class Decoder(nn.Module):
-        def __init__(self, latent_channels: int, num_speakers: int):
-            super().__init__()
-            self.decoder_layers = nn.Sequential(
-                nn.ConvTranspose2d(
-                    in_channels=latent_channels,
-                    out_channels=2 * num_speakers,
-                    kernel_size=3
-                ),
-                nn.ConstantPad2d((0, 0, -2, 0), 0.0) # Trim padding from ConvTranspose2d
-            )
-        def forward(self, processed_spec: torch.Tensor) -> torch.Tensor:
-            return self.decoder_layers(processed_spec)
-
     # --- Model Configuration ---
     # These parameters match common settings for 16kHz audio
     fs = 16000
     duration_s = 4
     batch_size = 2
     
-    full_config = {
-        "win_length": 512,        # Corresponds to 32 ms window
-        "hop_length": 128,        # Corresponds to 8 ms hop (75% overlap)
-        "latent_channels": 64,    # Number of channels after encoder
-        "num_blocks": 4,          # Number of MLPNet blocks (B)
-        "mixer_repetitions": 2,   # MLP-Mixer repetitions (M)
-        "num_speakers": 2         # S=2 for Blind Source Separation (BSS)
-    }
+    full_config = DEFAULT_CONFIG
 
-    # Recurrent step model configuration
-    recurrent_config = {
-        "latent_channels": full_config["latent_channels"],
-        "num_blocks": full_config["num_blocks"],
-        "mixer_repetitions": full_config["mixer_repetitions"],
-        "num_freqs": full_config["win_length"] // 2 + 1 # F' dimension
-    }
-
-    # Create model instances
-    encoder_model = Encoder(full_config["latent_channels"], full_config["win_length"])
-    recurrent_step_model = TFMLPNet(**recurrent_config)
-    decoder_model = Decoder(full_config["latent_channels"], full_config["num_speakers"])
-
-    print(f"Recurrent Step Model created with {sum(p.numel() for p in recurrent_step_model.parameters())/1e6:.2f}M parameters.")
+    # --- Create Full Model instance ---
+    full_model = TFMLPNetFull(
+        win_length=full_config["win_length"],
+        latent_channels=full_config["latent_channels"],
+        num_blocks=full_config["num_blocks"],
+        mixer_repetitions=full_config["mixer_repetitions"],
+        num_speakers=full_config["num_speakers"]
+    )
+    print(f"Full Model created with {sum(p.numel() for p in full_model.parameters())/1e6:.2f}M parameters.")
 
     # --- Create Dummy Input ---
     # Original waveform input
@@ -251,32 +291,10 @@ if __name__ == '__main__':
     spec_ri_input = torch.stack([spec.real, spec.imag], dim=1) # (B, 2, F, T)
     print(f"Simulated Spectrogram Input shape: {spec_ri_input.shape}")
 
-    # --- Run Full Inference Pipeline (simulated) ---
+    # --- Run Full Inference Pipeline ---
     with torch.no_grad():
-        encoder_model.eval()
-        recurrent_step_model.eval()
-        decoder_model.eval()
-
-        # 1. Encoder
-        encoded_spec = encoder_model(spec_ri_input) # (B, C, F', T')
-        B, C, F_prime, T_prime = encoded_spec.shape
-        print(f"Encoded Spec shape: {encoded_spec.shape}")
-
-        # Initialize states for the recurrent step
-        h_states = torch.zeros(recurrent_config["num_blocks"], B, C, F_prime, device=encoded_spec.device)
-        c_states = torch.zeros(recurrent_config["num_blocks"], B, C, F_prime, device=encoded_spec.device)
-
-        outputs_over_time = []
-        for t in range(T_prime):
-            frame = encoded_spec[..., t] # (B, C, F')
-            processed_frame, h_states, c_states = recurrent_step_model(frame, h_states, c_states)
-            outputs_over_time.append(processed_frame)
-
-        processed_spec = torch.stack(outputs_over_time, dim=3) # (B, C, F', T')
-        print(f"Processed Spec shape: {processed_spec.shape}")
-
-        # 3. Decoder
-        mask = decoder_model(processed_spec) # (B, 2*S, F, T)
+        full_model.eval()
+        mask = full_model(spec_ri_input)
         print(f"Output Mask shape: {mask.shape}")
 
     # Expected output shape: (batch_size, num_speakers * 2, num_freqs, num_frames)
