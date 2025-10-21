@@ -13,17 +13,14 @@ def main():
 
     inference_times = []
 
-    # Create an ONNX runtime session
     session = ort.InferenceSession(onnx_model_path)
     input_name = session.get_inputs()[0].name
 
-    # Create a dummy input tensor
     dummy_input = torch.rand(*input_shape)
     dummy_input_np = dummy_input.numpy().astype(np.float32)
 
     print(f"Running {NUM_INFERENCES} inferences on {onnx_model_path} with input shape {input_shape}...")
 
-    # Warm-up run
     session.run(None, {input_name: dummy_input_np})
 
     for i in range(NUM_INFERENCES):

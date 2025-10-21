@@ -1,11 +1,8 @@
-# Start with the official Miniconda3 image
 FROM continuumio/miniconda3
 
-# Set environment variables
 ENV TZ=UTC
 ENV DEBIAN_FRONTEND=noninteractive
 
-# --- 1. INSTALL SYSTEM DEPENDENCIES (Including .NET) ---
 RUN apt-get update && apt-get install -y \
         git build-essential cmake ninja-build protobuf-compiler libprotobuf-dev \
         nlohmann-json3-dev xxd file wget gpg apt-transport-https pybind11-dev \
@@ -18,7 +15,6 @@ RUN apt-get update && apt-get install -y \
     apt-get install -y dotnet-sdk-6.0 dotnet-host && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 2. MANUALLY CREATE THE MISSING NETHOST CMAKE TARGET FILE ---
 RUN echo ">>> Manually creating nethost-config.cmake..." && \
     NETHOST_LIB_PATH=$(find /usr/share/dotnet -name "libnethost.so") && \
     NETHOST_INCLUDE_DIR=$(dirname "$(find /usr/share/dotnet -name 'nethost.h')") && \
@@ -27,31 +23,6 @@ RUN echo ">>> Manually creating nethost-config.cmake..." && \
     echo ">>> nethost-config.cmake created successfully." && \
     cat /usr/local/lib/cmake/nethost/nethost-config.cmake
 
-
-# # --- 2. MANUALLY CREATE THE MISSING NETHOST CMAKE FILE ---
-# RUN echo ">>> Manually creating nethost-config.cmake..." && \
-#     # Find the required .NET paths
-#     NETHOST_HEADER_PATH=$(find /usr/share/dotnet -name "nethost.h") && \
-#     NETHOST_LIB_PATH=$(find /usr/share/dotnet -name "libnethost.so") && \
-#     NETHOST_INCLUDE_DIR=$(dirname "${NETHOST_HEADER_PATH}") && \
-#     # Create the cmake config directory
-#     mkdir -p /usr/local/lib/cmake/nethost && \
-#     # Write the config file
-#     echo 'set(nethost_INCLUDE_DIRS "'${NETHOST_INCLUDE_DIR}'")' > /usr/local/lib/cmake/nethost/nethost-config.cmake && \
-#     echo 'set(nethost_LIBRARIES "'${NETHOST_LIB_PATH}'")' >> /usr/local/lib/cmake/nethost/nethost-config.cmake && \
-#     echo ">>> nethost-config.cmake created successfully." && \
-#     cat /usr/local/lib/cmake/nethost/nethost-config.cmake
-
-# --- 2b. INSTALL HALIDE DEPENDENCY ---
-# ENV HALIDE_VERSION=14.0.0
-# ENV HALIDE_DISTRIB_PATH=/opt/halide
-# RUN echo ">>> Installing Halide v${HALIDE_VERSION}..." && \
-#     wget https://github.com/halide/Halide/releases/download/v${HALIDE_VERSION}/halide-linux-${HALIDE_VERSION}-x86-64.tar.gz && \
-#     mkdir -p ${HALIDE_DISTRIB_PATH} && \
-#     tar -xvf halide-linux-${HALIDE_VERSION}-x86-64.tar.gz -C ${HALIDE_DISTRIB_PATH} --strip-components 1 && \
-#     rm halide-linux-${HALIDE_VERSION}-x86-64.tar.gz
-
-# --- 3. CREATE AND CONFIGURE CONDA ENVIRONMENT ---
 RUN conda create -n nncase_env python=3.10 -y
 SHELL ["/bin/bash", "-c"]
 RUN conda run -n nncase_env pip install --no-cache-dir torch onnx onnxsim numpy setuptools wheel
@@ -76,12 +47,8 @@ RUN source activate nncase_env && \
 	-DCMAKE_CXX_FLAGS="-mavx -mavx2" && \
     ninja && \
     pip install nncase-kpu && \
-    #pip install python/dist/*.whl nncase-kpu && \
     cd / && rm -rf nncase
 
-# --- 5. VERIFY AND FINALIZE ---
-#$ RUN echo "Verifying nncase installation..." && \
-#     conda run -n nncase_env python -c "import nncase; import nncase.runtime; print('✅ nncase v2.10.0 and runtime verified successfully!')"
 
 WORKDIR /workspace
 CMD ["/bin/bash", "--login", "-c", "conda activate nncase_env && /bin/bash"]

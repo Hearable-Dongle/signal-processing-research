@@ -185,14 +185,12 @@ if __name__ == '__main__':
     # To avoid dimension mismatches, the input time and frequency dimensions
     # should be divisible by 2^7 = 128.
     batch_size = 4
-    channels = 2  # Real and Imaginary components [cite: 90]
+    channels = 2  
     freq_bins = 256
     time_frames = 256
 
-    # Instantiate the model
     model = SiameseUnet()
     
-    # Create dummy input tensors
     dummy_mixture = torch.randn(batch_size, channels, freq_bins, time_frames)
     dummy_reference = torch.randn(batch_size, channels, freq_bins, time_frames)
     
@@ -200,18 +198,15 @@ if __name__ == '__main__':
     print(f"Input Mixture Shape:  {dummy_mixture.shape}")
     print(f"Input Reference Shape: {dummy_reference.shape}")
     
-    # Perform a forward pass
     estimated_output = model(dummy_mixture, dummy_reference)
     
     print(f"Output Estimate Shape: {estimated_output.shape}")
     
-    # --- Verification ---
     if dummy_mixture.shape == estimated_output.shape:
-        print("\n✅ Success! The output shape matches the input shape.")
+        print("\nSuccess! The output shape matches the input shape.")
     else:
-        print("\n❌ Error! The output shape does not match the input shape.")
+        print("\nError! The output shape does not match the input shape.")
 
-    # --- Model Summary ---
     from torchinfo import summary
     print("\n--- Model Summary ---")
     summary(model, input_size=[(batch_size, channels, freq_bins, time_frames), 
