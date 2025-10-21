@@ -20,11 +20,7 @@ def separate_audio(input_file, output_dir):
 
 
     print(f"Loading audio from: {input_file}")
-    try:
-        mixed_audio, sample_rate = sf.read(input_file, dtype='float32')
-    except Exception as e:
-        print(f"Error reading input file: {e}")
-        return
+    mixed_audio, sample_rate = sf.read(input_file, dtype='float32')
 
     if sample_rate != EXPECTED_SAMPLE_RATE:
         print(f"Warning: Input audio sample rate is {sample_rate}Hz, but the model expects {expected_sr}Hz.")
