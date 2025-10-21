@@ -27,6 +27,14 @@ else:
     # We proceed, but a warning is issued.
     print("Optimization finished, but verification failed. Proceeding anyway.")
 
+# Get the size of the model in bytes
+model_size_bytes = simplified_model.ByteSize()
+
+# Convert bytes to megabytes
+model_size_mb = model_size_bytes / (1024 * 1024)
+
+print(f"Simplified model size: {model_size_mb:.2f} MB")
+
 # Save the cleaned model
 onnx.save(simplified_model, output_model)
 
