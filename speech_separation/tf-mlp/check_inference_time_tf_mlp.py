@@ -1,120 +1,132 @@
 import time
 import numpy as np
 import onnxruntime as ort
+import torch
+import os
+from tf_mlp import Encoder, Decoder, TFMLPNet, DEFAULT_CONFIG
 
-NUM_INFERENCES = 200
+# --- Configuration ---
+NUM_INFERENCES = 50 # Reduced for this complex loop
+
+# --- Model & Input Parameters (Hard-coded as requested) ---
+CONFIG = DEFAULT_CONFIG
+LATENT_CHANNELS = CONFIG["latent_channels"]
+NUM_BLOCKS = CONFIG["num_blocks"]
+MIXER_REPETITIONS = CONFIG["mixer_repetitions"]
+NUM_SPEAKERS = CONFIG["num_speakers"]
+WIN_LENGTH = CONFIG["win_length"]
+NUM_FREQS = WIN_LENGTH // 2 + 1
+BATCH_SIZE = 1
+NUM_FRAMES = 100  # Example number of time frames
+
+# --- ONNX File Paths ---
+ENCODER_ONNX = "encoder.onnx"
+RECURRENT_STEP_ONNX = "recurrent_step.onnx"
+DECODER_ONNX = "decoder.onnx"
+
+def generate_onnx_models():
+    """Generates the three required ONNX models.
+    This is adapted from to_onnx.py to make the script self-contained.
+    """
+    print("Generating temporary ONNX models...")
+    # 1. Encoder
+    encoder = Encoder(LATENT_CHANNELS, WIN_LENGTH)
+    encoder.eval()
+    dummy_spec_ri = torch.randn(BATCH_SIZE, 2, NUM_FREQS, NUM_FRAMES)
+    torch.onnx.export(encoder, dummy_spec_ri, ENCODER_ONNX, opset_version=11,
+                        input_names=['spec_ri'], output_names=['encoded_spec'])
+
+    # 2. Recurrent Step
+    recurrent_step = TFMLPNet(LATENT_CHANNELS, NUM_BLOCKS, MIXER_REPETITIONS, NUM_FREQS)
+    recurrent_step.eval()
+    dummy_frame = torch.randn(BATCH_SIZE, LATENT_CHANNELS, NUM_FREQS)
+    h_states = torch.randn(NUM_BLOCKS, BATCH_SIZE, LATENT_CHANNELS, NUM_FREQS)
+    c_states = torch.randn(NUM_BLOCKS, BATCH_SIZE, LATENT_CHANNELS, NUM_FREQS)
+    torch.onnx.export(recurrent_step, (dummy_frame, h_states, c_states), RECURRENT_STEP_ONNX, opset_version=11,
+                        input_names=['frame', 'h_states', 'c_states'], 
+                        output_names=['out_frame', 'next_h', 'next_c'])
+
+    # 3. Decoder
+    decoder = Decoder(LATENT_CHANNELS, NUM_SPEAKERS)
+    decoder.eval()
+    dummy_processed_spec = torch.randn(BATCH_SIZE, LATENT_CHANNELS, NUM_FREQS, NUM_FRAMES)
+    torch.onnx.export(decoder, dummy_processed_spec, DECODER_ONNX, opset_version=11,
+                        input_names=['processed_spec'], output_names=['mask'])
+    print("ONNX models generated.")
 
 def main():
-    """
-    Measures the inference speed of the full TF-MLP model pipeline.
-    This involves running the encoder, the recurrent part in a loop, and the decoder.
-    """
-    # --- Model Paths ---
-    encoder_path = "encoder_simplified.onnx"
-    recurrent_step_path = "recurrent_step_simplified.onnx"
-    decoder_path = "decoder_simplified.onnx"
+    onnx_files = [ENCODER_ONNX, RECURRENT_STEP_ONNX, DECODER_ONNX]
+    try:
+        # --- 1. Generate and Load ONNX Models ---
+        generate_onnx_models()
+        encoder_sess = ort.InferenceSession(ENCODER_ONNX)
+        recurrent_sess = ort.InferenceSession(RECURRENT_STEP_ONNX)
+        decoder_sess = ort.InferenceSession(DECODER_ONNX)
 
-    # --- Model Configuration (hardcoded from tf-mlp/to_onnx.py) ---
-    latent_channels = 64
-    num_blocks = 4
-    win_length = 512
-    num_freqs = win_length // 2 + 1
-    batch_size = 1
-    num_frames = 100
+        # --- 2. Prepare Dummy Inputs ---
+        spec_ri_np = np.random.randn(BATCH_SIZE, 2, NUM_FREQS, NUM_FRAMES).astype(np.float32)
+        h_states_np = np.zeros((NUM_BLOCKS, BATCH_SIZE, LATENT_CHANNELS, NUM_FREQS), dtype=np.float32)
+        c_states_np = np.zeros((NUM_BLOCKS, BATCH_SIZE, LATENT_CHANNELS, NUM_FREQS), dtype=np.float32)
 
-    print("--- Model Configuration ---")
-    print(f"Latent Channels: {latent_channels}")
-    print(f"Num Blocks: {num_blocks}")
-    print(f"Window Length: {win_length}")
-    print(f"Num Frequencies: {num_freqs}")
-    print(f"Batch Size: {batch_size}")
-    print(f"Num Frames: {num_frames}")
-    print("--------------------------")
+        print(f"\nRunning {NUM_INFERENCES} inferences for the full TF-MLP model...")
+        print(f"Input Spec Shape: {spec_ri_np.shape}")
 
-    # --- Create ONNX runtime sessions ---
-    encoder_session = ort.InferenceSession(encoder_path)
-    recurrent_session = ort.InferenceSession(recurrent_step_path)
-    decoder_session = ort.InferenceSession(decoder_path)
+        # --- 3. Run Inference Benchmark ---
+        inference_times = []
+        
+        # Warm-up run
+        _ = encoder_sess.run(None, {'spec_ri': spec_ri_np})[0]
 
-    # --- Get input/output names ---
-    encoder_input_name = encoder_session.get_inputs()[0].name
-    encoder_output_name = encoder_session.get_outputs()[0].name
+        for i in range(NUM_INFERENCES):
+            start_time = time.perf_counter()
 
-    recurrent_input_names = [inp.name for inp in recurrent_session.get_inputs()]
-    recurrent_output_names = [out.name for out in recurrent_session.get_outputs()]
+            # 1. Run Encoder
+            encoded_spec = encoder_sess.run(None, {'spec_ri': spec_ri_np})[0]
 
-    decoder_input_name = decoder_session.get_inputs()[0].name
-    decoder_output_name = decoder_session.get_outputs()[0].name
+            # 2. Run Recurrent Loop
+            processed_frames = []
+            h, c = h_states_np, c_states_np
+            for frame_idx in range(NUM_FRAMES):
+                frame = encoded_spec[:, :, :, frame_idx]
+                # The model expects (batch, channels, freqs), so we might need to squeeze
+                if frame.ndim == 4 and frame.shape[2] == 1:
+                    frame = frame.squeeze(2)
+                
+                out_frame, h, c = recurrent_sess.run(None, {'frame': frame, 'h_states': h, 'c_states': c})
+                processed_frames.append(out_frame)
+            
+            # Stack frames to form the full spectrogram for the decoder
+            processed_spec = np.stack(processed_frames, axis=-1)
 
-    # --- Prepare dummy inputs ---
-    dummy_spec_ri = np.random.randn(batch_size, 2, num_freqs, num_frames).astype(np.float32)
-    
-    inference_times = []
+            # 3. Run Decoder
+            _ = decoder_sess.run(None, {'processed_spec': processed_spec})[0]
 
-    print(f"Running {NUM_INFERENCES} inferences for the full TF-MLP model...")
+            end_time = time.perf_counter()
+            inference_times.append(end_time - start_time)
+            print(f"Inference {i + 1}/{NUM_INFERENCES}", end='\r')
 
-    # --- Warm-up run ---
-    h_states = np.zeros((num_blocks, batch_size, latent_channels, num_freqs), dtype=np.float32)
-    c_states = np.zeros((num_blocks, batch_size, latent_channels, num_freqs), dtype=np.float32)
-    encoded_spec = encoder_session.run([encoder_output_name], {encoder_input_name: dummy_spec_ri})[0]
-    processed_frames = []
-    for i in range(encoded_spec.shape[3]):
-        frame = encoded_spec[:, :, :, i]
-        recurrent_inputs = {
-            recurrent_input_names[0]: frame,
-            recurrent_input_names[1]: h_states,
-            recurrent_input_names[2]: c_states
-        }
-        out_frame, h_states, c_states = recurrent_session.run(recurrent_output_names, recurrent_inputs)
-        processed_frames.append(out_frame)
-    processed_spec = np.stack(processed_frames, axis=3)
-    decoder_session.run([decoder_output_name], {decoder_input_name: processed_spec})
+        print("\nInference testing complete.")
 
-    # --- Main Inference Loop ---
-    for i in range(NUM_INFERENCES):
-        start_time = time.perf_counter()
+        # --- 4. Calculate and Display Statistics ---
+        avg_inference_time_ms = (sum(inference_times) / NUM_INFERENCES) * 1000
+        min_inference_time_ms = min(inference_times) * 1000
+        max_inference_time_ms = max(inference_times) * 1000
+        inferences_per_second = 1 / (sum(inference_times) / NUM_INFERENCES)
 
-        # 1. Encoder
-        encoded_spec = encoder_session.run([encoder_output_name], {encoder_input_name: dummy_spec_ri})[0]
+        print("\n--- Full TF-MLP (ONNX) Inference Time Statistics ---")
+        print(f"Number of inferences: {NUM_INFERENCES}")
+        print(f"Input frames: {NUM_FRAMES}")
+        print(f"Average inference time: {avg_inference_time_ms:.2f} ms")
+        print(f"Fastest inference time: {min_inference_time_ms:.2f} ms")
+        print(f"Slowest inference time: {max_inference_time_ms:.2f} ms")
+        print(f"Inferences per second (IPS): {inferences_per_second:.2f}")
 
-        # 2. Recurrent steps
-        # Reset states for each inference run
-        h_states = np.zeros((num_blocks, batch_size, latent_channels, num_freqs), dtype=np.float32)
-        c_states = np.zeros((num_blocks, batch_size, latent_channels, num_freqs), dtype=np.float32)
-        processed_frames = []
-        for frame_idx in range(encoded_spec.shape[3]):
-            frame = encoded_spec[:, :, :, frame_idx]
-            recurrent_inputs = {
-                recurrent_input_names[0]: frame,
-                recurrent_input_names[1]: h_states,
-                recurrent_input_names[2]: c_states
-            }
-            out_frame, h_states, c_states = recurrent_session.run(recurrent_output_names, recurrent_inputs)
-            processed_frames.append(out_frame)
-
-        # 3. Decoder
-        processed_spec = np.stack(processed_frames, axis=3)
-        decoder_session.run([decoder_output_name], {decoder_input_name: processed_spec})
-
-        end_time = time.perf_counter()
-        inference_times.append(end_time - start_time)
-        print(f"Inference {i+1}/{NUM_INFERENCES}", end='\r')
-
-    print("\nInference testing complete.")
-
-    avg_inference_time_ms = (sum(inference_times) / NUM_INFERENCES) * 1000
-    min_inference_time_ms = min(inference_times) * 1000
-    max_inference_time_ms = max(inference_times) * 1000
-    inferences_per_second = 1 / (sum(inference_times) / NUM_INFERENCES)
-
-    print("\n--- TF-MLP Full Model Inference Time Statistics ---")
-    print(f"Number of inferences: {NUM_INFERENCES}")
-    print(f"Input shape (spectrogram): {(batch_size, 2, num_freqs, num_frames)}")
-    print(f"Average inference time: {avg_inference_time_ms:.2f} ms")
-    print(f"Fastest inference time: {min_inference_time_ms:.2f} ms")
-    print(f"Slowest inference time: {max_inference_time_ms:.2f} ms")
-    print(f"Inferences per second (IPS): {inferences_per_second:.2f}")
-
+    finally:
+        # --- 5. Cleanup ---
+        print("\nCleaning up temporary ONNX files...")
+        for f in onnx_files:
+            if os.path.exists(f):
+                os.remove(f)
 
 if __name__ == "__main__":
     main()
