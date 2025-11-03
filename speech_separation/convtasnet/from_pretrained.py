@@ -1,7 +1,8 @@
 import argparse
 import os
-import torch
+
 import soundfile as sf
+import torch
 from asteroid.models import ConvTasNet
 
 EXPECTED_SAMPLE_RATE = 16000
@@ -12,21 +13,17 @@ def separate_audio(input_file, output_dir):
     """
     model_name = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
     print(f"Loading pre-trained model: {model_name}...")
-    try:
-        model = ConvTasNet.from_pretrained(model_name)
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        return
 
+    model = ConvTasNet.from_pretrained(model_name)
 
     print(f"Loading audio from: {input_file}")
     mixed_audio, sample_rate = sf.read(input_file, dtype='float32')
 
     if sample_rate != EXPECTED_SAMPLE_RATE:
-        print(f"Warning: Input audio sample rate is {sample_rate}Hz, but the model expects {expected_sr}Hz.")
+        print(f"Warning: Input audio sample rate is {sample_rate}Hz, but the model expects {EXPECTED_SAMPLE_RATE}Hz.")
         print("Results may be suboptimal. Please resample your audio to 16kHz for best performance.")
 
-    mixed_tensor = torch.tensor(mixed_audio, device=device)
+    mixed_tensor = torch.tensor(mixed_audio)
 
     if mixed_tensor.ndim > 1:
         print("Input audio is stereo. Converting to mono by averaging channels.")
@@ -49,7 +46,7 @@ def separate_audio(input_file, output_dir):
     print(f"Found {num_sources} sources. Saving to '{output_dir}'...")
 
     for i, source_audio in enumerate(separated_numpy):
-        output_filename = os.path.join(output_dir, f"separated_source_{i + 1}.wav")
+        output_filename = os.path.join(output_dir, f"{os.path.basename(input_file).split('.')[0]}_separated_source_{i + 1}.wav")
         sf.write(output_filename, source_audio, sample_rate)
         print(f"Successfully saved: {output_filename}")
 
@@ -78,3 +75,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
