@@ -3,4 +3,6 @@ __pycache__/
 tiger-env/
 .DS_Store/
 .vscode/
+training-env/
+
 
