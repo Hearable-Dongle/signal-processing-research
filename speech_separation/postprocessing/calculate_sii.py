@@ -609,3 +609,147 @@ def sii(ssl, nsl=None, hearing_threshold=None,
 
   # Speech Intelligibility Index (4.8 Eq. 14)
   return np.sum(band_importance(band_importance_function)*A)
+
+
+def calculate_spectrum_level(audio_signal_torch, sr, bandwidth_hz, mid_freqs=mid_band_freqs) -> np.ndarray:
+    import scipy.signal as signal
+
+    """
+    Calculates the 1/3-octave band spectrum level for a given audio signal.
+
+    This function:
+    1. Designs a 1/3-octave bandpass filter for each of the 18 bands.
+    2. Filters the audio signal with each filter.
+    3. Calculates the average power in each band.
+    4. Converts power to dB and normalizes by bandwidth to get spectrum level (dB/Hz).
+    """
+    
+    if audio_signal_torch.dim() > 1:
+        audio_signal_torch = audio_signal_torch[0]
+    audio_signal_np = audio_signal_torch.cpu().numpy()
+
+    nyquist = sr / 2.0
+    spectrum_levels = []
+    
+    eps = np.finfo(float).eps # Prevent log(0)
+
+    for i, fc in enumerate(mid_freqs):
+        # 1/3-Octave Filter
+        f_lower = fc / (2**(1/6))
+        f_upper = fc * (2**(1/6))
+        
+        # Frequencies within range
+        f_lower = max(f_lower, 20.0) 
+        f_upper = min(f_upper, nyquist - 1) # Stay just below Nyquist
+
+        # Normalized frequencies
+        wn = [f_lower / nyquist, f_upper / nyquist]
+
+        # # b, a = signal.butter(6, wn, btype='bandpass')
+        # # b, a = signal.butter(3, wn, btype='bandpass')
+        # filtered_audio = signal.filtfilt(b, a, audio_signal_np)
+        # # filtered_audio = signal.lfilter(b, a, audio_signal_np)
+        
+        sos = signal.butter(6, wn, btype='bandpass', output='sos')
+        filtered_audio = signal.sosfiltfilt(sos, audio_signal_np)
+        
+        # Power = mean of the squared signal
+        band_power = np.mean(filtered_audio**2)
+        band_power_db = 10 * np.log10(band_power + eps)
+        
+        # Normalize to Spectrum Level (power per Hz)
+        band_bw = bandwidth_hz[i]
+        spectrum_level_db = band_power_db - 10 * np.log10(band_bw)
+        
+        spectrum_levels.append(spectrum_level_db)
+        
+    return np.array(spectrum_levels)
+
+
+def main(original_audio_path: str, processed_audio_path: str, visualize: bool = False) ->  None:
+    import torchaudio
+
+    target_signal, sr_target = torchaudio.load(original_audio_path)
+    preds_signal, sr_preds = torchaudio.load(processed_audio_path)
+
+    min_len = min(target_signal.shape[1], preds_signal.shape[1])
+    target_signal = target_signal[:, :min_len]
+    preds_signal = preds_signal[:, :min_len]
+
+    if sr_target != sr_preds:
+        raise ValueError(f"Warning: Sample rates differ! Target: {sr_target} Hz, Preds: {sr_preds} Hz.")
+        
+    
+    # 1. Get the "Equivalent Speech Spectrum Level" (ssl)
+    # We use the 'normal' vocal effort spectrum from the ANSI standard
+    # as our "assumed" clean speech spectrum.
+    ssl_array = calculate_spectrum_level(target_signal, sr_target, bandwidth_hz)
+
+    noise_signal = target_signal - preds_signal
+    
+    print("Calculating noise spectrum...")
+    nsl_array = calculate_spectrum_level(noise_signal, sr_target, bandwidth_hz)
+
+    # calibration_offset_db = 100.0
+    # ssl_array = ssl_array + calibration_offset_db
+    # nsl_array = nsl_array + calibration_offset_db
+    
+    # CALIBRATION
+    eps = np.finfo(float).eps
+    target_power_dbfs = 10 * np.log10(np.mean(target_signal.cpu().numpy()**2) + eps)
+    STANDARD_CONVERSATIONAL_SPL = 65.0 # (in dB SPL)
+    calibration_offset_db = STANDARD_CONVERSATIONAL_SPL - target_power_dbfs
+    ssl_array = ssl_array + calibration_offset_db
+    nsl_array = nsl_array + calibration_offset_db
+
+    sii_score = sii(ssl=ssl_array, nsl=nsl_array)
+
+    print("\n" + "-"*30)
+    print(f"Target file:    {original_audio_path}")
+    print(f"Predicted file: {processed_audio_path}")
+    print("---------------------------------")
+    print(f"Speech Intelligibility Index (SII): {sii_score:.3f}")
+    
+    # DEBUGGING:
+    target_power = np.mean(target_signal.cpu().numpy()**2)
+    preds_power = np.mean(preds_signal.cpu().numpy()**2)
+    noise_power = np.mean(noise_signal.cpu().numpy()**2)
+
+    print("\n" + "="*30)
+    print("DEBUGGING INFO:")
+    print(f"Target Power: {10 * np.log10(target_power):.2f} dB")
+    print(f"Preds Power:  {10 * np.log10(preds_power):.2f} dB")
+    print(f"Noise Power:  {10 * np.log10(noise_power):.2f} dB")
+    print(f"Avg SSL: {np.mean(ssl_array):.2f} dB/Hz")
+    print(f"Avg NSL: {np.mean(nsl_array):.2f} dB/Hz")
+    print("="*30 + "\n")
+
+    if visualize:
+        from utils import plot_signal_differences
+        
+        plot_signal_differences(
+            target_signal.cpu().numpy()[0],
+            preds_signal.cpu().numpy()[0],
+            noise_signal.cpu().numpy()[0],
+            sii_score,
+            "SII Score",
+            units=""
+        )
+
+
+if __name__ == '__main__':
+  import argparse
+
+  parser = argparse.ArgumentParser(description="Calculate SII from a .wav file")
+  parser.add_argument("--original-audio", help="Path to the clean input .wav file.")
+  parser.add_argument("--processed-audio", help="Path to the processed .wav file.")
+  parser.add_argument("--visualize", action="store_true", help="Visualize the audio signals.")
+
+  args = parser.parse_args()
+
+
+  main(
+    original_audio_path=args.original_audio,
+    processed_audio_path=args.processed_audio,
+    visualize=args.visualize
+    )
