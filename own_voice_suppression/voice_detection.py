@@ -1,7 +1,11 @@
 import argparse
+from typing import Literal
 from os import PathLike
 from pathlib import Path
 from speechbrain.inference.speaker import EncoderClassifier
+from speechbrain.inference.speaker import SpeakerRecognition
+from transformers import WavLMModel, AutoProcessor, Wav2Vec2FeatureExtractor, WavLMForXVector
+
 from torch import Tensor
 import torch
 import torch.nn.functional as F
@@ -11,6 +15,51 @@ from general_utils.resample_audio import resample
 
 TARGET_SR = 16_000
 
+ClassifierOption = Literal["ecapa-voxceleb", "wavlm-large"]
+
+
+class WavLMClassifierWrapper:
+    """
+    A wrapper around the Hugging Face WavLM model to make it compatible
+    with the SpeechBrain 'EncoderClassifier' interface used in your script.
+    """
+    MODEL_ID = "microsoft/wavlm-base-plus-sv"
+    
+    def __init__(self, device=torch.device("cpu")):
+        self.device = device
+        print(f"Loading {self.MODEL_ID} on {device}...")
+        
+        self.processor = Wav2Vec2FeatureExtractor.from_pretrained(self.MODEL_ID)
+        
+        self.model = WavLMForXVector.from_pretrained(self.MODEL_ID).to(self.device)
+        self.model.eval()
+
+    def encode_batch(self, wavs: torch.Tensor) -> torch.Tensor:
+        """
+        Mimics SpeechBrain's encode_batch.
+        Input: (Batch, Time)
+        Output: (Batch, 1, Embedding_Dim)
+        """
+        if wavs.dim() > 1:
+            wavs_np = wavs.squeeze(0).cpu().numpy() if wavs.shape[0] == 1 else wavs.cpu().numpy()
+            if wavs_np.ndim > 1: wavs_np = wavs_np[0] # Handle (1, T) case
+        else:
+            wavs_np = wavs.cpu().numpy()
+
+        inputs = self.processor(
+            wavs_np, 
+            sampling_rate=TARGET_SR, 
+            return_tensors="pt", 
+            padding=True
+        ).to(self.device)
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            # Returns embeddings directly
+            embeddings = outputs.embeddings
+            embeddings = F.normalize(embeddings, p=2, dim=1)
+
+        return embeddings.unsqueeze(1)
 
 def prep_audio(audio: Tensor, orig_sr: int, target_sr: int = TARGET_SR) -> Tensor:
     """
@@ -39,18 +88,24 @@ def is_target_speaker(live_chunk: Tensor, target_embedding: Tensor, classifier: 
     return score.item() > threshold, score.item()
 
 
-def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike):
-    classifier = EncoderClassifier.from_hparams(
-        source="speechbrain/spkrec-ecapa-voxceleb", 
-        savedir="pretrained_models/spkrec-ecapa-voxceleb"
-    )
+def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, classifier_type: ClassifierOption = "wavlm-large"):
+    
+    if classifier_type == "ecapa-voxceleb":
+        classifier = EncoderClassifier.from_hparams(
+            source="speechbrain/spkrec-ecapa-voxceleb", 
+            savedir="pretrained_models/spkrec-ecapa-voxceleb"
+        )
+    elif classifier_type == "wavlm-large":
+        classifier = WavLMClassifierWrapper()
+    else:
+        raise ValueError(f"Unsupported classifier type: {classifier_type}")
+        
     enrolment_audio, sr_enroll = torchaudio.load(enrolment_path)
     enrolment_audio = prep_audio(enrolment_audio, sr_enroll, TARGET_SR)
 
     mixed_audio, sr_mix = torchaudio.load(mixed_path)
     mixed_audio = prep_audio(mixed_audio, sr_mix, TARGET_SR)
     
-    print("Works so far")
     
     with torch.no_grad():
         target_embedding = classifier.encode_batch(enrolment_audio)
@@ -117,7 +172,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if not args.output_path:
-        args.output_path = args.mixed_path.parent / f"suppressed_{args.mixed_path.name}_from_{args.enrolment_path.stem}.wav"
+        args.output_path = Path("own_voice_suppression") / "outputs" / f"suppressed_{args.mixed_path.stem}_from_{args.enrolment_path.stem}.wav"
 
     main(
         enrolment_path=args.enrolment_path, 
