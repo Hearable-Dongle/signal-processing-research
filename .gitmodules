@@ -4,3 +4,9 @@
 [submodule "speech_separation/TIGER"]
 	path = speech_separation/TIGER
 	url = https://github.com/JusperLee/TIGER.git
+[submodule "asteroid"]
+	path = asteroid
+	url = git@github.com:Hearable-Dongle/asteroid.git
+[submodule "speakerbeam"]
+	path = speakerbeam
+	url = git@github.com:Hearable-Dongle/speakerbeam.git
