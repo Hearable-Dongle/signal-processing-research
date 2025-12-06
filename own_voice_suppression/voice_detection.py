@@ -63,7 +63,6 @@ class PyannoteDiarizationWrapper:
         self.embedding_model = Model.from_pretrained(
             self.MODEL_ID,
         ).to(device)
-        print("SELF> EMBEDDING_MODEL", self.embedding_model)
         self.embedding_model.eval()
 
     def encode_batch(self, wavs: torch.Tensor) -> torch.Tensor:
@@ -79,16 +78,14 @@ class PyannoteDiarizationWrapper:
         with torch.no_grad():
             for i in range(wavs.shape[0]):
                 waveform_slice = wavs[i:i+1] # Keep 2D for pyannote
-                
-                file = {"waveform": waveform_slice.cpu(), "sample_rate": TARGET_SR}
-                
-                embedding_np = self.embedding_model(file)
-                
+                # The pyannote Model class expects a tensor directly.
+                # Ensure the waveform slice is on the correct device.
+                embedding_np = self.embedding_model(waveform_slice.to(self.device))                
                 # Average the embeddings if multiple chunks are returned 
                 if embedding_np.ndim > 1 and embedding_np.shape[0] > 1:
                     embedding_np = np.mean(embedding_np, axis=0, keepdims=True)
                 
-                embedding_torch = torch.from_numpy(embedding_np).to(self.device)
+                embedding_torch = embedding_np.to(self.device)
                 all_embeddings.append(embedding_torch)
 
         embeddings = torch.cat(all_embeddings, dim=0) # (B, emb_dim)
