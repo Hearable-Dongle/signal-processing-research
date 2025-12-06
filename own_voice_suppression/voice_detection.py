@@ -1,10 +1,10 @@
 import argparse
+from collections import deque
 from typing import Literal
 from os import PathLike
 from pathlib import Path
 from speechbrain.inference.speaker import EncoderClassifier
-from speechbrain.inference.speaker import SpeakerRecognition
-from transformers import WavLMModel, AutoProcessor, Wav2Vec2FeatureExtractor, WavLMForXVector
+from transformers import Wav2Vec2FeatureExtractor, WavLMForXVector
 
 from torch import Tensor
 import torch
@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from general_utils.resample_audio import resample
 
 TARGET_SR = 16_000
+SMOOTHING_WINDOW = 5
 
 ClassifierOption = Literal["ecapa-voxceleb", "wavlm-large"]
 
@@ -89,7 +90,11 @@ def is_target_speaker(live_chunk: Tensor, target_embedding: Tensor, classifier: 
     return score.item() > threshold, score.item()
 
 
-def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, classifier_type: ClassifierOption = "wavlm-large"):
+def main(enrolment_path: PathLike, 
+         mixed_path: PathLike, 
+         output_path: PathLike, 
+         classifier_type: ClassifierOption = "wavlm-large", 
+         smoothing_window: int = SMOOTHING_WINDOW):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     if classifier_type == "ecapa-voxceleb":
@@ -126,6 +131,7 @@ def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, 
     print(f"Processing {num_samples / TARGET_SR:.2f}s of audio with {window_sec}s context...")
     
     current_start = 0
+    score_buffer = deque(maxlen=smoothing_window)
     
     while current_start + window_samples <= num_samples:
         
@@ -133,10 +139,16 @@ def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, 
         
         with torch.no_grad():
             is_present, score = is_target_speaker(chunk, target_embedding, classifier, threshold=0.25)
+        
+        score_buffer.append(score)
+        smoothed_score = sum(score_buffer) / len(score_buffer)
 
         current_time_sec = current_start / TARGET_SR
         confidence_logs.append({
-            "time": current_time_sec, "score": score, "detected": int(is_present)}
+            "time": current_time_sec, 
+            "score": score, 
+            "smoothed_score": smoothed_score,
+            "detected": int(is_present)}
             )
         
         if is_present:
@@ -153,11 +165,14 @@ def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, 
 
     time_steps = [log["time"] for log in confidence_logs]
     scores = [log["score"] for log in confidence_logs]
-    plt.plot(time_steps, scores, label="Confidence Score")
+    smoothed_scores = [log["smoothed_score"] for log in confidence_logs]
+
+    plt.plot(time_steps, scores, label="Raw Confidence Score")
+    plt.plot(time_steps, smoothed_scores, label=f"Smoothed Confidence Score (window={smoothing_window})")
     plt.xlabel("Time (s)")
     plt.ylabel("Confidence Score")
     plt.title("Speaker Detection Confidence Over Time")
-    plt.legend()
+    plt.legend(loc="upper right")
     plt.savefig(output_path.parent / f"{output_path.stem}_confidence_plot.png")
 
     print(f"Saving to {output_path}")
