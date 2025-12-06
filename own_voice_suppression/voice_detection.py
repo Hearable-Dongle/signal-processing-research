@@ -10,6 +10,7 @@ from torch import Tensor
 import torch
 import torch.nn.functional as F
 import torchaudio
+import matplotlib.pyplot as plt
 
 from general_utils.resample_audio import resample
 
@@ -89,26 +90,27 @@ def is_target_speaker(live_chunk: Tensor, target_embedding: Tensor, classifier: 
 
 
 def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, classifier_type: ClassifierOption = "wavlm-large"):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     if classifier_type == "ecapa-voxceleb":
         classifier = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb", 
             savedir="pretrained_models/spkrec-ecapa-voxceleb"
-        )
+        ).to(device)
     elif classifier_type == "wavlm-large":
-        classifier = WavLMClassifierWrapper()
+        classifier = WavLMClassifierWrapper(device=device)
     else:
         raise ValueError(f"Unsupported classifier type: {classifier_type}")
         
     enrolment_audio, sr_enroll = torchaudio.load(enrolment_path)
-    enrolment_audio = prep_audio(enrolment_audio, sr_enroll, TARGET_SR)
+    enrolment_audio = prep_audio(enrolment_audio, sr_enroll, TARGET_SR).to(device)
 
     mixed_audio, sr_mix = torchaudio.load(mixed_path)
-    mixed_audio = prep_audio(mixed_audio, sr_mix, TARGET_SR)
+    mixed_audio = prep_audio(mixed_audio, sr_mix, TARGET_SR).to(device)
     
     
     with torch.no_grad():
-        target_embedding = classifier.encode_batch(enrolment_audio)
+        target_embedding = classifier.encode_batch(enrolment_audio).to(device)
 
     window_sec = 0.600
     stride_sec = 0.100
@@ -119,6 +121,7 @@ def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, 
 
     # Create a mask to track detections (1.0 = Speaker Detected, 0.0 = Not Detected)
     detection_mask = torch.zeros_like(mixed_audio)
+    confidence_logs = []
 
     print(f"Processing {num_samples / TARGET_SR:.2f}s of audio with {window_sec}s context...")
     
@@ -126,11 +129,15 @@ def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, 
     
     while current_start + window_samples <= num_samples:
         
-        # 600ms context buffer
         chunk = mixed_audio[:, current_start : current_start + window_samples]
         
         with torch.no_grad():
             is_present, score = is_target_speaker(chunk, target_embedding, classifier, threshold=0.25)
+
+        current_time_sec = current_start / TARGET_SR
+        confidence_logs.append({
+            "time": current_time_sec, "score": score, "detected": int(is_present)}
+            )
         
         if is_present:
             if current_start == 0:
@@ -143,6 +150,15 @@ def main(enrolment_path: PathLike, mixed_path: PathLike, output_path: PathLike, 
         current_start += stride_samples
 
     output_audio = mixed_audio * (1 - detection_mask)
+
+    time_steps = [log["time"] for log in confidence_logs]
+    scores = [log["score"] for log in confidence_logs]
+    plt.plot(time_steps, scores, label="Confidence Score")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Confidence Score")
+    plt.title("Speaker Detection Confidence Over Time")
+    plt.legend()
+    plt.savefig(output_path.parent / f"{output_path.stem}_confidence_plot.png")
 
     print(f"Saving to {output_path}")
     torchaudio.save(output_path, output_audio, TARGET_SR)
