@@ -16,6 +16,10 @@ from general_utils.resample_audio import resample
 
 TARGET_SR = 16_000
 SMOOTHING_WINDOW = 10
+SPEAKER_DETECTION_THRESHOLD = 0.65
+
+DEFAULT_CLASSIFIER = "wavlm-large"
+CLASSIFIER_OPTIONS = ["ecapa-voxceleb", "wavlm-large"]
 
 ClassifierOption = Literal["ecapa-voxceleb", "wavlm-large"]
 
@@ -77,7 +81,7 @@ def prep_audio(audio: Tensor, orig_sr: int, target_sr: int = TARGET_SR) -> Tenso
         )
     return audio
 
-def is_target_speaker(live_chunk: Tensor, target_embedding: Tensor, classifier: EncoderClassifier, threshold=0.25):
+def get_target_speaker_confidence(live_chunk: Tensor, target_embedding: Tensor, classifier: EncoderClassifier):
     """
     live_chunk: 100ms audio tensor (1, 1600)
     target_embedding: Pre-computed embedding of the user (1, 1, 192)
@@ -87,14 +91,16 @@ def is_target_speaker(live_chunk: Tensor, target_embedding: Tensor, classifier: 
     
     score = F.cosine_similarity(live_embedding.squeeze(1), target_embedding.squeeze(1))
     
-    return score.item() > threshold, score.item()
+    return score.item()
 
 
 def main(enrolment_path: PathLike, 
          mixed_path: PathLike, 
          output_directory: PathLike, 
-         classifier_type: ClassifierOption = "wavlm-large", 
-         smoothing_window: int = SMOOTHING_WINDOW):
+         classifier_type: ClassifierOption = DEFAULT_CLASSIFIER, 
+         smoothing_window: int = SMOOTHING_WINDOW,
+         speaker_detection_threshold: int = SPEAKER_DETECTION_THRESHOLD,
+         ):
     
     output_path = Path(output_directory) / f"suppressed.wav"
     
@@ -141,10 +147,17 @@ def main(enrolment_path: PathLike,
         chunk = mixed_audio[:, current_start : current_start + window_samples]
         
         with torch.no_grad():
-            is_present, score = is_target_speaker(chunk, target_embedding, classifier, threshold=0.25)
+            score = get_target_speaker_confidence(
+                live_chunk=chunk, 
+                target_embedding=target_embedding, 
+                classifier=classifier, 
+                )
         
         score_buffer.append(score)
         smoothed_score = sum(score_buffer) / len(score_buffer)
+        
+        # Use smoothed score for detection decision
+        is_present = smoothed_score >= speaker_detection_threshold
 
         current_time_sec = current_start / TARGET_SR
         confidence_logs.append({
@@ -164,7 +177,7 @@ def main(enrolment_path: PathLike,
 
         current_start += stride_samples
 
-    output_audio = mixed_audio * (1 - detection_mask)
+    output_audio = (mixed_audio * (1 - detection_mask)).cpu()
 
     time_steps = [log["time"] for log in confidence_logs]
     scores = [log["score"] for log in confidence_logs]
@@ -172,6 +185,7 @@ def main(enrolment_path: PathLike,
 
     plt.plot(time_steps, scores, label="Raw Confidence Score")
     plt.plot(time_steps, smoothed_scores, label=f"Smoothed Confidence Score (window={smoothing_window})")
+    plt.axhline(y=speaker_detection_threshold, color='r', linestyle='--', label="Detection Threshold")
     plt.xlabel("Time (s)")
     plt.ylabel("Confidence Score")
     plt.title("Speaker Detection Confidence Over Time")
@@ -200,12 +214,17 @@ if __name__ == "__main__":
         type=Path,
         help="Directory to save the output audio file.",
     )
-    
-    
+    parser.add_argument(
+        "--classifier-type",
+        type=str,
+        choices=CLASSIFIER_OPTIONS,
+        default=DEFAULT_CLASSIFIER,
+        help="Type of speaker classifier to use.",
+    )
     
     args = parser.parse_args()
     
-    if not args.output_path:
+    if not args.output_directory:
         args.output_directory = Path("own_voice_suppression") / "outputs" / f"suppressed_{args.mixed_path.stem}_from_{args.enrolment_path.stem}"
     
     args.output_directory.mkdir(parents=True, exist_ok=True)
@@ -213,5 +232,8 @@ if __name__ == "__main__":
     main(
         enrolment_path=args.enrolment_path, 
         mixed_path=args.mixed_path, 
-        output_directory=args.output_directory
+        output_directory=args.output_directory,
+        classifier_type=args.classifier_type,
     )
+    
+    
