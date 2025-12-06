@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from general_utils.resample_audio import resample
 
 TARGET_SR = 16_000
-SMOOTHING_WINDOW = 5
+SMOOTHING_WINDOW = 10
 
 ClassifierOption = Literal["ecapa-voxceleb", "wavlm-large"]
 
@@ -92,9 +92,12 @@ def is_target_speaker(live_chunk: Tensor, target_embedding: Tensor, classifier: 
 
 def main(enrolment_path: PathLike, 
          mixed_path: PathLike, 
-         output_path: PathLike, 
+         output_directory: PathLike, 
          classifier_type: ClassifierOption = "wavlm-large", 
          smoothing_window: int = SMOOTHING_WINDOW):
+    
+    output_path = Path(output_directory) / f"suppressed.wav"
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     if classifier_type == "ecapa-voxceleb":
@@ -173,7 +176,7 @@ def main(enrolment_path: PathLike,
     plt.ylabel("Confidence Score")
     plt.title("Speaker Detection Confidence Over Time")
     plt.legend(loc="upper right")
-    plt.savefig(output_path.parent / f"{output_path.stem}_confidence_plot.png")
+    plt.savefig(output_directory / f"confidence_plot.png")
 
     print(f"Saving to {output_path}")
     torchaudio.save(output_path, output_audio, TARGET_SR)
@@ -193,9 +196,9 @@ if __name__ == "__main__":
         help="Path to the mixed audio file.",
     )
     parser.add_argument(
-        "--output-path",
+        "--output-directory",
         type=Path,
-        help="Path to save the output audio file.",
+        help="Directory to save the output audio file.",
     )
     
     
@@ -203,10 +206,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if not args.output_path:
-        args.output_path = Path("own_voice_suppression") / "outputs" / f"suppressed_{args.mixed_path.stem}_from_{args.enrolment_path.stem}.wav"
+        args.output_directory = Path("own_voice_suppression") / "outputs" / f"suppressed_{args.mixed_path.stem}_from_{args.enrolment_path.stem}"
+    
+    args.output_directory.mkdir(parents=True, exist_ok=True)
 
     main(
         enrolment_path=args.enrolment_path, 
         mixed_path=args.mixed_path, 
-        output_path=args.output_path
+        output_directory=args.output_directory
     )
