@@ -1,8 +1,12 @@
 import argparse
 from collections import deque
+import os
 from typing import Literal
 from os import PathLike
 from pathlib import Path
+
+import numpy as np
+from pyannote.audio import Model, Pipeline
 from speechbrain.inference.speaker import EncoderClassifier
 from transformers import Wav2Vec2FeatureExtractor, WavLMForXVector
 
@@ -19,16 +23,80 @@ SMOOTHING_WINDOW = 10
 SPEAKER_DETECTION_THRESHOLD = 0.65
 
 DEFAULT_CLASSIFIER = "wavlm-large"
-CLASSIFIER_OPTIONS = ["ecapa-voxceleb", "wavlm-large"]
+CLASSIFIER_OPTIONS = ["ecapa-voxceleb", "wavlm-large", "xvect-voxceleb", "pyannote-diarization"]
 
-ClassifierOption = Literal["ecapa-voxceleb", "wavlm-large"]
+ClassifierOption = Literal["ecapa-voxceleb", "wavlm-large", "xvect-voxceleb", "pyannote-diarization"]
+
+
+class PyannoteDiarizationWrapper:
+    """
+    A wrapper around the pyannote.audio speaker embedding model.
+    This uses the same embedding model (`pyannote/speaker-embedding`) as the
+    `pyannote/speaker-diarization-3.1` pipeline.
+    Requires a Hugging Face token that has accepted the user agreements for the models.
+    """
+    MODEL_ID = "pyannote/embedding"
+    # MODEL_ID = "pyannote/speaker-diarization-3.1" # Use with pipeline
+    
+    def __init__(self, device=torch.device("cpu")):
+        self.device = device
+        print(f"Loading {self.MODEL_ID} on {device}...")
+        
+        # Pyannote models use a HF token for gated models.
+        hf_token = os.environ.get("HUGGING_FACE_TOKEN")
+        if hf_token is None:
+            print("Warning: Hugging Face token not found. This might fail if the model is gated.")
+        
+        # Hack: Override torch.load to disable weights_only loading
+        # See https://github.com/m-bain/whisperX/issues/1304
+        _original_torch_load = torch.load
+
+        def _trusted_load(*args, **kwargs):
+            kwargs['weights_only'] = False
+            return _original_torch_load(*args, **kwargs)
+
+        torch.load = _trusted_load
+        
+        # self.embedding_model = Pipeline.from_pretrained(
+        #     self.MODEL_ID,
+        # ).to(device)
+        self.embedding_model = Model.from_pretrained(
+            self.MODEL_ID,
+        ).to(device)
+        print("SELF> EMBEDDING_MODEL", self.embedding_model)
+        self.embedding_model.eval()
+
+    def encode_batch(self, wavs: torch.Tensor) -> torch.Tensor:
+        """
+        Mimics SpeechBrain's encode_batch.
+        Input: (Batch, Time)
+        Output: (Batch, 1, Embedding_Dim)
+        """
+        if wavs.dim() == 1: # Add back batch dimension
+            wavs = wavs.unsqueeze(0) 
+        
+        all_embeddings = []
+        with torch.no_grad():
+            for i in range(wavs.shape[0]):
+                waveform_slice = wavs[i:i+1] # Keep 2D for pyannote
+                
+                file = {"waveform": waveform_slice.cpu(), "sample_rate": TARGET_SR}
+                
+                embedding_np = self.embedding_model(file)
+                
+                # Average the embeddings if multiple chunks are returned 
+                if embedding_np.ndim > 1 and embedding_np.shape[0] > 1:
+                    embedding_np = np.mean(embedding_np, axis=0, keepdims=True)
+                
+                embedding_torch = torch.from_numpy(embedding_np).to(self.device)
+                all_embeddings.append(embedding_torch)
+
+        embeddings = torch.cat(all_embeddings, dim=0) # (B, emb_dim)
+        embeddings = F.normalize(embeddings, p=2, dim=1)
+        return embeddings.unsqueeze(1)
 
 
 class WavLMClassifierWrapper:
-    """
-    A wrapper around the Hugging Face WavLM model to make it compatible
-    with the SpeechBrain 'EncoderClassifier' interface used in your script.
-    """
     MODEL_ID = "microsoft/wavlm-base-plus-sv"
     
     def __init__(self, device=torch.device("cpu")):
@@ -105,26 +173,40 @@ def main(enrolment_path: PathLike,
     output_path = Path(output_directory) / f"suppressed.wav"
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    classifier_device = device
     
+    # Workaround for xvect-voxceleb: it seems to have a bug causing tensors to be on CPU
+    # during GPU execution. We force it to CPU.
+    if classifier_type == "xvect-voxceleb":
+        print("INFO: Using CPU for xvect-voxceleb due to a device compatibility issue.")
+        classifier_device = torch.device("cpu")
+
     if classifier_type == "ecapa-voxceleb":
         classifier = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb", 
             savedir="pretrained_models/spkrec-ecapa-voxceleb"
-        ).to(device)
+        ).to(classifier_device)
+    elif classifier_type == "xvect-voxceleb":
+        classifier = EncoderClassifier.from_hparams(
+            source="speechbrain/spkrec-xvect-voxceleb",
+            savedir="pretrained_models/spkrec-xvect-voxceleb"
+        ).to(classifier_device)
     elif classifier_type == "wavlm-large":
-        classifier = WavLMClassifierWrapper(device=device)
+        classifier = WavLMClassifierWrapper(device=classifier_device)
+    elif classifier_type == "pyannote-diarization":
+        classifier = PyannoteDiarizationWrapper(device=classifier_device)
     else:
         raise ValueError(f"Unsupported classifier type: {classifier_type}")
         
     enrolment_audio, sr_enroll = torchaudio.load(enrolment_path)
-    enrolment_audio = prep_audio(enrolment_audio, sr_enroll, TARGET_SR).to(device)
+    enrolment_audio = prep_audio(enrolment_audio, sr_enroll, TARGET_SR).to(classifier_device)
 
     mixed_audio, sr_mix = torchaudio.load(mixed_path)
-    mixed_audio = prep_audio(mixed_audio, sr_mix, TARGET_SR).to(device)
+    mixed_audio = prep_audio(mixed_audio, sr_mix, TARGET_SR).to(classifier_device)
     
     
     with torch.no_grad():
-        target_embedding = classifier.encode_batch(enrolment_audio).to(device)
+        target_embedding = classifier.encode_batch(enrolment_audio).to(classifier_device)
 
     window_sec = 0.600
     stride_sec = 0.100
@@ -189,7 +271,7 @@ def main(enrolment_path: PathLike,
     plt.xlabel("Time (s)")
     plt.ylabel("Confidence Score")
     plt.title("Speaker Detection Confidence Over Time")
-    plt.legend(loc="upper right")
+    plt.legend(loc="lower right")
     plt.savefig(output_directory / f"confidence_plot.png")
 
     print(f"Saving to {output_path}")
@@ -225,7 +307,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if not args.output_directory:
-        args.output_directory = Path("own_voice_suppression") / "outputs" / f"suppressed_{args.mixed_path.stem}_from_{args.enrolment_path.stem}"
+        args.output_directory = Path("own_voice_suppression") / "outputs" / f"suppressed_using_{args.classifier_type}_{args.mixed_path.stem}_from_{args.enrolment_path.stem}"
     
     args.output_directory.mkdir(parents=True, exist_ok=True)
 
