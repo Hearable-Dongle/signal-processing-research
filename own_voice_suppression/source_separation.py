@@ -23,6 +23,8 @@ from own_voice_suppression.audio_utils import prep_audio, resample, torch_truste
 WAVLM_REQUIRED_SR = 16_000  
 SMOOTHING_WINDOW = 5
 DETECTION_THRESHOLD = 0.55
+WINDOW_SEC = 2
+STRIDE_SEC = 0.100
 
 MODEL_OPTIONS = ["convtasnet", "sepformer", "diart"]
 ModelOption = Literal["convtasnet", "sepformer", "diart"]
@@ -69,13 +71,13 @@ class WavLMVerifier:
 
 
 class AsteroidConvTasNetWrapper:
-    """ Native Rate: 8000 Hz """
-    NATIVE_SR = 8000
+    """ Native Rate: 16000 Hz """
+    NATIVE_SR = 16000
     
     def __init__(self, device):
-        print("[Model] Loading ConvTasNet (8k causal)...")
+        print("[Model] Loading ConvTasNet (16k causal)...")
         torch.load = torch_trusted_load
-        self.model = ConvTasNet.from_pretrained("JorisCos/ConvTasNet_Libri2Mix_sepclean_8k")
+        self.model = ConvTasNet.from_pretrained("JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k")
         self.model.to(device)
     
     def process(self, mix_8k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -109,6 +111,7 @@ class DiartWrapper:
     def __init__(self, device):
         if diart_func is None: raise ImportError("Diart not installed.")
         print("[Model] Loading Diart Streaming Pipeline...")
+        torch.load = torch_trusted_load
         self.segmentation = SegmentationModel.from_pretrained("pyannote/segmentation-3.0")
         self.segmentation.to(device)
         
@@ -129,7 +132,7 @@ class DiartWrapper:
         return mix_16k * s1_mask, mix_16k * s2_mask
 
 
-def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, suppress: bool):
+def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, suppress: bool, window_sec=WINDOW_SEC, stride_sec=STRIDE_SEC):
     
     output_directory.mkdir(parents=True, exist_ok=True)
     
@@ -161,8 +164,6 @@ def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, 
 
     target_emb = verifier.get_embedding(enroll_wav, input_sr=WAVLM_REQUIRED_SR)
 
-    window_sec = 0.600
-    stride_sec = 0.100
     window_samples = int(window_sec * working_sr)
     stride_samples = int(stride_sec * working_sr)
     num_samples = mixed_wav.shape[1]
