@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import torchaudio
 import matplotlib.pyplot as plt
 
-from general_utils.resample_audio import resample
+from own_voice_suppression.audio_utils import prep_audio, torch_trusted_load
 
 TARGET_SR = 16_000
 SMOOTHING_WINDOW = 10
@@ -47,15 +47,7 @@ class PyannoteDiarizationWrapper:
         if hf_token is None:
             print("Warning: Hugging Face token not found. This might fail if the model is gated.")
         
-        # Hack: Override torch.load to disable weights_only loading
-        # See https://github.com/m-bain/whisperX/issues/1304
-        _original_torch_load = torch.load
-
-        def _trusted_load(*args, **kwargs):
-            kwargs['weights_only'] = False
-            return _original_torch_load(*args, **kwargs)
-
-        torch.load = _trusted_load
+        torch.load = torch_trusted_load
         
         # self.embedding_model = Pipeline.from_pretrained(
         #     self.MODEL_ID,
@@ -131,20 +123,6 @@ class WavLMClassifierWrapper:
             embeddings = F.normalize(embeddings, p=2, dim=1)
 
         return embeddings.unsqueeze(1)
-
-def prep_audio(audio: Tensor, orig_sr: int, target_sr: int = TARGET_SR) -> Tensor:
-    """
-    Ensures mono channel and resamples to target sample rate.
-    """
-    if audio.shape[0] > 1:
-        audio = torch.mean(audio, dim=0, keepdim=True)
-    if orig_sr != target_sr:
-        audio = resample(
-            audio, 
-            orig_sr=orig_sr, 
-            new_sr=target_sr
-        )
-    return audio
 
 def get_target_speaker_confidence(live_chunk: Tensor, target_embedding: Tensor, classifier: EncoderClassifier):
     """
