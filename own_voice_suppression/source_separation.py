@@ -229,17 +229,15 @@ def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, 
                 score_perm_orig = F.cosine_similarity(emb1, anchor_emb_s1) + F.cosine_similarity(emb2, anchor_emb_s2)
                 score_perm_flipped = F.cosine_similarity(emb1, anchor_emb_s2) + F.cosine_similarity(emb2, anchor_emb_s1)
 
-                if score_perm_orig >= score_perm_flipped:
-                    final_s1, final_s2 = s1, s2
-                    anchor_emb_s1 = ALPHA * anchor_emb_s1 + (1 - ALPHA) * emb1
-                    anchor_emb_s2 = ALPHA * anchor_emb_s2 + (1 - ALPHA) * emb2
-                else:
-                    final_s1, final_s2 = s2, s1
-                    anchor_emb_s1 = ALPHA * anchor_emb_s1 + (1 - ALPHA) * emb2
-                    anchor_emb_s2 = ALPHA * anchor_emb_s2 + (1 - ALPHA) * emb1
+                if score_perm_orig < score_perm_flipped:
+                    s1, s2 = s2, s1
+                    emb1, emb2 = emb2, emb1
 
-            s1_rms = torch.sqrt(torch.mean(final_s1**2)).item()
-            s2_rms = torch.sqrt(torch.mean(final_s2**2)).item()
+                anchor_emb_s1 = ALPHA * anchor_emb_s1 + (1 - ALPHA) * emb1
+                anchor_emb_s2 = ALPHA * anchor_emb_s2 + (1 - ALPHA) * emb2
+
+            s1_rms = torch.sqrt(torch.mean(s1**2)).item()
+            s2_rms = torch.sqrt(torch.mean(s2**2)).item()
             log.append({"time": current_start / working_sr, "s1_rms": s1_rms, "s2_rms": s2_rms})
             
             # Overlap-add for the consistently ordered sources
