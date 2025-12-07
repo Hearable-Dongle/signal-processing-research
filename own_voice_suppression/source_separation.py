@@ -176,6 +176,11 @@ def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, 
     
     log = []
     
+    # Avoid permutation flips in separation mode
+    anchor_emb_s1 = None
+    anchor_emb_s2 = None
+    ALPHA = 0.95 # Smoothing factor for anchor embedding updates
+    
     print(f"Processing {num_samples/working_sr:.2f}s...")
 
     current_start = 0
@@ -185,7 +190,7 @@ def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, 
         
         s1, s2 = extractor.process(chunk)
         
-        if suppress:
+        if suppress: # Suppression mode
             score_s1 = verifier.score(s1, target_emb, input_sr=working_sr)
             score_s2 = verifier.score(s2, target_emb, input_sr=working_sr)
             
@@ -211,22 +216,43 @@ def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, 
                 new_content = kept_audio[:, stride_start_idx:]
                 output_buffer[:, update_start : update_end] = new_content
         
-        else: # Separation mode
-            s1_rms = torch.sqrt(torch.mean(s1**2)).item()
-            s2_rms = torch.sqrt(torch.mean(s2**2)).item()
+        else: # Separation mode (with speaker tracking)
+            if anchor_emb_s1 is None:
+                anchor_emb_s1 = verifier.get_embedding(s1, input_sr=working_sr)
+                anchor_emb_s2 = verifier.get_embedding(s2, input_sr=working_sr)
+                final_s1, final_s2 = s1, s2
+            else:
+                emb1 = verifier.get_embedding(s1, input_sr=working_sr)
+                emb2 = verifier.get_embedding(s2, input_sr=working_sr)
+                
+                # Check permutation against anchors
+                score_perm_orig = F.cosine_similarity(emb1, anchor_emb_s1) + F.cosine_similarity(emb2, anchor_emb_s2)
+                score_perm_flipped = F.cosine_similarity(emb1, anchor_emb_s2) + F.cosine_similarity(emb2, anchor_emb_s1)
+
+                if score_perm_orig >= score_perm_flipped:
+                    final_s1, final_s2 = s1, s2
+                    anchor_emb_s1 = ALPHA * anchor_emb_s1 + (1 - ALPHA) * emb1
+                    anchor_emb_s2 = ALPHA * anchor_emb_s2 + (1 - ALPHA) * emb2
+                else:
+                    final_s1, final_s2 = s2, s1
+                    anchor_emb_s1 = ALPHA * anchor_emb_s1 + (1 - ALPHA) * emb2
+                    anchor_emb_s2 = ALPHA * anchor_emb_s2 + (1 - ALPHA) * emb1
+
+            s1_rms = torch.sqrt(torch.mean(final_s1**2)).item()
+            s2_rms = torch.sqrt(torch.mean(final_s2**2)).item()
             log.append({"time": current_start / working_sr, "s1_rms": s1_rms, "s2_rms": s2_rms})
             
-            # Overlap-add for both sources
+            # Overlap-add for the consistently ordered sources
             if current_start == 0:
-                output_buffer_s1[:, 0 : window_samples] = s1
-                output_buffer_s2[:, 0 : window_samples] = s2
+                output_buffer_s1[:, 0 : window_samples] = final_s1
+                output_buffer_s2[:, 0 : window_samples] = final_s2
             else:
                 stride_start_idx = window_samples - stride_samples
                 update_start = current_start + stride_start_idx
                 update_end = current_start + window_samples
                 
-                output_buffer_s1[:, update_start : update_end] = s1[:, stride_start_idx:]
-                output_buffer_s2[:, update_start : update_end] = s2[:, stride_start_idx:]
+                output_buffer_s1[:, update_start : update_end] = final_s1[:, stride_start_idx:]
+                output_buffer_s2[:, update_start : update_end] = final_s2[:, stride_start_idx:]
 
         current_start += stride_samples
 
