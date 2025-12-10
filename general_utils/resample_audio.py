@@ -22,7 +22,7 @@ def resample(audio: torch.Tensor, orig_sr: int, new_sr: int) -> torch.Tensor:
     resampler = torchaudio.transforms.Resample(
         orig_freq=orig_sr,
         new_freq=new_sr,
-    )
+    ).to(audio.device)
     resampled_audio = resampler(audio)
     return resampled_audio
 
