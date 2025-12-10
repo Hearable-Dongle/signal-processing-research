@@ -71,7 +71,11 @@ class WavLMVerifier:
 
 
 class AsteroidConvTasNetWrapper:
-    """ Native Rate: 16000 Hz """
+    """ 
+    Wraps Asteroid's ConvTasNet for 2-speaker source separation.
+    Includes internal padding and volume normalization to fix stitching artifacts.
+    Native Rate: 16000 Hz 
+    """
     NATIVE_SR = 16000
     
     def __init__(self, device):
@@ -79,29 +83,90 @@ class AsteroidConvTasNetWrapper:
         torch.load = torch_trusted_load
         self.model = ConvTasNet.from_pretrained("JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k")
         self.model.to(device)
+        self.model.eval()
     
-    def process(self, mix_8k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def process(self, mix_chunk: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Process the chunk with internal padding and energy normalization 
+        to ensure smooth stitching in the main loop.
+        """
         with torch.no_grad():
-            est_sources = self.model(mix_8k) # Returns (Batch, Sources, Time) at 8k
-        return est_sources[:, 0, :], est_sources[:, 1, :]
+            # Pad the input with 0.5s of reflected audio so the model has future context
+            pad_samples = int(0.5 * self.NATIVE_SR)
+            padded_input = torch.nn.functional.pad(
+                mix_chunk.unsqueeze(1),  
+                (pad_samples, pad_samples), 
+                mode='reflect'
+            ).squeeze(1)
+
+            est_sources_padded = self.model(padded_input)
+
+            # Crop the padding back off
+            est_sources = est_sources_padded[:, :, pad_samples:-pad_samples]
+            s1 = est_sources[:, 0, :]
+            s2 = est_sources[:, 1, :]
+
+            # Normalize output energy to match the input mixture's energy (RMS)
+            # This is to counteract the model's tendency to change volume arbitrarily.
+            separated_mix = s1 + s2
+            input_rms = torch.sqrt(torch.mean(mix_chunk ** 2, dim=-1, keepdim=True))
+            separated_mix_rms = torch.sqrt(torch.mean(separated_mix ** 2, dim=-1, keepdim=True)) + 1e-8
+            scaling_factor = input_rms / separated_mix_rms
+            
+            s1_normalized = s1 * scaling_factor
+            s2_normalized = s2 * scaling_factor
+            
+        return s1_normalized, s2_normalized
 
 
 class SpeechBrainSepFormerWrapper:
-    """ Native Rate: 8000 Hz """
+    """
+    Wraps SpeechBrain's SepFormer for 2-speaker source separation.
+    Includes internal padding and volume normalization to fix stitching artifacts.
+    Native Rate: 8000 Hz
+    """
     NATIVE_SR = 8000
 
     def __init__(self, device):
         print("[Model] Loading SepFormer (wsj02mix)...")
         self.model = SepFormer.from_hparams(
-            source="speechbrain/sepformer-wsj02mix", 
+            source="speechbrain/sepformer-wsj02mix",
             savedir="pretrained_models/sepformer",
             run_opts={"device": str(device)}
         )
 
-    def process(self, mix_8k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def process(self, mix_chunk: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Process the chunk with internal padding and energy normalization
+        to ensure smooth stitching in the main loop.
+        """
         with torch.no_grad():
-            est_sources = self.model.separate_batch(mix_8k) 
-        return est_sources[:, :, 0], est_sources[:, :, 1]
+            # Pad the input with 0.5s of reflected audio so the model has future context
+            pad_samples = int(0.5 * self.NATIVE_SR)
+            padded_input = torch.nn.functional.pad(
+                mix_chunk.unsqueeze(1),
+                (pad_samples, pad_samples),
+                mode='reflect'
+            ).squeeze(1)
+
+            # est_sources_padded has shape (Batch, PaddedTime, Sources)
+            est_sources_padded = self.model.separate_batch(padded_input)
+
+            # Crop the padding back off
+            est_sources = est_sources_padded[:, pad_samples:-pad_samples, :]
+            s1 = est_sources[:, :, 0]
+            s2 = est_sources[:, :, 1]
+
+            # Normalize output energy to match the input mixture's energy (RMS)
+            separated_mix = s1 + s2
+            input_rms = torch.sqrt(torch.mean(mix_chunk ** 2, dim=-1, keepdim=True))
+            separated_mix_rms = torch.sqrt(torch.mean(separated_mix ** 2, dim=-1, keepdim=True)) + 1e-8
+            scaling_factor = input_rms / separated_mix_rms
+
+            s1_normalized = s1 * scaling_factor
+            s2_normalized = s2 * scaling_factor
+
+        return s1_normalized, s2_normalized
 
 
 class DiartWrapper:
@@ -220,7 +285,6 @@ def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, 
             if anchor_emb_s1 is None:
                 anchor_emb_s1 = verifier.get_embedding(s1, input_sr=working_sr)
                 anchor_emb_s2 = verifier.get_embedding(s2, input_sr=working_sr)
-                final_s1, final_s2 = s1, s2
             else:
                 emb1 = verifier.get_embedding(s1, input_sr=working_sr)
                 emb2 = verifier.get_embedding(s2, input_sr=working_sr)
@@ -242,15 +306,15 @@ def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, 
             
             # Overlap-add for the consistently ordered sources
             if current_start == 0:
-                output_buffer_s1[:, 0 : window_samples] = final_s1
-                output_buffer_s2[:, 0 : window_samples] = final_s2
+                output_buffer_s1[:, 0 : window_samples] = s1
+                output_buffer_s2[:, 0 : window_samples] = s2
             else:
                 stride_start_idx = window_samples - stride_samples
                 update_start = current_start + stride_start_idx
                 update_end = current_start + window_samples
                 
-                output_buffer_s1[:, update_start : update_end] = final_s1[:, stride_start_idx:]
-                output_buffer_s2[:, update_start : update_end] = final_s2[:, stride_start_idx:]
+                output_buffer_s1[:, update_start : update_end] = s1[:, stride_start_idx:]
+                output_buffer_s2[:, update_start : update_end] = s2[:, stride_start_idx:]
 
         current_start += stride_samples
 
