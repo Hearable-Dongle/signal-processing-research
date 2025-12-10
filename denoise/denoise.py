@@ -19,7 +19,10 @@ MODEL_OPTIONS = ["convtasnet", "metricgan", "deepfilternet", "spectral-gating"]
 ModelOption = Literal["convtasnet", "metricgan", "deepfilternet", "spectral-gating"]
 
 class ConvTasNetWrapper:
-    """ Wraps Asteroid's ConvTasNet for single-speaker enhancement. """
+    """ 
+    Wraps Asteroid's ConvTasNet for single-speaker enhancement. 
+    Includes internal padding and volume normalization to fix stitching artifacts.
+    """
     MODEL_ID = "JorisCos/ConvTasNet_Libri1Mix_enhsingle_16k"
     NATIVE_SR = 16000
     
@@ -30,9 +33,30 @@ class ConvTasNetWrapper:
         self.model.eval()
         
     def process(self, noisy_chunk: torch.Tensor) -> torch.Tensor:
+        """
+        Process the chunk with internal padding and energy normalization 
+        to ensure smooth stitching in the main loop.
+        """
         with torch.no_grad():
-            estimate = self.model(noisy_chunk)
-        return estimate[:, 0, :]
+            # Pad the input with 0.5s of reflected audio so the model has future contxt
+            pad_samples = int(0.5 * self.NATIVE_SR)
+            padded_input = torch.nn.functional.pad(
+                noisy_chunk.unsqueeze(1),  
+                (pad_samples, pad_samples), 
+                mode='reflect'
+            ).squeeze(1)
+
+            estimate_padded = self.model(padded_input)
+
+            # Crop the padding back off to get the original size
+            estimate = estimate_padded[:, 0, pad_samples:-pad_samples]
+
+            # ConvTasNet changes the volume arbitrarily, so we normalize output energy back to their input RMS
+            input_energy = torch.sqrt(torch.mean(noisy_chunk ** 2, dim=-1, keepdim=True))
+            output_energy = torch.sqrt(torch.mean(estimate ** 2, dim=-1, keepdim=True)) + 1e-8
+            estimate = estimate * (input_energy / output_energy)
+
+        return estimate
 
 class MetricGANWrapper:
     """ Wraps SpeechBrain's MetricGAN+ """
