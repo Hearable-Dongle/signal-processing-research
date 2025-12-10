@@ -87,6 +87,7 @@ mpmath==1.3.0
 multidict==6.7.0
 networkx==3.6
 nltk==3.9.2
+noisereduce==3.0.3
 numpy==1.26.4
 nvidia-cublas-cu12==12.8.4.1
 nvidia-cuda-cupti-cu12==12.8.90
@@ -136,6 +137,7 @@ pycparser @ file:///home/task_175749564936714/conda-bld/pycparser_1757496040682/
 pydantic @ file:///home/task_176250531594496/conda-bld/pydantic_1762505362412/work
 pydantic-settings @ file:///home/task_175878416925449/conda-bld/pydantic-settings_1758784193926/work
 pydantic_core @ file:///home/task_176059738185733/conda-bld/pydantic-core_1760597433577/work
+pydub==0.25.1
 Pygments @ file:///home/task_176243137807904/conda-bld/pygments_1762431407645/work
 PyJWT @ file:///io/buildout/croot/pyjwt_1739558969999/work
 pyparsing==3.2.5
