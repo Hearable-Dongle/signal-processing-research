@@ -2,7 +2,29 @@ import sys
 import torch
 import torchaudio
 import argparse
-from pathlib import Path
+
+
+def resample(audio: torch.Tensor, orig_sr: int, new_sr: int) -> torch.Tensor:
+    """
+    Resamples the input audio tensor from orig_sr to new_sr.
+
+    Args:
+        audio (torch.Tensor): The input audio tensor of shape (channels, time).
+        orig_sr (int): The original sample rate of the audio.
+        new_sr (int): The target sample rate to resample to.
+
+    Returns:
+        torch.Tensor: The resampled audio tensor.
+    """
+    if orig_sr == new_sr:
+        return audio
+
+    resampler = torchaudio.transforms.Resample(
+        orig_freq=orig_sr,
+        new_freq=new_sr,
+    )
+    resampled_audio = resampler(audio)
+    return resampled_audio
 
 def resample_audio_file(input_path: str, output_path: str, new_sample_rate: int):
     """
@@ -27,11 +49,7 @@ def resample_audio_file(input_path: str, output_path: str, new_sample_rate: int)
         resampled_waveform = waveform
     else:
         print(f"Resampling from {sr} Hz to {new_sample_rate} Hz.")
-        resampler = torchaudio.transforms.Resample(
-            orig_freq=sr,
-            new_freq=new_sample_rate,
-        )
-        resampled_waveform = resampler(waveform)
+        resampled_waveform = resample(waveform, sr, new_sample_rate)
 
     try:
         torchaudio.save(
