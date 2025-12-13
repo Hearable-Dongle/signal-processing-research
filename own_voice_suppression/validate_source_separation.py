@@ -2,12 +2,19 @@ import argparse
 import glob
 import shutil
 from pathlib import Path
+import argparse
+import glob
+import shutil
+from pathlib import Path
+import sys
+
 import torch
 import torchaudio
 import numpy as np
 from tqdm import tqdm
 
-# Reuse metrics and constants from your existing validation script
+from speech_separation.postprocessing.calculate_sii import sii
+
 from own_voice_suppression.validate_voice_detection import (
     compute_si_sdr,
     compute_suppression_db,
@@ -15,10 +22,87 @@ from own_voice_suppression.validate_voice_detection import (
     LIBRIMIX_PATH
 )
 
+# ANSI S3.5-1997 third-octave bands (center frequencies from 160Hz to 8000Hz)
+FREQ_BANDS = [
+    (141, 178), (178, 224), (224, 281), (281, 355), (355, 447),
+    (447, 562), (562, 708), (708, 891), (891, 1122), (1122, 1413),
+    (1413, 1778), (1778, 2239), (2239, 2818), (2818, 3548),
+    (3548, 4467), (4467, 5623), (5623, 7079), (7079, 8913)
+]
+
+def _audio_to_18_band_spectrum_level(audio, sample_rate, n_fft=4096):
+    """
+    Calculates the spectrum level in 18 third-octave bands for a given audio signal.
+    """
+    if audio.dim() > 1 and audio.shape[0] > 1:
+        audio = audio.mean(dim=0)
+    audio = audio.squeeze()
+
+    win_length = n_fft
+    hop_length = win_length // 4
+    
+    spectrogram_transform = torchaudio.transforms.Spectrogram(
+        n_fft=n_fft,
+        win_length=win_length,
+        hop_length=hop_length,
+        window_fn=torch.hann_window,
+        power=2.0
+    )
+    power_spec = spectrogram_transform(audio)
+    avg_power_per_bin = power_spec.mean(dim=1)
+    
+    fft_freqs = torch.fft.rfftfreq(n_fft, d=1.0/sample_rate)
+    
+    band_powers = []
+    for low_f, high_f in FREQ_BANDS:
+        band_mask = (fft_freqs >= low_f) & (fft_freqs < high_f)
+        if not torch.any(band_mask):
+            power = 1e-12
+        else:
+            power = avg_power_per_bin[band_mask].sum().item()
+        band_powers.append(power)
+    
+    band_powers = np.array(band_powers)
+    band_widths = np.array([h - l for l, h in FREQ_BANDS])
+    
+    spectrum_level = band_powers / band_widths
+    return spectrum_level
+
+def calculate_sii_from_audio(target_audio, residual_noise_audio, sample_rate):
+    """
+    Calculates the Speech Intelligibility Index (SII) from raw audio tensors.
+    """
+    n_fft = 4096
+    
+    # ssl: Speech Spectrum Level (from target background audio)
+    # nsl: Noise Spectrum Level (from residual user voice)
+    ssl_level = _audio_to_18_band_spectrum_level(target_audio, sample_rate)
+    nsl_level = _audio_to_18_band_spectrum_level(residual_noise_audio, sample_rate)
+    
+    epsilon = 1e-20
+    ssl_db = 10 * np.log10(ssl_level + epsilon)
+    nsl_db = 10 * np.log10(nsl_level + epsilon)
+
+    # Normalize levels. Assume the peak of the calculated speech spectrum
+    # corresponds to the peak of the standard 'normal' speech spectrum (~35 dB).
+    # This pseudo-calibrates the levels for the SII function.
+    peak_ssl_db = np.max(ssl_db)
+    offset = 35 - peak_ssl_db
+    
+    ssl_calibrated = ssl_db + offset
+    nsl_calibrated = nsl_db + offset
+    
+    hearing_threshold = np.zeros(18)
+    
+    sii_score = sii(ssl_calibrated, nsl_calibrated, hearing_threshold)
+    return sii_score
+
+
 def evaluate_separation(librimix_root, num_samples=10, model_type="wavlm-large", save_outputs=False):
     """
-    Evaluates Source Separation quality using SI-SDR.
-    Checks how well the system isolates the background (Target) and suppresses the User (Interference).
+    Evaluates Source Separation quality using SI-SDR and SII.
+    - SI-SDR: Checks how well the system isolates the background (Target) and suppresses the User (Interference).
+    - SII: Estimates speech intelligibility of the target speech in the presence of the residual noise.
     """
     librimix_path = Path(librimix_root)
     
@@ -33,7 +117,7 @@ def evaluate_separation(librimix_root, num_samples=10, model_type="wavlm-large",
     
     results = []
     
-    print(f"\n--- Starting Source Separation Evaluation (SI-SDR) on {num_samples} samples ---")
+    print(f"\n--- Starting Source Separation Evaluation (SI-SDR & SII) on {num_samples} samples ---")
     print(f"Classifier: {model_type}\n")
 
     base_output_dir = Path("own_voice_suppression/outputs/validation_separation")
@@ -72,27 +156,28 @@ def evaluate_separation(librimix_root, num_samples=10, model_type="wavlm-large",
             print("Error: Output file not created.")
             continue
             
-        est_audio, _ = torchaudio.load(suppressed_path) # The system's attempt at "Background Only"
+        est_audio, sample_rate = torchaudio.load(suppressed_path) # The system's attempt at "Background Only"
         ref_background, _ = torchaudio.load(s2_path)    # Ground Truth Background (S2)
         ref_user, _ = torchaudio.load(s1_path)          # Ground Truth User (S1)
         mix_audio, _ = torchaudio.load(mix_path)
 
+        # SI-SDR Metrics
         sdr_background = compute_si_sdr(est_audio, ref_background)
-        
-        # Baseline SDR: How close was the original mix to the background?
         input_sdr_background = compute_si_sdr(mix_audio, ref_background)
-        
-        # Improvement: The "Value Add" of your system
         sdr_improvement = sdr_background - input_sdr_background
-
-        # Suppression: How much of S1 did we kill?
         suppression_val = compute_suppression_db(mix_audio, est_audio, ref_user)
+        
+        # Speech Intelligibility Index (SII)
+        # We model the background (s2) as the target 'speech' and the residual user voice as the 'noise'.
+        residual_noise = est_audio - ref_background
+        sii_score = calculate_sii_from_audio(target_audio=ref_background, residual_noise_audio=residual_noise, sample_rate=sample_rate)
         
         results.append({
             "file": s1_path.name,
             "sdr_background": sdr_background,
             "sdr_improvement": sdr_improvement,
-            "suppression_db": suppression_val
+            "suppression_db": suppression_val,
+            "sii": sii_score
         })
         
         if save_outputs and perm_out_dir:
@@ -108,22 +193,24 @@ def evaluate_separation(librimix_root, num_samples=10, model_type="wavlm-large",
     avg_sdr = np.mean([r['sdr_background'] for r in results])
     avg_imp = np.mean([r['sdr_improvement'] for r in results])
     avg_supp = np.mean([r['suppression_db'] for r in results])
+    avg_sii = np.mean([r['sii'] for r in results])
     
-    print("\n" + "="*60)
-    print("           SOURCE SEPARATION RESULTS (SI-SDR)           ")
-    print("="*60)
-    print(f"{'Filename':<25} | {'SDR (dB)':<10} | {'Imp (dB)':<10} | {'Supp (dB)':<10}")
-    print("-" * 65)
+    print("\n" + "="*75)
+    print("                SOURCE SEPARATION & INTELLIGIBILITY RESULTS                ")
+    print("="*75)
+    print(f"{'Filename':<25} | {'SDR (dB)':<10} | {'Imp (dB)':<10} | {'Supp (dB)':<10} | {'SII':<5}")
+    print("-" * 75)
     for r in results:
-        print(f"{r['file'][:23]:<25} | {r['sdr_background']:<10.2f} | {r['sdr_improvement']:<10.2f} | {r['suppression_db']:<10.2f}")
-    print("-" * 65)
+        print(f"{r['file'][:23]:<25} | {r['sdr_background']:<10.2f} | {r['sdr_improvement']:<10.2f} | {r['suppression_db']:<10.2f} | {r['sii']:.3f}")
+    print("-" * 75)
     print(f"AVG SDR (Quality):       {avg_sdr:.2f} dB")
     print(f"AVG IMPROVEMENT:         {avg_imp:.2f} dB   <-- Key Metric")
     print(f"AVG SUPPRESSION (User):  {avg_supp:.2f} dB")
-    print("="*60)
+    print(f"AVG SII (Clarity):       {avg_sii:.3f}")
+    print("="*75)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate Source Separation (SI-SDR) on LibriMix.")
+    parser = argparse.ArgumentParser(description="Evaluate Source Separation (SI-SDR & SII) on LibriMix.")
     parser.add_argument("--librimix-root", type=Path, default=LIBRIMIX_PATH, help="Path to LibriMix root directory")
     parser.add_argument("--samples", type=int, default=10, help="Number of files to evaluate")
     parser.add_argument("--model-type", type=str, default="wavlm-large", help="Which classifier model to use")
