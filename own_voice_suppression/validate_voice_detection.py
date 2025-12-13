@@ -2,10 +2,6 @@ import argparse
 import glob
 import shutil
 from pathlib import Path
-import sys
-
-# Add project root to allow sibling imports
-sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import torch
 import torch.nn.functional as F
