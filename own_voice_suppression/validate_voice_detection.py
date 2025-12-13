@@ -25,7 +25,7 @@ def plot_vad_results(confidence_logs, y_true, total_len_samples, sr, output_path
     
     fig, ax = plt.subplots(figsize=(15, 5))
 
-    ax.plot(log_times, raw_scores, label='Raw Confidence', color='lightskyblue', alpha=0.7, linewidth=1)
+    ax.plot(log_times, raw_scores, label='Raw Confidence', color='orange', alpha=0.7, linewidth=1)
     ax.plot(log_times, smoothed_scores, label='Smoothed Confidence', color='dodgerblue', linewidth=2)
 
     ax.axhline(y=threshold, color='r', linestyle='--', label=f'Current Threshold ({threshold:.2f})')
@@ -402,11 +402,26 @@ if __name__ == "__main__":
     parser.add_argument("--save-outputs", action='store_true', help="Save output audio files for inspection")
     parser.add_argument("--vad-threshold", type=float, default=-40.0, help="Threshold in dB for Voice Activity Detection (VAD).")
     parser.add_argument("--speaker-detection-threshold", type=float, default=0.65, help="Confidence threshold for speaker detection (0.0 to 1.0).")
+    parser.add_argument("--smoothing-window", type=int, default=10, help="Number of frames for score smoothing.")
 
     args = parser.parse_args()
 
     if args.validation_mode == 'sdr':
-        evaluate_detection_sdr(args.librimix_root, args.samples, args.model_type, args.save_outputs, speaker_detection_threshold=args.speaker_detection_threshold)
-
+        evaluate_detection_sdr(
+            args.librimix_root, 
+            args.samples, 
+            args.model_type, 
+            args.save_outputs, 
+            speaker_detection_threshold=args.speaker_detection_threshold,
+            smoothing_window=args.smoothing_window
+        )
     else:
-        evaluate_detection_vad(args.librimix_root, args.samples, args.model_type, args.save_outputs, speaker_detection_threshold=args.speaker_detection_threshold, vad_threshold=args.vad_threshold)
+        evaluate_detection_vad(
+            args.librimix_root, 
+            args.samples, 
+            args.model_type, 
+            args.save_outputs, 
+            speaker_detection_threshold=args.speaker_detection_threshold, 
+            vad_threshold=args.vad_threshold,
+            smoothing_window=args.smoothing_window
+        )

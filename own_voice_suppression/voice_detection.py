@@ -236,10 +236,20 @@ def main(enrolment_path: PathLike,
 
     output_audio = (mixed_audio * (1 - detection_mask)).cpu()
 
+    print(f"Saving to {output_path}")
+    torchaudio.save(output_path, output_audio, TARGET_SR)
+    
+    return confidence_logs
+
+def plot_confidence_graph(confidence_logs, output_directory, speaker_detection_threshold, smoothing_window):
+    """
+    Plots the speaker detection confidence scores over time and saves the plot.
+    """
     time_steps = [log["time"] for log in confidence_logs]
     scores = [log["score"] for log in confidence_logs]
     smoothed_scores = [log["smoothed_score"] for log in confidence_logs]
 
+    plt.figure(figsize=(12, 6))
     plt.plot(time_steps, scores, label="Raw Confidence Score")
     plt.plot(time_steps, smoothed_scores, label=f"Smoothed Confidence Score (window={smoothing_window})")
     plt.axhline(y=speaker_detection_threshold, color='r', linestyle='--', label="Detection Threshold")
@@ -247,10 +257,11 @@ def main(enrolment_path: PathLike,
     plt.ylabel("Confidence Score")
     plt.title("Speaker Detection Confidence Over Time")
     plt.legend(loc="lower right")
-    plt.savefig(output_directory / f"confidence_plot.png")
-
-    print(f"Saving to {output_path}")
-    torchaudio.save(output_path, output_audio, TARGET_SR)
+    
+    plot_path = Path(output_directory) / "confidence_plot.png"
+    plt.savefig(plot_path)
+    print(f"Confidence plot saved to {plot_path}")
+    plt.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -286,11 +297,18 @@ if __name__ == "__main__":
     
     args.output_directory.mkdir(parents=True, exist_ok=True)
 
-    main(
+    confidence_logs = main(
         enrolment_path=args.enrolment_path, 
         mixed_path=args.mixed_path, 
         output_directory=args.output_directory,
         classifier_type=args.classifier_type,
+    )
+    
+    plot_confidence_graph(
+        confidence_logs=confidence_logs,
+        output_directory=args.output_directory,
+        speaker_detection_threshold=SPEAKER_DETECTION_THRESHOLD,
+        smoothing_window=SMOOTHING_WINDOW
     )
     
     
