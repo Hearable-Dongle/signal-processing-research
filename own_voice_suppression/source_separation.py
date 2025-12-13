@@ -18,6 +18,7 @@ import diart.functional as diart_func
 from diart.models import SegmentationModel
 
 
+from own_voice_suppression.plot_utils import plot_target_presence, plot_source_amplitudes
 from own_voice_suppression.audio_utils import prep_audio, resample, torch_trusted_load
 
 WAVLM_REQUIRED_SR = 16_000  
@@ -28,12 +29,6 @@ STRIDE_SEC = 0.100
 
 MODEL_OPTIONS = ["convtasnet", "sepformer", "diart"]
 ModelOption = Literal["convtasnet", "sepformer", "diart"]
-
-def resample(audio: torch.Tensor, orig_sr: int, new_sr: int) -> torch.Tensor:
-    if orig_sr == new_sr:
-        return audio
-    resampler = torchaudio.transforms.Resample(orig_sr, new_sr).to(audio.device)
-    return resampler(audio)
 
 
 class WavLMVerifier:
@@ -321,43 +316,20 @@ def main(enrolment_path, mixed_path, output_directory, model_type: ModelOption, 
     if suppress:
         output_path = output_directory / f"suppressed_{model_type}.wav"
         torchaudio.save(output_path, output_buffer.cpu(), working_sr)
-        print(f"Saved suppressed audio to {output_path} @ {working_sr}Hz")
+        print(f"\nSaved suppressed audio to {output_path} @ {working_sr}Hz")
         
-        times = [d["time"] for d in log]
-        dets = [d["detected"] for d in log]
-        
-        plt.figure(figsize=(10, 4))
-        plt.fill_between(times, dets, step="pre", alpha=0.4, color='red', label="Target Detected")
-        plt.plot(times, dets, drawstyle="steps", color='red')
-        plt.ylim(-0.1, 1.1)
-        plt.title(f"Target Presence ({model_type})")
-        plt.xlabel("Time (s)")
-        plt.yticks([0, 1], ["Absent", "Present"])
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(output_directory / f"presence_{model_type}.png")
+        plot_path = output_directory / f"presence_{model_type}.png"
+        plot_target_presence(log, plot_path, model_type)
 
     else: # Separation mode
         output_path_s1 = output_directory / f"separated_{model_type}_source1.wav"
         output_path_s2 = output_directory / f"separated_{model_type}_source2.wav"
         torchaudio.save(output_path_s1, output_buffer_s1.cpu(), working_sr)
         torchaudio.save(output_path_s2, output_buffer_s2.cpu(), working_sr)
-        print(f"Saved separated sources to {output_path_s1} and {output_path_s2} @ {working_sr}Hz")
+        print(f"\nSaved separated sources to {output_path_s1} and {output_path_s2} @ {working_sr}Hz")
         
-        times = [d["time"] for d in log]
-        s1_rms = [d["s1_rms"] for d in log]
-        s2_rms = [d["s2_rms"] for d in log]
-
-        plt.figure(figsize=(10, 4))
-        plt.plot(times, s1_rms, label="Source 1 Amplitude")
-        plt.plot(times, s2_rms, label="Source 2 Amplitude")
-        plt.title(f"Source Amplitudes ({model_type})")
-        plt.xlabel("Time (s)")
-        plt.ylabel("RMS Amplitude")
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.6)
-        plt.tight_layout()
-        plt.savefig(output_directory / f"amplitudes_{model_type}.png")
+        plot_path = output_directory / f"amplitudes_{model_type}.png"
+        plot_source_amplitudes(log, plot_path, model_type)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
