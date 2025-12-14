@@ -12,7 +12,7 @@ from tqdm import tqdm
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from general_utils.constants import LIBRIMIX_PATH
-from own_voice_suppression.plot_utils import plot_target_presence
+from own_voice_suppression.plot_utils import plot_target_presence, plot_waveform_comparison
 from own_voice_suppression.source_separation import (
     DETECTION_THRESHOLD, MODEL_OPTIONS, STRIDE_SEC, WAVLM_REQUIRED_SR, WINDOW_SEC,
     ModelOption, prep_audio, resample, run_separation_pipeline)
@@ -53,17 +53,40 @@ def _audio_to_18_band_spectrum_level(audio, sample_rate, n_fft=4096):
     return spectrum_level
 
 
+def align_volume(estimated: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """
+    Scales the estimated signal to optimally match the target signal 
+    using Least Squares (minimizing the energy of the difference).
+    """
+    # Ensure 1D for dot product
+    est_flat = estimated.view(-1)
+    tgt_flat = target.view(-1)
+    
+    # Calculate optimal scaling factor alpha
+    # alpha = <estimated, target> / <estimated, estimated>
+    dot_prod = torch.dot(est_flat, tgt_flat)
+    energy_est = torch.dot(est_flat, est_flat) + 1e-8
+    
+    alpha = dot_prod / energy_est
+    
+    return alpha * estimated
+
+
 def calculate_sii_from_audio(target_audio, residual_noise_audio, sample_rate):
     n_fft = 4096
     ssl_level = _audio_to_18_band_spectrum_level(target_audio, sample_rate, n_fft)
     nsl_level = _audio_to_18_band_spectrum_level(residual_noise_audio, sample_rate, n_fft)
+    
     epsilon = 1e-20
     ssl_db = 10 * np.log10(ssl_level + epsilon)
     nsl_db = 10 * np.log10(nsl_level + epsilon)
+    
     peak_ssl_db = np.max(ssl_db)
-    offset = 35 - peak_ssl_db
+    offset = 65 - peak_ssl_db  
+    
     ssl_calibrated = ssl_db + offset
     nsl_calibrated = nsl_db + offset
+    
     hearing_threshold = np.zeros(18)
     sii_score = sii(ssl_calibrated, nsl_calibrated, hearing_threshold)
     return sii_score
@@ -172,6 +195,8 @@ def evaluate_separation(
         else:
             estimated_background = estimated_background.cpu()
 
+        estimated_background = align_volume(estimated_background, background_audio)
+
         sdr = compute_si_sdr(estimated_background, background_audio)
         input_sdr = compute_si_sdr(input_for_processing.cpu(), background_audio)
         sdr_improvement = sdr - input_sdr
@@ -194,6 +219,14 @@ def evaluate_separation(
             torchaudio.save(sample_out_dir / "ground_truth_background.wav", background_audio.cpu(), WAVLM_REQUIRED_SR)
             torchaudio.save(sample_out_dir / "estimated_background.wav", estimated_background.cpu(), WAVLM_REQUIRED_SR)
             torchaudio.save(sample_out_dir / "ground_truth_target.wav", target_audio.cpu(), WAVLM_REQUIRED_SR)
+            
+            plot_waveform_comparison(
+                estimated_wav=estimated_background,
+                ground_truth_wav=background_audio,
+                sr=WAVLM_REQUIRED_SR,
+                output_path=sample_out_dir / "waveform_comparison.png"
+            )
+
             if logs:
                 plot_target_presence(logs, sample_out_dir / "target_presence.png", model_type)
 
