@@ -36,10 +36,16 @@ class WavLMVerifier:
         self.model.eval()
 
     def get_embedding(self, wav_tensor: torch.Tensor, input_sr: int) -> torch.Tensor:
-        if wav_tensor.shape[1] < 400:
-             return torch.zeros(1, 512).to(self.device)
+        MIN_SAMPLES = 8000  # Safe minimum length for the WavLM model's convolutions
+
+        # If the chunk is too short for the model, pad it with zeros
+        if wav_tensor.shape[1] < MIN_SAMPLES:
+            padding_needed = MIN_SAMPLES - wav_tensor.shape[1]
+            wav_tensor = F.pad(wav_tensor, (0, padding_needed))
+
         if input_sr != WAVLM_REQUIRED_SR:
             wav_tensor = resample(wav_tensor, input_sr, WAVLM_REQUIRED_SR)
+            
         wav_np = wav_tensor.squeeze(0).cpu().numpy()
         inputs = self.processor(wav_np, sampling_rate=WAVLM_REQUIRED_SR, return_tensors="pt", padding=True).to(self.device)
         with torch.no_grad():
@@ -60,7 +66,11 @@ class AsteroidConvTasNetWrapper:
     
     def process(self, mix_chunk: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         with torch.no_grad():
-            pad_samples = int(0.5 * self.NATIVE_SR)
+            # Ensure padding is not larger than the chunk itself
+            chunk_len = mix_chunk.shape[-1]
+            pad_samples_ideal = int(0.5 * self.NATIVE_SR)
+            pad_samples = min(pad_samples_ideal, chunk_len - 1)
+            
             padded_input = F.pad(mix_chunk.unsqueeze(1), (pad_samples, pad_samples), mode='reflect').squeeze(1)
             est_sources_padded = self.model(padded_input)
             est_sources = est_sources_padded[:, :, pad_samples:-pad_samples]
@@ -79,7 +89,11 @@ class SpeechBrainSepFormerWrapper:
 
     def process(self, mix_chunk: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         with torch.no_grad():
-            pad_samples = int(0.5 * self.NATIVE_SR)
+            # Ensure padding is not larger than the chunk itself
+            chunk_len = mix_chunk.shape[-1]
+            pad_samples_ideal = int(0.5 * self.NATIVE_SR)
+            pad_samples = min(pad_samples_ideal, chunk_len - 1)
+
             padded_input = F.pad(mix_chunk.unsqueeze(1), (pad_samples, pad_samples), mode='reflect').squeeze(1)
             est_sources_padded = self.model.separate_batch(padded_input)
             est_sources = est_sources_padded[:, pad_samples:-pad_samples, :]
