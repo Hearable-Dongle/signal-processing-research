@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+import sys
 import torch
 import torchaudio
 import matplotlib.pyplot as plt
@@ -10,6 +11,8 @@ from speechbrain.inference.enhancement import SpectralMaskEnhancement
 import noisereduce as nr
 from df.enhance import enhance, init_df
 
+# Add project root to allow sibling imports
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 from own_voice_suppression.audio_utils import prep_audio
 
 WINDOW_SEC = 2.0  
@@ -110,14 +113,9 @@ class SpectralGatingWrapper:
         return torch.from_numpy(reduced_np).unsqueeze(0).to(self.device)
 
 
-def main(input_path, output_directory, model_type: ModelOption, window_sec=WINDOW_SEC, stride_sec=STRIDE_SEC):
-    output_directory = Path(output_directory)
-    output_directory.mkdir(parents=True, exist_ok=True)
-    output_path = output_directory / "denoised.wav"
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Running on {device}")
-
+def load_enhancer(model_type: ModelOption, device):
+    """Loads the specified enhancement model."""
+    print(f"[Model] Loading {model_type}...")
     if model_type == "convtasnet":
         enhancer = ConvTasNetWrapper(device)
     elif model_type == "metricgan":
@@ -128,37 +126,73 @@ def main(input_path, output_directory, model_type: ModelOption, window_sec=WINDO
         enhancer = SpectralGatingWrapper(device)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
+    return enhancer
 
+def denoise_long_audio(enhancer, noisy_wav: torch.Tensor):
+    """ Denoises a long audio file using a sliding window. """
+    working_sr = enhancer.NATIVE_SR
+    window_samples = int(WINDOW_SEC * working_sr)
+    stride_samples = int(STRIDE_SEC * working_sr)
+    num_samples_audio = noisy_wav.shape[1]
+
+    output_buffer = torch.zeros_like(noisy_wav)
+    
+    current_start = 0
+    with torch.no_grad():
+        while current_start + window_samples <= num_samples_audio:
+            chunk = noisy_wav[:, current_start : current_start + window_samples]
+            enhanced_chunk = enhancer.process(chunk)
+            
+            if current_start == 0:
+                output_buffer[:, 0:window_samples] = enhanced_chunk
+            else:
+                stride_idx = window_samples - stride_samples
+                new_content = enhanced_chunk[:, stride_idx:]
+                update_start = current_start + stride_idx
+                update_end = current_start + window_samples
+                output_buffer[:, update_start:update_end] = new_content
+                
+            current_start += stride_samples
+    
+        if current_start < num_samples_audio:
+            last_chunk = noisy_wav[:, current_start:]
+            if last_chunk.shape[1] < window_samples:
+                padding = window_samples - last_chunk.shape[1]
+                last_chunk = torch.nn.functional.pad(last_chunk, (0, padding))
+            
+            enhanced_chunk = enhancer.process(last_chunk)
+
+            remaining_len = num_samples_audio - current_start
+            stride_idx = window_samples - stride_samples
+            
+            if current_start > 0:
+                update_start = current_start + stride_idx
+                if update_start < num_samples_audio:
+                    len_to_copy = num_samples_audio - update_start
+                    output_buffer[:, update_start:] = enhanced_chunk[:, stride_idx:stride_idx + len_to_copy]
+            else:
+                output_buffer[:, current_start:] = enhanced_chunk[:, :remaining_len]
+
+    return output_buffer
+
+def main(input_path, output_directory, model_type: ModelOption, window_sec=WINDOW_SEC, stride_sec=STRIDE_SEC):
+    output_directory = Path(output_directory)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    output_path = output_directory / "denoised.wav"
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Running on {device}")
+
+    enhancer = load_enhancer(model_type, device)
     working_sr = enhancer.NATIVE_SR
     print(f"Working Sample Rate: {working_sr} Hz")
 
     print("Loading audio...")
     noisy_wav, sr = torchaudio.load(input_path)
     noisy_wav = prep_audio(noisy_wav, sr, working_sr).to(device)
-
-    window_samples = int(window_sec * working_sr)
-    stride_samples = int(stride_sec * working_sr)
-    num_samples = noisy_wav.shape[1]
-
-    output_buffer = torch.zeros_like(noisy_wav)
     
-    print(f"Denoising {num_samples/working_sr:.2f}s of audio...")
-
-    current_start = 0
-    while current_start + window_samples <= num_samples:
-        chunk = noisy_wav[:, current_start : current_start + window_samples]
-        enhanced_chunk = enhancer.process(chunk)
-        
-        if current_start == 0:
-            output_buffer[:, 0 : window_samples] = enhanced_chunk
-        else:
-            stride_idx = window_samples - stride_samples
-            new_content = enhanced_chunk[:, stride_idx:]
-            update_start = current_start + stride_idx
-            update_end = current_start + window_samples
-            output_buffer[:, update_start : update_end] = new_content
-            
-        current_start += stride_samples
+    print(f"Denoising {noisy_wav.shape[1]/working_sr:.2f}s of audio...")
+    output_buffer = denoise_long_audio(enhancer, noisy_wav)
 
     output_buffer = prep_audio(output_buffer, working_sr, 16000)
     torchaudio.save(output_path, output_buffer.cpu(), 16000)
