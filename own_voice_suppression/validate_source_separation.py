@@ -114,7 +114,9 @@ def evaluate_separation(
     save_outputs: bool,
     output_dir: PathLike,
     background_noise_db: float,
-    window_sec: float = WINDOW_SEC 
+    window_sec: float = WINDOW_SEC,
+    smoothing_window: int = 10,
+    stride_sec: float = STRIDE_SEC
 ):
     output_dir = Path(output_dir)
     np.random.seed(RANDOM_SEED)
@@ -127,7 +129,7 @@ def evaluate_separation(
     
     if not s1_files or not s2_files:
         print(f"No LibriMix files found in {librimix_root}. Check path.")
-        return
+        return 0
 
     np.random.shuffle(s1_files)
     np.random.shuffle(s2_files)
@@ -156,18 +158,15 @@ def evaluate_separation(
         target_audio = prep_audio(target_audio, sr1, WAVLM_REQUIRED_SR)
         background_audio = prep_audio(background_audio, sr2, WAVLM_REQUIRED_SR)
 
-        # Trim to same length
         min_len = min(target_audio.shape[1], background_audio.shape[1])
         target_audio = target_audio[:, :min_len]
         background_audio = background_audio[:, :min_len]
         
-        # Mix speakers and normalize
         synthesized_mix = target_audio + background_audio
         synthesized_mix /= torch.max(torch.abs(synthesized_mix)) + 1e-8
         
         input_for_processing = synthesized_mix
 
-        # Background noise
         if background_noise_db is not None and noise_files:
             noise_path = np.random.choice(noise_files)
             noise_audio, noise_sr = torchaudio.load(noise_path)
@@ -185,12 +184,12 @@ def evaluate_separation(
             device=device,
             suppress=True,
             detection_threshold=detection_threshold,
-            window_sec=window_sec, 
-            stride_sec=STRIDE_SEC,
+            window_sec=window_sec,
+            stride_sec=stride_sec,
+            smoothing_window=smoothing_window
         )
         estimated_background = output_audios[0]
 
-        # Resample estimated background to common SR
         if result_sr != WAVLM_REQUIRED_SR:
             estimated_background = resample(estimated_background.cpu(), result_sr, WAVLM_REQUIRED_SR)
         else:
@@ -231,10 +230,9 @@ def evaluate_separation(
             if logs:
                 plot_target_presence(logs, sample_out_dir / "target_presence.png", model_type)
 
-
     if not results:
         print("No results generated.")
-        return
+        return 0
 
     avg_imp = np.mean([r['sdr_improvement'] for r in results])
     avg_supp = np.mean([r['suppression_db'] for r in results])
@@ -256,6 +254,8 @@ def evaluate_separation(
     if save_outputs:
         print("\nOutputs saved to:", output_dir)
 
+    return avg_sii
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate speaker suppression performance on synthesized mixes.")
@@ -265,7 +265,9 @@ if __name__ == "__main__":
     parser.add_argument("--save-outputs", action='store_true')
     parser.add_argument("--background-noise-db", type=float, default=None, help="Add background noise at a specific SNR (in dB).")
     parser.add_argument("--detection-threshold", type=float, default=DETECTION_THRESHOLD)
-    parser.add_argument("--window-sec", type=float, default=WINDOW_SEC, help="Window size in seconds for processing audio chunks.") 
+    parser.add_argument("--window-sec", type=float, default=WINDOW_SEC, help="Window size in seconds for processing audio chunks.")
+    parser.add_argument("--stride-sec", type=float, default=STRIDE_SEC, help="Stride size in seconds for processing audio chunks.")
+    parser.add_argument("--smoothing-window", type=int, default=10, help="Number of frames for score smoothing.")
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
 
@@ -280,5 +282,7 @@ if __name__ == "__main__":
         save_outputs=args.save_outputs,
         output_dir=args.output_dir,
         background_noise_db=args.background_noise_db,
-        window_sec=args.window_sec # Pass to evaluate_separation
+        window_sec=args.window_sec,
+        smoothing_window=args.smoothing_window,
+        stride_sec=args.stride_sec
     )
