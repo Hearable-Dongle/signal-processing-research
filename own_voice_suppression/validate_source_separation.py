@@ -113,7 +113,8 @@ def evaluate_separation(
     detection_threshold: float,
     save_outputs: bool,
     output_dir: PathLike,
-    background_noise_db: float
+    background_noise_db: float,
+    window_sec: float = WINDOW_SEC 
 ):
     output_dir = Path(output_dir)
     np.random.seed(RANDOM_SEED)
@@ -184,7 +185,7 @@ def evaluate_separation(
             device=device,
             suppress=True,
             detection_threshold=detection_threshold,
-            window_sec=WINDOW_SEC,
+            window_sec=window_sec, 
             stride_sec=STRIDE_SEC,
         )
         estimated_background = output_audios[0]
@@ -264,6 +265,7 @@ if __name__ == "__main__":
     parser.add_argument("--save-outputs", action='store_true')
     parser.add_argument("--background-noise-db", type=float, default=None, help="Add background noise at a specific SNR (in dB).")
     parser.add_argument("--detection-threshold", type=float, default=DETECTION_THRESHOLD)
+    parser.add_argument("--window-sec", type=float, default=WINDOW_SEC, help="Window size in seconds for processing audio chunks.") 
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
 
@@ -278,4 +280,5 @@ if __name__ == "__main__":
         save_outputs=args.save_outputs,
         output_dir=args.output_dir,
         background_noise_db=args.background_noise_db,
+        window_sec=args.window_sec # Pass to evaluate_separation
     )
