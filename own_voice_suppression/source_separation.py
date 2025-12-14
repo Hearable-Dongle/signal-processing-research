@@ -1,8 +1,6 @@
 import argparse
-from collections import deque
 from typing import Literal, Tuple
 from pathlib import Path
-import numpy as np
 
 import torch
 import torch.nn.functional as F
@@ -17,7 +15,6 @@ from diart.models import SegmentationModel
 from own_voice_suppression.plot_utils import plot_source_amplitudes, plot_target_presence
 from own_voice_suppression.audio_utils import prep_audio, resample, torch_trusted_load
 
-# --- Constants ---
 WAVLM_REQUIRED_SR = 16_000  
 DETECTION_THRESHOLD = 0.55
 WINDOW_SEC = 2.0
@@ -26,8 +23,6 @@ STRIDE_SEC = 0.5
 MODEL_OPTIONS = ["convtasnet", "sepformer", "diart"]
 ModelOption = Literal["convtasnet", "sepformer", "diart"]
 
-
-# --- Model Wrappers ---
 
 class WavLMVerifier:
     MODEL_ID = "microsoft/wavlm-base-plus-sv"
