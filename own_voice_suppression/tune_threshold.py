@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 
 from own_voice_suppression.validate_voice_detection import evaluate_detection_vad, evaluate_detection_sdr
+from own_voice_suppression.validate_source_separation import evaluate_separation, MODEL_OPTIONS
 from own_voice_suppression.voice_detection import CLASSIFIER_OPTIONS
 from general_utils.constants import LIBRIMIX_PATH
 
@@ -22,12 +23,11 @@ def objective(trial: optuna.Trial, args):
             librimix_root=args.librimix_root,
             num_samples=args.samples,
             model_type=args.model_type,
-            save_outputs=False,  # Disable saving during tuning for speed
+            save_outputs=False,
             speaker_detection_threshold=threshold,
             smoothing_window=smoothing_window
         )
-        return metric_value
-    else:  # 'sdr'
+    elif args.metric_mode == 'sdr':
         metric_value = evaluate_detection_sdr(
             librimix_root=args.librimix_root,
             num_samples=args.samples,
@@ -36,21 +36,35 @@ def objective(trial: optuna.Trial, args):
             speaker_detection_threshold=threshold,
             smoothing_window=smoothing_window
         )
-        return metric_value
+    elif args.metric_mode == 'sii':
+        metric_value = evaluate_separation(
+            librimix_root=args.librimix_root,
+            num_samples=args.samples,
+            model_type=args.model_type,
+            detection_threshold=threshold,
+            smoothing_window=smoothing_window,
+            save_outputs=False,
+            output_dir=Path(f"temp_tune_outputs_{trial.number}"),
+            background_noise_db=None
+        )
+    else:
+        raise ValueError(f"Unknown metric mode: {args.metric_mode}")
+        
+    return metric_value
 
 def main():
     parser = argparse.ArgumentParser(
         description="Tune hyperparameters for the voice suppression system using Optuna.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--model-type", type=str, default="wavlm-large", choices=CLASSIFIER_OPTIONS,
+    parser.add_argument("--model-type", type=str, default="wavlm-large", choices=[*CLASSIFIER_OPTIONS, *MODEL_OPTIONS],
                         help="Which classifier model to use for tuning.")
     parser.add_argument("--samples", type=int, default=20,
                         help="Number of audio samples to use for evaluation in each trial.")
     parser.add_argument("--trials", type=int, default=50,
                         help="Number of optimization trials to run.")
-    parser.add_argument("--metric-mode", type=str, choices=['vad', 'sdr'], default='vad',
-                        help="Metric to optimize: 'vad' for F1-score or 'sdr' for SI-SDR improvement.")
+    parser.add_argument("--metric-mode", type=str, choices=['vad', 'sdr', 'sii'], default='vad',
+                        help="Metric to optimize: 'vad' (F1-score), 'sdr' (SI-SDR improvement), or 'sii' (Speech Intelligibility Index).")
     parser.add_argument("--librimix-root", type=Path, default=LIBRIMIX_PATH,
                         help="Path to the LibriMix root directory for evaluation data.")
     
