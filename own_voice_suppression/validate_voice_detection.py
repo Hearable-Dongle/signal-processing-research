@@ -2,6 +2,7 @@ import argparse
 import glob
 import shutil
 from pathlib import Path
+import uuid
 
 import torch
 import torch.nn.functional as F
@@ -12,6 +13,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 from general_utils.constants import LIBRIMIX_PATH
 
 from own_voice_suppression.voice_detection import main as run_suppression
+from own_voice_suppression.source_separation import prep_audio
 
 def plot_vad_results(confidence_logs, y_true, total_len_samples, sr, output_path, threshold):
     import matplotlib.pyplot as plt
@@ -138,7 +140,8 @@ def evaluate_detection_sdr(librimix_root, num_samples=10, model_type="wavlm-larg
     else:
         perm_out_dir = None
 
-    temp_out_dir = Path("temp_eval_outputs")
+    # Unique temp directory in case of parallel runs
+    temp_out_dir = Path(f"temp_eval_outputs_{uuid.uuid4()}") 
     temp_out_dir.mkdir(exist_ok=True)
 
     for s1_path in tqdm(s1_files, desc="Evaluating SDR"):
@@ -247,7 +250,7 @@ def evaluate_detection_vad(librimix_root, num_samples=10, model_type="wavlm-larg
     else:
         perm_out_dir = None
 
-    temp_out_dir = Path("temp_eval_outputs")
+    temp_out_dir = Path(f"temp_eval_outputs_{uuid.uuid4()}") # Unique temporary directory
     temp_out_dir.mkdir(exist_ok=True)
 
     print(f"\n--- Evaluating Detection (VAD) on {num_samples} constructed samples ---")
@@ -258,17 +261,17 @@ def evaluate_detection_vad(librimix_root, num_samples=10, model_type="wavlm-larg
         
         # --- Construct new audio mix with overlaps ---
         s1_audio, sr = torchaudio.load(s1_path)
+        s1_audio = prep_audio(s1_audio, sr, WAVLM_REQUIRED_SR) # Ensure mono and common SR
+        sr = WAVLM_REQUIRED_SR # Set common sample rate
         
         # Find two other random speakers for padding and ensure consistent sample rate
         other_speaker_paths = np.random.choice([p for p in s2_files if p != str(s1_path).replace("/s1/", "/s2/")], 2, replace=False)
         
         other_1_audio, other_1_sr = torchaudio.load(other_speaker_paths[0])
-        if other_1_sr != sr:
-            other_1_audio = torchaudio.functional.resample(other_1_audio, other_1_sr, sr)
+        other_1_audio = prep_audio(other_1_audio, other_1_sr, sr) # Ensure mono and common SR
 
         other_2_audio, other_2_sr = torchaudio.load(other_speaker_paths[1])
-        if other_2_sr != sr:
-            other_2_audio = torchaudio.functional.resample(other_2_audio, other_2_sr, sr)
+        other_2_audio = prep_audio(other_2_audio, other_2_sr, sr) # Ensure mono and common SR
 
         # Define segment and overlap lengths
         pad_len_sec = 3
