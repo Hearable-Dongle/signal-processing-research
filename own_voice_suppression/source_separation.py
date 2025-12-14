@@ -1,6 +1,7 @@
 import argparse
 from typing import Literal, Tuple
 from pathlib import Path
+from collections import deque
 
 import torch
 import torch.nn.functional as F
@@ -119,7 +120,8 @@ def run_separation_pipeline(
     suppress: bool,
     detection_threshold: float = DETECTION_THRESHOLD,
     window_sec: float = WINDOW_SEC,
-    stride_sec: float = STRIDE_SEC
+    stride_sec: float = STRIDE_SEC,
+    smoothing_window: int = 10
 ) -> Tuple[Tuple[torch.Tensor, ...], list, int]:
     """
     Runs the full source separation and suppression/tracking pipeline on audio tensors.
@@ -157,7 +159,7 @@ def run_separation_pipeline(
     log = []
 
     anchor_emb_s1, anchor_emb_s2 = None, None
-
+    score_buffer = deque(maxlen=smoothing_window)
     ALPHA = 0.95
 
     current_start = 0
@@ -169,19 +171,28 @@ def run_separation_pipeline(
         if suppress:
             score_s1 = verifier.score(s1, target_emb, input_sr=working_sr)
             score_s2 = verifier.score(s2, target_emb, input_sr=working_sr)
+            
+            raw_score = max(score_s1, score_s2)
+            score_buffer.append(raw_score)
+            smoothed_score = sum(score_buffer) / len(score_buffer)
 
             target_detected = False
             kept_audio = chunk 
 
-            if score_s1 > detection_threshold and score_s1 > score_s2:
-                kept_audio = s2 
-                target_detected = True
+            if smoothed_score >= detection_threshold:
+                if score_s1 > score_s2:
+                    kept_audio = s2 
+                    target_detected = True
+                else:
+                    kept_audio = s1
+                    target_detected = True
 
-            elif score_s2 > detection_threshold and score_s2 > score_s1:
-                kept_audio = s1
-                target_detected = True
-
-            log.append({"time": current_start / working_sr, "detected": int(target_detected)})
+            log.append({
+                "time": current_start / working_sr, 
+                "score": raw_score,
+                "smoothed_score": smoothed_score,
+                "detected": int(target_detected)
+            })
 
             if current_start == 0:
                 output_buffer[:, 0:window_samples] = kept_audio
@@ -229,13 +240,12 @@ def run_separation_pipeline(
                 output_buffer_s2[:, current_start + stride_start_idx : current_start + window_samples] = s2[:, stride_start_idx:]
 
         current_start += stride_samples
-
+    
     if suppress:
         return (output_buffer,), log, working_sr
 
     else:
         return (output_buffer_s1, output_buffer_s2), log, working_sr
-
 
 def main():
     parser = argparse.ArgumentParser(description="""
