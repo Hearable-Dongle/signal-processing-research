@@ -2,6 +2,7 @@ import argparse
 from typing import Literal, Tuple
 from pathlib import Path
 from collections import deque
+import time
 
 import torch
 import torch.nn.functional as F
@@ -136,23 +137,20 @@ def run_separation_pipeline(
     window_sec: float = WINDOW_SEC,
     stride_sec: float = STRIDE_SEC,
     smoothing_window: int = 10
-) -> Tuple[Tuple[torch.Tensor, ...], list, int]:
+) -> Tuple[Tuple[torch.Tensor, ...], list, int, float]:
     """
     Runs the full source separation and suppression/tracking pipeline on audio tensors.
+    Returns the processed audio, logs, working sample rate, and average latency in seconds.
     """
-
     if model_type == "convtasnet":
         extractor = AsteroidConvTasNetWrapper(device)
-
     elif model_type == "sepformer":
         extractor = SpeechBrainSepFormerWrapper(device)
-
     elif model_type == "diart":
         extractor = DiartWrapper(device)
-
     else:
         raise ValueError(f"Unknown model type: {model_type}")
-
+    
     verifier = WavLMVerifier(device)
     working_sr = extractor.NATIVE_SR
 
@@ -163,7 +161,6 @@ def run_separation_pipeline(
 
     window_samples = int(window_sec * working_sr)
     stride_samples = int(stride_sec * working_sr)
-
     num_samples = mixed_audio.shape[1]
 
     output_buffer = torch.zeros_like(mixed_audio)
@@ -171,21 +168,23 @@ def run_separation_pipeline(
     output_buffer_s2 = torch.zeros_like(mixed_audio) if not suppress else None
 
     log = []
-
+    total_inference_time = 0
+    num_chunks = 0
     anchor_emb_s1, anchor_emb_s2 = None, None
     score_buffer = deque(maxlen=smoothing_window)
     ALPHA = 0.95
-
     current_start = 0
 
     while current_start + window_samples <= num_samples:
+        start_time = time.monotonic()
+
         chunk = mixed_audio[:, current_start : current_start + window_samples]
         s1, s2 = extractor.process(chunk)
 
         if suppress:
             score_s1 = verifier.score(s1, target_emb, input_sr=working_sr)
             score_s2 = verifier.score(s2, target_emb, input_sr=working_sr)
-            
+
             raw_score = max(score_s1, score_s2)
             score_buffer.append(raw_score)
             smoothed_score = sum(score_buffer) / len(score_buffer)
@@ -197,9 +196,14 @@ def run_separation_pipeline(
                 if score_s1 > score_s2:
                     kept_audio = s2 
                     target_detected = True
+
                 else:
                     kept_audio = s1
                     target_detected = True
+
+            end_time = time.monotonic()
+            total_inference_time += (end_time - start_time)
+            num_chunks += 1
 
             log.append({
                 "time": current_start / working_sr, 
@@ -223,6 +227,7 @@ def run_separation_pipeline(
             if anchor_emb_s1 is None:
                 anchor_emb_s1 = verifier.get_embedding(s1, input_sr=working_sr)
                 anchor_emb_s2 = verifier.get_embedding(s2, input_sr=working_sr)
+
             else:
                 emb1 = verifier.get_embedding(s1, input_sr=working_sr)
                 emb2 = verifier.get_embedding(s2, input_sr=working_sr)
@@ -246,53 +251,50 @@ def run_separation_pipeline(
             if current_start == 0:
                 output_buffer_s1[:, :window_samples] = s1
                 output_buffer_s2[:, :window_samples] = s2
-
+                
             else:
-                # Assuming simple overlap-add for separation mode for now
                 stride_start_idx = window_samples - stride_samples
                 output_buffer_s1[:, current_start + stride_start_idx : current_start + window_samples] = s1[:, stride_start_idx:]
                 output_buffer_s2[:, current_start + stride_start_idx : current_start + window_samples] = s2[:, stride_start_idx:]
 
         current_start += stride_samples
     
-    if suppress:
-        return (output_buffer,), log, working_sr
+    avg_latency = (total_inference_time / num_chunks) if num_chunks > 0 else 0
 
+    if suppress:
+        return (output_buffer,), log, working_sr, avg_latency
     else:
-        return (output_buffer_s1, output_buffer_s2), log, working_sr
+        return (output_buffer_s1, output_buffer_s2), log, working_sr, avg_latency
+
 
 def main():
     parser = argparse.ArgumentParser(description="""
-
         Performs speaker separation or suppression on an audio file.
-
         In 'separation' mode (default), it separates the mixed audio into two tracks.
-
         In 'suppression' mode (`--suppress`), it removes the enrolled target speaker.
-
     """)
     parser.add_argument("--enrolment-path", type=Path, required=True, help="Path to the enrolment audio file for the target speaker.")
     parser.add_argument("--mixed-path", type=Path, required=True, help="Path to the mixed audio file to be processed.")
     parser.add_argument("--output-directory", type=Path, help="Directory to save the output audio files and plots.")
     parser.add_argument("--model-type", type=str, choices=MODEL_OPTIONS, default="convtasnet", help="Which separation model to use.")
     parser.add_argument("--suppress", action="store_true", help="Enable suppression of the target speaker. If not set, separates all sources.")
-
     args = parser.parse_args()
 
     if not args.output_directory:
         mode = "suppression" if args.suppress else "separation"
         args.output_directory = Path(f"own_voice_suppression/outputs/{mode}/{args.model_type}_enrol_{args.enrolment_path.stem}_mix_{args.mixed_path.stem}")
+        args.output_directory.mkdir(parents=True, exist_ok=True)
 
-    args.output_directory.mkdir(parents=True, exist_ok=True)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Running on {device}")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Running on {device}")
 
     enrolment_audio, sr_enrol = torchaudio.load(args.enrolment_path)
+
+
     mixed_audio, sr_mix = torchaudio.load(args.mixed_path)
     print(f"Processing {mixed_audio.shape[1] / WAVLM_REQUIRED_SR:.2f}s of audio...")
 
-    output_audios, log, working_sr = run_separation_pipeline(
+    output_audios, log, working_sr, avg_latency = run_separation_pipeline(
         mixed_audio=mixed_audio,
         orig_sr_mix=sr_mix,
         enrolment_audio=enrolment_audio,
@@ -301,6 +303,8 @@ def main():
         device=device,
         suppress=args.suppress,
     )
+    
+    print(f"Average latency per chunk: {avg_latency * 1000:.2f} ms")
 
     if args.suppress:
         output_path = args.output_directory / f"suppressed_{args.model_type}.wav"
