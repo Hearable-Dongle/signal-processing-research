@@ -15,6 +15,8 @@ import time
 from denoise.denoise import load_enhancer, MODEL_OPTIONS
 from own_voice_suppression.audio_utils import prep_audio
 from own_voice_suppression.validate_voice_detection import compute_si_sdr, LIBRIMIX_PATH
+from own_voice_suppression.validate_source_separation import calculate_sii_from_audio, align_volume
+from speech_separation.postprocessing.calculate_sii import sii
 
 
 def denoise_long_audio(enhancer, noisy_wav, working_sr):
@@ -127,16 +129,24 @@ def evaluate_denoising(librimix_root, num_samples=10, model_type="convtasnet", s
         ref_speech, _ = torchaudio.load(s2_path)
         mix_audio, _ = torchaudio.load(mix_path)
 
+        # Align volume before calculating metrics
+        est_speech = align_volume(est_speech, ref_speech)
+
         output_si_sdr = compute_si_sdr(est_speech, ref_speech)
         input_si_sdr = compute_si_sdr(mix_audio, ref_speech)
         sdr_improvement = output_si_sdr - input_si_sdr
+
+        # Calculate SII
+        residual_for_sii = est_speech - ref_speech
+        sii_score = calculate_sii_from_audio(ref_speech, residual_for_sii, 16000)
         
         results.append({
             "file": s2_path.name,
             "input_si_sdr": input_si_sdr,
             "output_si_sdr": output_si_sdr,
             "sdr_improvement": sdr_improvement,
-            "latency_ms": avg_latency * 1000
+            "latency_ms": avg_latency * 1000,
+            "sii": sii_score
         })
         
         if save_outputs and perm_out_dir:
@@ -156,19 +166,21 @@ def evaluate_denoising(librimix_root, num_samples=10, model_type="convtasnet", s
     avg_imp = np.mean([r['sdr_improvement'] for r in results])
     avg_output_sdr = np.mean([r['output_si_sdr'] for r in results])
     avg_latency = np.mean([r['latency_ms'] for r in results])
+    avg_sii = np.mean([r['sii'] for r in results])
 
-    print("\n" + "="*95)
-    print("                 DENOISING RESULTS (SI-SDR & LATENCY)                ")
-    print("="*95)
-    print(f"{ 'Filename':<25} | {'Input SI-SDR':<12} | {'Output SI-SDR':<13} | {'Improvement (dB)':<15} | {'Latency (ms)':<15}")
-    print("-" * 95)
+    print("\n" + "="*110)
+    print("                 DENOISING RESULTS (SI-SDR, SII & LATENCY)                ")
+    print("="*110)
+    print(f"{ 'Filename':<25} | {'Input SI-SDR':<12} | {'Output SI-SDR':<13} | {'Improvement (dB)':<15} | {'Latency (ms)':<15} | {'SII':<5}")
+    print("-" * 110)
     for r in results:
-        print(f"{r['file'][:23]:<25} | {r['input_si_sdr']:<12.2f} | {r['output_si_sdr']:<13.2f} | {r['sdr_improvement']:<15.2f} | {r['latency_ms']:.2f}")
-    print("-" * 95)
+        print(f"{r['file'][:23]:<25} | {r['input_si_sdr']:<12.2f} | {r['output_si_sdr']:<13.2f} | {r['sdr_improvement']:<15.2f} | {r['latency_ms']:.2f} | {r['sii']:.3f}")
+    print("-" * 110)
     print(f"AVG OUTPUT SI-SDR:      {avg_output_sdr:.2f} dB")
     print(f"AVG SI-SDR IMPROVEMENT: {avg_imp:.2f} dB   <-- Key Metric")
     print(f"AVERAGE LATENCY:        {avg_latency:.2f} ms")
-    print("="*95)
+    print(f"AVERAGE SII (CLARITY):  {avg_sii:.3f}")
+    print("="*110)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate Denoising models on LibriMix.")

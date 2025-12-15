@@ -37,9 +37,7 @@ class WavLMVerifier:
         self.model.eval()
 
     def get_embedding(self, wav_tensor: torch.Tensor, input_sr: int) -> torch.Tensor:
-        MIN_SAMPLES = 8000  # Safe minimum length for the WavLM model's convolutions
-
-        # If the chunk is too short for the model, pad it with zeros
+        MIN_SAMPLES = 8000
         if wav_tensor.shape[1] < MIN_SAMPLES:
             padding_needed = MIN_SAMPLES - wav_tensor.shape[1]
             wav_tensor = F.pad(wav_tensor, (0, padding_needed))
@@ -67,7 +65,6 @@ class AsteroidConvTasNetWrapper:
     
     def process(self, mix_chunk: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         with torch.no_grad():
-            # Ensure padding is not larger than the chunk itself
             chunk_len = mix_chunk.shape[-1]
             pad_samples_ideal = int(0.5 * self.NATIVE_SR)
             pad_samples = min(pad_samples_ideal, chunk_len - 1)
@@ -90,7 +87,6 @@ class SpeechBrainSepFormerWrapper:
 
     def process(self, mix_chunk: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         with torch.no_grad():
-            # Ensure padding is not larger than the chunk itself
             chunk_len = mix_chunk.shape[-1]
             pad_samples_ideal = int(0.5 * self.NATIVE_SR)
             pad_samples = min(pad_samples_ideal, chunk_len - 1)
@@ -124,7 +120,6 @@ class DiartWrapper:
         s2_mask = (probs_interp[0, 1, :] > 0.5).float() if num_speakers > 1 else torch.zeros_like(s1_mask)
         return mix_16k * s1_mask, mix_16k * s2_mask
 
-
 def run_separation_pipeline(
     mixed_audio: torch.Tensor,
     orig_sr_mix: int,
@@ -137,10 +132,10 @@ def run_separation_pipeline(
     window_sec: float = WINDOW_SEC,
     stride_sec: float = STRIDE_SEC,
     smoothing_window: int = 10
-) -> Tuple[Tuple[torch.Tensor, ...], list, int, float]:
+) -> Tuple[Tuple[torch.Tensor, ...], list, int, float, float]:
     """
     Runs the full source separation and suppression/tracking pipeline on audio tensors.
-    Returns the processed audio, logs, working sample rate, and average latency in seconds.
+    Returns the processed audio, logs, working sample rate, avg latency, and avg RTF.
     """
     if model_type == "convtasnet":
         extractor = AsteroidConvTasNetWrapper(device)
@@ -150,7 +145,7 @@ def run_separation_pipeline(
         extractor = DiartWrapper(device)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
-    
+
     verifier = WavLMVerifier(device)
     working_sr = extractor.NATIVE_SR
 
@@ -177,61 +172,33 @@ def run_separation_pipeline(
 
     while current_start + window_samples <= num_samples:
         start_time = time.monotonic()
-
         chunk = mixed_audio[:, current_start : current_start + window_samples]
         s1, s2 = extractor.process(chunk)
 
         if suppress:
             score_s1 = verifier.score(s1, target_emb, input_sr=working_sr)
             score_s2 = verifier.score(s2, target_emb, input_sr=working_sr)
-
+            
             raw_score = max(score_s1, score_s2)
             score_buffer.append(raw_score)
             smoothed_score = sum(score_buffer) / len(score_buffer)
 
             target_detected = False
             kept_audio = chunk 
-
             if smoothed_score >= detection_threshold:
                 if score_s1 > score_s2:
                     kept_audio = s2 
                     target_detected = True
-
                 else:
                     kept_audio = s1
                     target_detected = True
-
-            end_time = time.monotonic()
-            total_inference_time += (end_time - start_time)
-            num_chunks += 1
-
-            log.append({
-                "time": current_start / working_sr, 
-                "score": raw_score,
-                "smoothed_score": smoothed_score,
-                "detected": int(target_detected)
-            })
-
-            if current_start == 0:
-                output_buffer[:, 0:window_samples] = kept_audio
-
-            else:
-                fade_len = window_samples - stride_samples
-                fade_in = torch.linspace(0, 1, fade_len).to(device)
-                fade_out = torch.linspace(1, 0, fade_len).to(device)
-                output_buffer[:, current_start : current_start + fade_len] *= fade_out
-                output_buffer[:, current_start : current_start + fade_len] += kept_audio[:, :fade_len] * fade_in
-                output_buffer[:, current_start + fade_len : current_start + window_samples] = kept_audio[:, fade_len:]
-
         else: # Separation mode
             if anchor_emb_s1 is None:
                 anchor_emb_s1 = verifier.get_embedding(s1, input_sr=working_sr)
                 anchor_emb_s2 = verifier.get_embedding(s2, input_sr=working_sr)
-
             else:
                 emb1 = verifier.get_embedding(s1, input_sr=working_sr)
                 emb2 = verifier.get_embedding(s2, input_sr=working_sr)
-
                 score_perm_orig = F.cosine_similarity(emb1, anchor_emb_s1) + F.cosine_similarity(emb2, anchor_emb_s2)
                 score_perm_flipped = F.cosine_similarity(emb1, anchor_emb_s2) + F.cosine_similarity(emb2, anchor_emb_s1)
 
@@ -242,36 +209,63 @@ def run_separation_pipeline(
                 anchor_emb_s1 = ALPHA * anchor_emb_s1 + (1 - ALPHA) * emb1
                 anchor_emb_s2 = ALPHA * anchor_emb_s2 + (1 - ALPHA) * emb2
 
+        end_time = time.monotonic()
+        total_inference_time += (end_time - start_time)
+        num_chunks += 1
+        
+        if suppress:
+            log.append({
+                "time": current_start / working_sr, 
+                "score": raw_score,
+                "smoothed_score": smoothed_score,
+                "detected": int(target_detected)
+            })
+            if current_start == 0:
+                output_buffer[:, 0:window_samples] = kept_audio
+            else:
+                fade_len = window_samples - stride_samples
+                fade_in = torch.linspace(0, 1, fade_len).to(device)
+                fade_out = torch.linspace(1, 0, fade_len).to(device)
+                output_buffer[:, current_start : current_start + fade_len] *= fade_out
+                output_buffer[:, current_start : current_start + fade_len] += kept_audio[:, :fade_len] * fade_in
+                output_buffer[:, current_start + fade_len : current_start + window_samples] = kept_audio[:, fade_len:]
+        else: # Separation mode
             log.append({
                 "time": current_start / working_sr,
                 "s1_rms": torch.sqrt(torch.mean(s1**2)).item(),
                 "s2_rms": torch.sqrt(torch.mean(s2**2)).item()
             })
-
             if current_start == 0:
                 output_buffer_s1[:, :window_samples] = s1
                 output_buffer_s2[:, :window_samples] = s2
-                
             else:
-                stride_start_idx = window_samples - stride_samples
-                output_buffer_s1[:, current_start + stride_start_idx : current_start + window_samples] = s1[:, stride_start_idx:]
-                output_buffer_s2[:, current_start + stride_start_idx : current_start + window_samples] = s2[:, stride_start_idx:]
+                fade_len = window_samples - stride_samples
+                fade_in = torch.linspace(0, 1, fade_len).to(device)
+                fade_out = torch.linspace(1, 0, fade_len).to(device)
 
+                output_buffer_s1[:, current_start:current_start + fade_len] *= fade_out
+                output_buffer_s1[:, current_start:current_start + fade_len] += s1[:, :fade_len] * fade_in
+                output_buffer_s1[:, current_start + fade_len : current_start + window_samples] = s1[:, fade_len:]
+                
+                output_buffer_s2[:, current_start:current_start + fade_len] *= fade_out
+                output_buffer_s2[:, current_start:current_start + fade_len] += s2[:, :fade_len] * fade_in
+                output_buffer_s2[:, current_start + fade_len : current_start + window_samples] = s2[:, fade_len:]
+        
         current_start += stride_samples
     
     avg_latency = (total_inference_time / num_chunks) if num_chunks > 0 else 0
+    rtf = avg_latency / window_sec if window_sec > 0 else 0
 
     if suppress:
-        return (output_buffer,), log, working_sr, avg_latency
+        return (output_buffer,), log, working_sr, avg_latency, rtf
     else:
-        return (output_buffer_s1, output_buffer_s2), log, working_sr, avg_latency
-
+        return (output_buffer_s1, output_buffer_s2), log, working_sr, avg_latency, rtf
 
 def main():
     parser = argparse.ArgumentParser(description="""
-        Performs speaker separation or suppression on an audio file.
-        In 'separation' mode (default), it separates the mixed audio into two tracks.
-        In 'suppression' mode (`--suppress`), it removes the enrolled target speaker.
+Performs speaker separation or suppression on an audio file.
+In 'separation' mode (default), it separates the mixed audio into two tracks.
+In 'suppression' mode (`--suppress`), it removes the enrolled target speaker.
     """)
     parser.add_argument("--enrolment-path", type=Path, required=True, help="Path to the enrolment audio file for the target speaker.")
     parser.add_argument("--mixed-path", type=Path, required=True, help="Path to the mixed audio file to be processed.")
@@ -283,18 +277,16 @@ def main():
     if not args.output_directory:
         mode = "suppression" if args.suppress else "separation"
         args.output_directory = Path(f"own_voice_suppression/outputs/{mode}/{args.model_type}_enrol_{args.enrolment_path.stem}_mix_{args.mixed_path.stem}")
-        args.output_directory.mkdir(parents=True, exist_ok=True)
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Running on {device}")
+    args.output_directory.mkdir(parents=True, exist_ok=True)
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Running on {device}")
 
     enrolment_audio, sr_enrol = torchaudio.load(args.enrolment_path)
-
-
     mixed_audio, sr_mix = torchaudio.load(args.mixed_path)
     print(f"Processing {mixed_audio.shape[1] / WAVLM_REQUIRED_SR:.2f}s of audio...")
 
-    output_audios, log, working_sr, avg_latency = run_separation_pipeline(
+    output_audios, log, working_sr, avg_latency, rtf = run_separation_pipeline(
         mixed_audio=mixed_audio,
         orig_sr_mix=sr_mix,
         enrolment_audio=enrolment_audio,
@@ -305,27 +297,24 @@ def main():
     )
     
     print(f"Average latency per chunk: {avg_latency * 1000:.2f} ms")
+    print(f"Real-Time Factor (RTF): {rtf:.3f}")
 
     if args.suppress:
         output_path = args.output_directory / f"suppressed_{args.model_type}.wav"
         torchaudio.save(output_path, output_audios[0].cpu(), working_sr)
         print(f"\nSaved suppressed audio to {output_path} @ {working_sr}Hz")
-
         if log:
             plot_path = args.output_directory / f"presence_{args.model_type}.png"
             plot_target_presence(log, plot_path, args.model_type)
-
     else:
         output_path_s1 = args.output_directory / f"separated_{args.model_type}_source1.wav"
         output_path_s2 = args.output_directory / f"separated_{args.model_type}_source2.wav"
         torchaudio.save(output_path_s1, output_audios[0].cpu(), working_sr)
         torchaudio.save(output_path_s2, output_audios[1].cpu(), working_sr)
         print(f"\nSaved separated sources to {output_path_s1} and {output_path_s2} @ {working_sr}Hz")
-
         if log:
             plot_path = args.output_directory / f"amplitudes_{args.model_type}.png"
             plot_source_amplitudes(log, plot_path, args.model_type)
-
 
 if __name__ == "__main__":
     main()
