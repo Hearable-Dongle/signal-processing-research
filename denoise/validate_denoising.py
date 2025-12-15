@@ -7,15 +7,16 @@ import torch
 import torchaudio
 import numpy as np
 from tqdm import tqdm
+import time
+import uuid
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-import time
 
 from denoise.denoise import load_enhancer, MODEL_OPTIONS
 from own_voice_suppression.audio_utils import prep_audio
 from own_voice_suppression.validate_voice_detection import compute_si_sdr, LIBRIMIX_PATH
 from own_voice_suppression.validate_source_separation import calculate_sii_from_audio, align_volume
+from own_voice_suppression.plot_utils import plot_denoising_waveforms
 from speech_separation.postprocessing.calculate_sii import sii
 
 
@@ -23,8 +24,8 @@ def denoise_long_audio(enhancer, noisy_wav, working_sr):
     """
     Denoises a long audio file using a sliding window approach and measures latency.
     """
-    window_sec = 2.0  # Window size for processing
-    stride_sec = 0.5  # Overlap between windows
+    window_sec = 2.0
+    stride_sec = 0.5
     
     window_samples = int(window_sec * working_sr)
     stride_samples = int(stride_sec * working_sr)
@@ -47,7 +48,6 @@ def denoise_long_audio(enhancer, noisy_wav, working_sr):
         total_inference_time += (end_time - start_time)
         num_chunks += 1
         
-        # Overlap-add with cross-fade
         if current_start == 0:
             output_buffer[:, 0:window_samples] = denoised_chunk
         else:
@@ -62,101 +62,128 @@ def denoise_long_audio(enhancer, noisy_wav, working_sr):
         current_start += stride_samples
         
     avg_latency = (total_inference_time / num_chunks) if num_chunks > 0 else 0
+    rtf = avg_latency / window_sec if window_sec > 0 else 0
     
-    return output_buffer, avg_latency
+    return output_buffer, avg_latency, rtf
 
-
-def evaluate_denoising(librimix_root, num_samples=10, model_type="convtasnet", save_outputs=False):
+def _adjust_snr(clean_signal, noise_signal, snr_db):
     """
-    Evaluates a denoising model on the LibriMix dataset.
-    Treats s2 as the target speech and s1 as the noise.
-    Computes SI-SDR improvement.
+    Adjusts the noise level to a target SNR relative to the clean signal.
+    """
+    clean_len = clean_signal.shape[-1]
+    noise_len = noise_signal.shape[-1]
+    if clean_len > noise_len:
+        repeat_factor = clean_len // noise_len + 1
+        noise_signal = noise_signal.repeat(1, repeat_factor)
+    noise_signal = noise_signal[..., :clean_len]
+    power_clean = torch.mean(clean_signal ** 2)
+    power_noise = torch.mean(noise_signal ** 2) + 1e-8
+    power_noise_target = power_clean / (10**(snr_db / 10))
+    scaling_factor = torch.sqrt(power_noise_target / power_noise)
+    return noise_signal * scaling_factor
+
+
+def evaluate_denoising(librimix_root, num_samples=10, model_type="convtasnet", save_outputs=False, background_noise_db=20.0, noise_type='wham'):
+    """
+    Evaluates a denoising model.
+    Adds ambient or white noise to clean speech and evaluates the model's ability to remove it.
     """
     librimix_path = Path(librimix_root)
     
     search_pattern = str(librimix_path / "**" / "s2" / "*.wav")
-    s2_files = glob.glob(search_pattern, recursive=True)
+    s2_files = sorted(glob.glob(search_pattern, recursive=True))[:num_samples]
     
     if not s2_files:
-        print(f"No files found in {librimix_path}. Check your path structure.")
+        print(f"No LibriMix s2 files found in {librimix_path}. Check path.")
         return
 
-    s2_files = sorted(s2_files)[:num_samples]
-    
+    noise_files = []
+    if noise_type == 'wham':
+        if background_noise_db is not None:
+            noise_dir = librimix_path / "wham_noise"
+            if noise_dir.exists():
+                noise_files = glob.glob(str(noise_dir / "**" / "*.wav"), recursive=True)
+            if not noise_files:
+                raise RuntimeError(f"Warning: WHAM! noise directory not found or empty at {noise_dir}. Cannot use 'wham' noise type.")
+
     results = []
-    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on {device}")
     
-    print(f"\n--- Starting Denoising Evaluation (SI-SDR) on {num_samples} samples ---")
-    print(f"Model: {model_type}\n")
+    print(f"\n--- Starting Denoising Evaluation on {num_samples} samples ---")
+    print(f"Model: {model_type}, Noise Type: {noise_type}, Noise Level: {background_noise_db} dB SNR\n")
 
-    # Load model once
     enhancer = load_enhancer(model_type, device)
-    working_sr = enhancer.NATIVE_SR
+    working_sr = enhancer.sr if hasattr(enhancer, 'sr') else 16000
     print(f"Working Sample Rate: {working_sr} Hz")
 
     base_output_dir = Path("denoise/outputs/validation_denoising")
-    if save_outputs:
-        perm_out_dir = base_output_dir / f"{model_type}-{num_samples}"
+    perm_out_dir = base_output_dir / f"{model_type}-{num_samples}_snr{int(background_noise_db)}_{noise_type}" if save_outputs else None
+    if perm_out_dir:
         perm_out_dir.mkdir(parents=True, exist_ok=True)
         print(f"Saving outputs to {perm_out_dir}")
-    else:
-        perm_out_dir = None
     
-    temp_out_dir = Path("temp_denoise_outputs")
+    temp_out_dir = Path(f"temp_denoise_outputs_{uuid.uuid4()}")
     temp_out_dir.mkdir(exist_ok=True)
 
     for s2_path in tqdm(s2_files):
         s2_path = Path(s2_path)
         
-        mix_path = Path(str(s2_path).replace("/s2/", "/mix_clean/"))
-        s1_path = Path(str(s2_path).replace("/s2/", "/s1/"))
+        ref_speech, sr = torchaudio.load(s2_path)
+        ref_speech = prep_audio(ref_speech, sr, working_sr)
+
+        if noise_type == 'wham':
+            if not noise_files:
+                print("Skipping sample because no WHAM! noise files are available.")
+                continue
+            noise_path = np.random.choice(noise_files)
+            noise_wav, noise_sr = torchaudio.load(noise_path)
+            noise_wav = prep_audio(noise_wav, noise_sr, working_sr)
+        elif noise_type == 'white':
+            noise_wav = torch.randn_like(ref_speech)
+        else:
+            raise ValueError(f"Unsupported noise type: {noise_type}")
+
+        scaled_noise = _adjust_snr(ref_speech, noise_wav, background_noise_db)
+        noisy_wav = (ref_speech + scaled_noise).to(device)
+
+        output_buffer, avg_latency, rtf = denoise_long_audio(enhancer, noisy_wav, working_sr)
         
-        if not mix_path.exists() or not s1_path.exists():
-            print(f"Skipping {s2_path.name}: mix/s1 files not found.")
-            continue
+        denoised_for_metrics = prep_audio(output_buffer.cpu(), working_sr, 16000)
+        ref_speech_for_metrics = prep_audio(ref_speech.cpu(), working_sr, 16000)
+        noisy_for_metrics = prep_audio(noisy_wav.cpu(), working_sr, 16000)
 
-        noisy_wav, sr = torchaudio.load(mix_path)
-        noisy_wav = prep_audio(noisy_wav, sr, working_sr).to(device)
+        denoised_aligned = align_volume(denoised_for_metrics, ref_speech_for_metrics)
 
-        output_buffer, avg_latency = denoise_long_audio(enhancer, noisy_wav, working_sr)
-
-        denoised_path = temp_out_dir / "denoised.wav"
-        torchaudio.save(denoised_path, prep_audio(output_buffer, working_sr, 16000).cpu(), 16000)
-
-        est_speech, _ = torchaudio.load(denoised_path)
-        ref_speech, _ = torchaudio.load(s2_path)
-        mix_audio, _ = torchaudio.load(mix_path)
-
-        # Align volume before calculating metrics
-        est_speech = align_volume(est_speech, ref_speech)
-
-        output_si_sdr = compute_si_sdr(est_speech, ref_speech)
-        input_si_sdr = compute_si_sdr(mix_audio, ref_speech)
-        sdr_improvement = output_si_sdr - input_si_sdr
-
-        # Calculate SII
-        residual_for_sii = est_speech - ref_speech
-        sii_score = calculate_sii_from_audio(ref_speech, residual_for_sii, 16000)
+        output_si_sdr = compute_si_sdr(denoised_aligned, ref_speech_for_metrics)
+        input_si_sdr = compute_si_sdr(noisy_for_metrics, ref_speech_for_metrics)
         
         results.append({
             "file": s2_path.name,
             "input_si_sdr": input_si_sdr,
             "output_si_sdr": output_si_sdr,
-            "sdr_improvement": sdr_improvement,
+            "sdr_improvement": output_si_sdr - input_si_sdr,
             "latency_ms": avg_latency * 1000,
-            "sii": sii_score
+            "sii": calculate_sii_from_audio(ref_speech_for_metrics, denoised_aligned - ref_speech_for_metrics, 16000),
+            "rtf": rtf
         })
         
         if save_outputs and perm_out_dir:
             sample_out_dir = perm_out_dir / s2_path.stem
-            sample_out_dir.mkdir(exist_ok=True)
-            shutil.copy(denoised_path, sample_out_dir / "denoised_speech.wav")
-            shutil.copy(mix_path, sample_out_dir / "original_mix.wav")
+            sample_out_dir.mkdir(parents=True, exist_ok=True)
+            torchaudio.save(sample_out_dir / "denoised_speech.wav", denoised_aligned.cpu(), 16000)
+            torchaudio.save(sample_out_dir / "noisy_input.wav", noisy_for_metrics.cpu(), 16000)
+            torchaudio.save(sample_out_dir / "added_noise.wav", prep_audio(scaled_noise, working_sr, 16000).cpu(), 16000)
             shutil.copy(s2_path, sample_out_dir / "ground_truth_speech.wav")
-            shutil.copy(s1_path, sample_out_dir / "ground_truth_noise.wav")
-
+            
+            plot_denoising_waveforms(
+                noisy_wav=noisy_for_metrics,
+                denoised_wav=denoised_aligned,
+                ground_truth_wav=ref_speech_for_metrics,
+                sr=16000,
+                output_path=sample_out_dir / "denoising_comparison.png"
+            )
+            
     shutil.rmtree(temp_out_dir)
 
     if not results:
@@ -167,20 +194,22 @@ def evaluate_denoising(librimix_root, num_samples=10, model_type="convtasnet", s
     avg_output_sdr = np.mean([r['output_si_sdr'] for r in results])
     avg_latency = np.mean([r['latency_ms'] for r in results])
     avg_sii = np.mean([r['sii'] for r in results])
+    avg_rtf = np.mean([r['rtf'] for r in results])
 
-    print("\n" + "="*110)
-    print("                 DENOISING RESULTS (SI-SDR, SII & LATENCY)                ")
-    print("="*110)
-    print(f"{ 'Filename':<25} | {'Input SI-SDR':<12} | {'Output SI-SDR':<13} | {'Improvement (dB)':<15} | {'Latency (ms)':<15} | {'SII':<5}")
-    print("-" * 110)
+    print("\n" + "="*125)
+    print("                 DENOISING RESULTS (SI-SDR, SII, LATENCY & RTF)                ")
+    print("="*125)
+    print(f"{ 'Filename':<25} | {'Input SI-SDR':<12} | {'Output SI-SDR':<13} | {'Improvement (dB)':<15} | {'Latency (ms)':<15} | {'SII':<5} | {'RTF':<5}")
+    print("-" * 125)
     for r in results:
-        print(f"{r['file'][:23]:<25} | {r['input_si_sdr']:<12.2f} | {r['output_si_sdr']:<13.2f} | {r['sdr_improvement']:<15.2f} | {r['latency_ms']:.2f} | {r['sii']:.3f}")
-    print("-" * 110)
+        print(f"{r['file'][:23]:<25} | {r['input_si_sdr']:<12.2f} | {r['output_si_sdr']:<13.2f} | {r['sdr_improvement']:<15.2f} | {r['latency_ms']:.2f} | {r['sii']:.3f} | {r['rtf']:.3f}")
+    print("-" * 125)
     print(f"AVG OUTPUT SI-SDR:      {avg_output_sdr:.2f} dB")
     print(f"AVG SI-SDR IMPROVEMENT: {avg_imp:.2f} dB   <-- Key Metric")
     print(f"AVERAGE LATENCY:        {avg_latency:.2f} ms")
     print(f"AVERAGE SII (CLARITY):  {avg_sii:.3f}")
-    print("="*110)
+    print(f"AVERAGE RTF:            {avg_rtf:.3f}")
+    print("="*125)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate Denoising models on LibriMix.")
@@ -188,7 +217,9 @@ if __name__ == "__main__":
     parser.add_argument("--samples", type=int, default=10, help="Number of files to evaluate")
     parser.add_argument("--model-type", type=str, choices=MODEL_OPTIONS, default="convtasnet", help="Which denoising model to use")
     parser.add_argument("--save-outputs", action='store_true', help="Save output audio files for inspection")
+    parser.add_argument("--background-noise-db", type=float, default=20.0, help="SNR for adding background noise. Default: 20dB.")
+    parser.add_argument("--noise-type", type=str, choices=['wham', 'white'], default='wham', help="Type of noise to add.")
     
     args = parser.parse_args()
     
-    evaluate_denoising(args.librimix_root, args.samples, args.model_type, args.save_outputs)
+    evaluate_denoising(args.librimix_root, args.samples, args.model_type, args.save_outputs, args.background_noise_db, args.noise_type)
