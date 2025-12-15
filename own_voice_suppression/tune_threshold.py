@@ -37,7 +37,7 @@ def objective(trial: optuna.Trial, args):
             smoothing_window=smoothing_window
         )
     elif args.metric_mode == 'sii':
-        metric_value = evaluate_separation(
+        metric_value, _, _ = evaluate_separation(
             librimix_root=args.librimix_root,
             num_samples=args.samples,
             model_type=args.model_type,

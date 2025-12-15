@@ -175,7 +175,7 @@ def evaluate_separation(
             input_for_processing += scaled_noise
             input_for_processing /= torch.max(torch.abs(input_for_processing)) + 1e-8
 
-        output_audios, logs, result_sr = run_separation_pipeline(
+        output_audios, logs, result_sr, avg_latency, rtf = run_separation_pipeline(
             mixed_audio=input_for_processing,
             orig_sr_mix=WAVLM_REQUIRED_SR,
             enrolment_audio=target_audio,
@@ -195,12 +195,19 @@ def evaluate_separation(
         else:
             estimated_background = estimated_background.cpu()
 
+        # Ensure all tensors have the same length before metric calculation
+        min_len = min(estimated_background.shape[-1], background_audio.shape[-1])
+        estimated_background = estimated_background[..., :min_len]
+        background_audio = background_audio[..., :min_len]
+        input_for_processing = input_for_processing.cpu()[..., :min_len]
+        target_audio = target_audio[..., :min_len]
+
         estimated_background = align_volume(estimated_background, background_audio)
 
         sdr = compute_si_sdr(estimated_background, background_audio)
-        input_sdr = compute_si_sdr(input_for_processing.cpu(), background_audio)
+        input_sdr = compute_si_sdr(input_for_processing, background_audio)
         sdr_improvement = sdr - input_sdr
-        suppression_db = compute_suppression_db(input_for_processing.cpu(), estimated_background, target_audio)
+        suppression_db = compute_suppression_db(input_for_processing, estimated_background, target_audio)
         
         residual_for_sii = estimated_background - background_audio
         sii = calculate_sii_from_audio(background_audio, residual_for_sii, WAVLM_REQUIRED_SR)
@@ -209,7 +216,9 @@ def evaluate_separation(
             "file": f"mix_{i+1}",
             "sdr_improvement": sdr_improvement,
             "suppression_db": suppression_db,
-            "sii": sii
+            "sii": sii,
+            "latency_ms": avg_latency * 1000,
+            "rtf": rtf
         })
 
         if save_outputs:
@@ -232,29 +241,33 @@ def evaluate_separation(
 
     if not results:
         print("No results generated.")
-        return 0
+        return 0, 0, 0
 
     avg_imp = np.mean([r['sdr_improvement'] for r in results])
     avg_supp = np.mean([r['suppression_db'] for r in results])
     avg_sii = np.mean([r['sii'] for r in results])
+    avg_latency = np.mean([r['latency_ms'] for r in results])
+    avg_rtf = np.mean([r['rtf'] for r in results])
 
-    print("\n" + "="*51)
-    print("      SPEAKER SUPPRESSION EVALUATION RESULTS      ")
-    print("="*51)
-    print(f"{ 'Sample':<10} | { 'SDR Imp (dB)':<15} | { 'Supp (dB)':<12} | { 'SII':<5}")
-    print("-" * 51)
+    print("\n" + "="*85)
+    print("                 SPEAKER SUPPRESSION EVALUATION RESULTS                ")
+    print("="*85)
+    print(f"{ 'Sample':<10} | { 'SDR Imp (dB)':<15} | { 'Supp (dB)':<12} | { 'SII':<5} | { 'Latency (ms)':<15} | {'RTF':<5}")
+    print("-" * 85)
     for r in results:
-        print(f"{r['file']:<10} | {r['sdr_improvement']:<15.2f} | {r['suppression_db']:<12.2f} | {r['sii']:.3f}")
-    print("-" * 51)
+        print(f"{r['file']:<10} | {r['sdr_improvement']:<15.2f} | {r['suppression_db']:<12.2f} | {r['sii']:.3f} | {r['latency_ms']:.2f} | {r['rtf']:.3f}")
+    print("-" * 85)
     print(f"AVERAGE SI-SDR IMPROVEMENT: {avg_imp:.2f} dB")
     print(f"AVERAGE TARGET SUPPRESSION: {avg_supp:.2f} dB")
     print(f"AVERAGE SII (CLARITY):    {avg_sii:.3f}")
-    print("="*51)
+    print(f"AVERAGE LATENCY:          {avg_latency:.2f} ms")
+    print(f"AVERAGE RTF:              {avg_rtf:.3f}")
+    print("="*85)
     
     if save_outputs:
         print("\nOutputs saved to:", output_dir)
 
-    return avg_sii
+    return avg_sii, avg_latency, avg_rtf
 
 
 if __name__ == "__main__":
@@ -272,7 +285,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if not args.output_dir:
-        args.output_dir = Path("own_voice_suppression/outputs/validation/separation") / f"{args.model_type}_thresh_{args.detection_threshold}"
+        args.output_dir = Path("own_voice_suppression/outputs/validation/separation") / f"{args.model_type}_thresh_{args.detection_threshold}_samples_{args.samples}"
 
     evaluate_separation(
         librimix_root=args.librimix_root,

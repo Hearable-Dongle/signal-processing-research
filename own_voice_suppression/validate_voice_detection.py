@@ -13,7 +13,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 from general_utils.constants import LIBRIMIX_PATH
 
 from own_voice_suppression.voice_detection import main as run_suppression
-from own_voice_suppression.source_separation import prep_audio
+from own_voice_suppression.source_separation import prep_audio, WAVLM_REQUIRED_SR
 
 def plot_vad_results(confidence_logs, y_true, total_len_samples, sr, output_path, threshold):
     import matplotlib.pyplot as plt
@@ -240,9 +240,9 @@ def evaluate_detection_vad(librimix_root, num_samples=10, model_type="wavlm-larg
         
     s1_files = sorted(s1_files)[:num_samples]
     
-    metrics = {"precision": [], "recall": [], "f1": []}
+    metrics = {"precision": [], "recall": [], "f1": [], "accuracy": []}
     
-    base_output_dir = Path("own_voice_suppression/outputs/validation")
+    base_output_dir = Path("own_voice_suppression/outputs/validation_vad")
     if save_outputs:
         perm_out_dir = base_output_dir / f"{model_type}-{num_samples}-surround"
         perm_out_dir.mkdir(parents=True, exist_ok=True)
@@ -348,10 +348,12 @@ def evaluate_detection_vad(librimix_root, num_samples=10, model_type="wavlm-larg
         p = precision_score(y_true, y_pred, zero_division=0)
         r = recall_score(y_true, y_pred, zero_division=0)
         f = f1_score(y_true, y_pred, zero_division=0)
+        a = (y_true == y_pred).sum() / len(y_true)
         
         metrics["precision"].append(p)
         metrics["recall"].append(r)
         metrics["f1"].append(f)
+        metrics["accuracy"].append(a)
 
         if save_outputs and perm_out_dir:
             sample_out_dir = perm_out_dir / s1_path.stem
@@ -391,7 +393,21 @@ def evaluate_detection_vad(librimix_root, num_samples=10, model_type="wavlm-larg
     print(f"RECALL (Did we catch the user?): {np.mean(metrics['recall'])*100:.1f}%")
     print(f"PRECISION (Did we avoid false cuts?): {np.mean(metrics['precision'])*100:.1f}%")
     print(f"F1 SCORE: {avg_f1*100:.1f}%")
+    print(f"ACCURACY: {np.mean(metrics['accuracy'])*100:.1f}%\n")
     print("="*40)
+    
+    if save_outputs and perm_out_dir:
+        metrics_path = perm_out_dir / "detection_metrics.txt"
+        with open(metrics_path, 'w') as f:
+            f.write("DETECTION PERFORMANCE METRICS\n")
+            f.write("="*40 + "\n")
+            f.write(f"RECALL (Did we catch the user?): {np.mean(metrics['recall'])*100:.1f}%\n")
+            f.write(f"PRECISION (Did we avoid false cuts?): {np.mean(metrics['precision'])*100:.1f}%\n")
+            f.write(f"F1 SCORE: {avg_f1*100:.1f}%\n")
+            f.write(f"ACCURACY: {np.mean(metrics['accuracy'])*100:.1f}%\n")
+            f.write("="*40 + "\n")
+        print(f"Saved detection metrics to {metrics_path}")
+    
     return avg_f1
 
 

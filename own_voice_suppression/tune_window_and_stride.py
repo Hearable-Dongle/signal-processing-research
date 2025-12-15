@@ -69,7 +69,7 @@ def tune_parameters(
         if param_to_tune == 'stride_sec' and val > fixed_param_val:
             continue
 
-        avg_sii = evaluate_separation(
+        avg_sii, _, _ = evaluate_separation(
             librimix_root=librimix_root,
             num_samples=samples,
             model_type=model_type,
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     tune_mode = 'window' if args.tune_window else 'stride'
 
     if not args.output_dir:
-        args.output_dir = Path(f"own_voice_suppression/outputs/tuning_results/{args.model_type}_thresh_{args.detection_threshold}_smooth_win_{args.smoothing_window}/{tune_mode}_tuning")
+        args.output_dir = Path(f"own_voice_suppression/outputs/tuning_results/{args.model_type}_thresh_{args.detection_threshold}_smooth_win_{args.smoothing_window}_samples_{args.samples}/{tune_mode}_tuning")
 
     tune_parameters(
         tune_mode=tune_mode,
