@@ -3,11 +3,10 @@
 # This script runs the validation process for a predefined list of non-AI denoising models.
 # It captures the output of the validation script, extracts key performance metrics 
 # (Overall SII and Average RTF), and presents them in a summary table.
+# NOTE: (this was vibe-coded) The end output doesn't really work but just check the logs
 
-# List of non-AI models to validate
 MODELS=("spectral-gating" "spectral-subtraction" "wiener" "wavelet" "high-pass" "notch")
 
-# Directory to store validation logs
 LOG_DIR="validation_logs"
 mkdir -p "$LOG_DIR"
 
@@ -19,7 +18,6 @@ echo "Starting validation for non-AI models..."
 echo "Logs will be saved in the '$LOG_DIR' directory."
 echo ""
 
-# Loop through each model and run the validation script
 for model in "${MODELS[@]}"; do
     echo "----------------------------------------"
     echo "=> Running validation for: $model"
@@ -27,22 +25,18 @@ for model in "${MODELS[@]}"; do
     
     log_file="$LOG_DIR/${model}_validation.log"
     
-    # Execute the validation script and redirect stdout/stderr to a log file
     python -m denoise.validate_denoising \
         --samples 500 \
         --model-type "$model" \
         --save-outputs \
-        --noise-type wham > "$log_file" 2>&1
+        --noise-type wham > "$log_file" 2>&1 # Check this log file for details
 
-    # Check the exit code of the python script
     if [ $? -eq 0 ]; then
         echo "Validation for '$model' completed successfully."
         
-        # Parse the log file to find SII and RTF metrics
         sii=$(grep "Overall SII:" "$log_file" | awk '{print $NF}')
         rtf=$(grep "Average RTF:" "$log_file" | awk '{print $NF}')
         
-        # Store the metrics in the associative arrays
         RESULTS_SII["$model"]=${sii:-"Not Found"}
         RESULTS_RTF["$model"]=${rtf:-"Not Found"}
     else
@@ -53,7 +47,7 @@ for model in "${MODELS[@]}"; do
     echo ""
 done
 
-# Print the summary table of all results
+# TODO: get this part working
 echo "========================================================"
 echo "               Validation Summary"
 echo "========================================================"
