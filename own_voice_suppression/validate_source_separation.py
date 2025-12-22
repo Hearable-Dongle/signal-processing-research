@@ -9,8 +9,6 @@ import torch
 import torchaudio
 from tqdm import tqdm
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
 from general_utils.constants import LIBRIMIX_PATH
 from own_voice_suppression.plot_utils import plot_target_presence, plot_waveform_comparison
 from own_voice_suppression.source_separation import (

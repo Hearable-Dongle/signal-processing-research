@@ -9,14 +9,7 @@ import os
 from pathlib import Path
 import sys
 
-# Add project root to allow sibling imports from 'own_voice_suppression'
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-try:
-    from fvcore.nn import FlopCountAnalysis
-except ImportError:
-    print("fvcore not found. Please install it to run this script: pip install fvcore")
-    sys.exit(1)
+from fvcore.nn import FlopCountAnalysis
 
 from own_voice_suppression.source_separation import (
     AsteroidConvTasNetWrapper,
@@ -77,27 +70,19 @@ def analyze_model(model_type: str):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running analysis on {device}")
 
-    # 1. Load Model and Dummy Input
-    try:
-        model, dummy_input = get_model_and_input(model_type, device)
-        model.eval()
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        return
+    model, dummy_input = get_model_and_input(model_type, device)
+    model.eval()
 
-    # 2. Calculate Parameters
     # Use state_dict to count parameters, as model.parameters() can be unreliable
     # for complex models where requires_grad might not be set as expected in eval mode.
     state_dict = model.state_dict()
     num_params = sum(p.numel() for p in state_dict.values())
 
-    # 3. Calculate Model Size on Disk
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
         torch.save(model.state_dict(), tmp.name)
         model_size_mb = os.path.getsize(tmp.name) / (1024 * 1024)
     os.remove(tmp.name)
 
-    # 4. Calculate TFLOPs
     tflops = "N/A"
     try:
         flops_analyzer = FlopCountAnalysis(model, dummy_input)
@@ -117,7 +102,6 @@ def analyze_model(model_type: str):
         print(f"Could not calculate FLOPS automatically: {e}")
         print("FLOPS calculation will be skipped.")
 
-    # 5. Print Results
     print("\n" + "="*40)
     print(f"Model Analysis Report: '{model_type}'")
     print("="*40)
