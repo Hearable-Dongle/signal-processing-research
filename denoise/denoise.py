@@ -5,6 +5,9 @@ import torch
 import torchaudio
 import matplotlib.pyplot as plt
 from typing import Literal
+import numpy as np
+from scipy import signal
+import pywt
 
 from asteroid.models import ConvTasNet
 from speechbrain.inference.enhancement import SpectralMaskEnhancement
@@ -18,8 +21,8 @@ from own_voice_suppression.audio_utils import prep_audio
 WINDOW_SEC = 2.0  
 STRIDE_SEC = 0.5
 
-MODEL_OPTIONS = ["convtasnet", "metricgan", "deepfilternet", "spectral-gating"]
-ModelOption = Literal["convtasnet", "metricgan", "deepfilternet", "spectral-gating"]
+MODEL_OPTIONS = ["convtasnet", "metricgan", "deepfilternet", "spectral-gating", "spectral-subtraction", "wiener", "wavelet", "high-pass", "notch"]
+ModelOption = Literal["convtasnet", "metricgan", "deepfilternet", "spectral-gating", "spectral-subtraction", "wiener", "wavelet", "high-pass", "notch"]
 
 class ConvTasNetWrapper:
     """ 
@@ -112,6 +115,86 @@ class SpectralGatingWrapper:
         
         return torch.from_numpy(reduced_np).unsqueeze(0).to(self.device)
 
+class WienerFilterWrapper:
+    """ Wraps scipy.signal.wiener for denoising. """
+    NATIVE_SR = 16000 # Not strictly necessary, but good for consistency
+
+    def __init__(self, device):
+        self.device = device
+        print("[Model] Initializing Wiener Filter...")
+
+    def process(self, noisy_chunk: torch.Tensor) -> torch.Tensor:
+        noisy_np = noisy_chunk.squeeze(0).cpu().numpy()
+        denoised_np = signal.wiener(noisy_np, mysize=5)
+        return torch.from_numpy(denoised_np).unsqueeze(0).to(self.device)
+
+class WaveletDenoisingWrapper:
+    """ Denoising using Wavelet Transform. """
+    NATIVE_SR = 16000
+
+    def __init__(self, device):
+        self.device = device
+        print("[Model] Initializing Wavelet Denoising...")
+
+    def process(self, noisy_chunk: torch.Tensor) -> torch.Tensor:
+        noisy_np = noisy_chunk.squeeze(0).cpu().numpy()
+        
+        # Decompose to get wavelet coefficients
+        coeffs = pywt.wavedec(noisy_np, 'db8', level=6)
+        
+        # Calculate threshold
+        sigma = np.median(np.abs(coeffs[-1])) / 0.6745
+        threshold = sigma * np.sqrt(2 * np.log(len(noisy_np)))
+        
+        # Threshold coefficients
+        coeffs_thresh = [pywt.threshold(c, threshold, mode='soft') for c in coeffs]
+        
+        # Reconstruct signal
+        denoised_np = pywt.waverec(coeffs_thresh, 'db8')
+        
+        # Ensure same length
+        if len(denoised_np) > len(noisy_np):
+            denoised_np = denoised_np[:len(noisy_np)]
+        elif len(denoised_np) < len(noisy_np):
+            denoised_np = np.pad(denoised_np, (0, len(noisy_np) - len(denoised_np)), 'constant')
+
+        return torch.from_numpy(denoised_np).unsqueeze(0).to(self.device)
+
+class HighPassFilterWrapper:
+    """ Denoising using a High-Pass Filter. """
+    NATIVE_SR = 16000
+    CUTOFF_FREQ = 80 # Hz
+
+    def __init__(self, device):
+        self.device = device
+        print(f"[Model] Initializing High-Pass Filter (cutoff: {self.CUTOFF_FREQ} Hz)...")
+        # Design filter
+        nyquist = 0.5 * self.NATIVE_SR
+        norm_cutoff = self.CUTOFF_FREQ / nyquist
+        self.b, self.a = signal.butter(5, norm_cutoff, btype='high', analog=False)
+
+    def process(self, noisy_chunk: torch.Tensor) -> torch.Tensor:
+        noisy_np = noisy_chunk.squeeze(0).cpu().numpy()
+        denoised_np = signal.filtfilt(self.b, self.a, noisy_np)
+        return torch.from_numpy(denoised_np.copy()).unsqueeze(0).to(self.device)
+
+class NotchFilterWrapper:
+    """ Denoising using a Notch Filter. """
+    NATIVE_SR = 16000
+    NOTCH_FREQ = 60 # Hz
+    QUALITY_FACTOR = 30.0
+
+    def __init__(self, device):
+        self.device = device
+        print(f"[Model] Initializing Notch Filter (freq: {self.NOTCH_FREQ} Hz)...")
+        # Design filter
+        self.b, self.a = signal.iirnotch(self.NOTCH_FREQ, self.QUALITY_FACTOR, self.NATIVE_SR)
+
+    def process(self, noisy_chunk: torch.Tensor) -> torch.Tensor:
+        noisy_np = noisy_chunk.squeeze(0).cpu().numpy()
+        denoised_np = signal.lfilter(self.b, self.a, noisy_np)
+        return torch.from_numpy(denoised_np.copy()).unsqueeze(0).to(self.device)
+
 
 def load_enhancer(model_type: ModelOption, device):
     """Loads the specified enhancement model."""
@@ -122,8 +205,18 @@ def load_enhancer(model_type: ModelOption, device):
         enhancer = MetricGANWrapper(device)
     elif model_type == "deepfilternet":
         enhancer = DeepFilterNetWrapper(device)
-    elif model_type == "spectral-gating":
+    elif model_type == "spectral-gating" or model_type == "spectral-subtraction":
+        if model_type == "spectral-subtraction":
+            print("[Info] 'spectral-subtraction' is an alias for 'spectral-gating'.")
         enhancer = SpectralGatingWrapper(device)
+    elif model_type == "wiener":
+        enhancer = WienerFilterWrapper(device)
+    elif model_type == "wavelet":
+        enhancer = WaveletDenoisingWrapper(device)
+    elif model_type == "high-pass":
+        enhancer = HighPassFilterWrapper(device)
+    elif model_type == "notch":
+        enhancer = NotchFilterWrapper(device)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     return enhancer

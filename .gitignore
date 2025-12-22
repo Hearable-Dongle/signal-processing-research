@@ -4,6 +4,7 @@ tiger-env/
 .DS_Store/
 .vscode/
 *-env/
+outputs/
 
 
 
