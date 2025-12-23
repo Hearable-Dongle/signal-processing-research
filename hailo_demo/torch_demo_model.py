@@ -33,9 +33,9 @@ torch.onnx.export(
     do_constant_folding=True,
     input_names=['input'],
     output_names=['output'],
-    # KEY FIX: Force the legacy exporter to prevent automatic upgrade to 18
+    # Force the legacy exporter to prevent automatic upgrade to 18
     operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-    # KEY FIX: Explicitly disable the new dynamo-based exporter
+    # Explicitly disable the new dynamo-based exporter
     dynamo=False 
 )
 
