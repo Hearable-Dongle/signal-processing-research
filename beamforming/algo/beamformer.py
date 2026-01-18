@@ -4,13 +4,17 @@ from numpy.typing import NDArray
 
 def wng_mvdr_steepest(
     Rnn: NDArray[np.float64],
-    steering_vec: NDArray[np.complex128],
+    steering_vecs: list[NDArray[np.complex128]],
     gamma: float,
     mu: float,
     iteration_count: int,
 ) -> tuple[NDArray[np.complex128], NDArray[np.float64]]:
+    # TODO: Update to handle multiple speakers
+    # Create constraint matrix from steering vectors
+    C = np.hstack(steering_vecs)
+
     # Create distortionless beamformer weights in steering vector direction
-    weight_vec = steering_vec / (steering_vec.conj().T @ steering_vec)
+    weight_vec = C @ np.linalg.pinv(C.conj().T @ C) @ np.ones((len(steering_vecs), 1))
 
     # Initialize list for storing noise power history
     power_history: list[np.float64] = list()
@@ -29,9 +33,8 @@ def wng_mvdr_steepest(
         # Update gradient
         w_tilde = weight_vec - mu * grad
 
-        # Enforce distortionless constraint
-        alpha = (steering_vec.conj().T @ w_tilde - 1) / (steering_vec.conj().T @ steering_vec)
-        w1 = w_tilde - steering_vec * alpha
+        # Enforce distortionless constraint for all steering vectors
+        w1 = w_tilde - C @ np.linalg.pinv(C.conj().T @ C) @ (C.conj().T @ w_tilde - np.ones((len(steering_vecs), 1)))
 
         # Enforce WNG constraint
         norm2 = np.real(w1.conj().T @ w1)
@@ -48,7 +51,7 @@ def wng_mvdr_steepest(
 
 def wng_mvdr_newton(
     Rnn: NDArray[np.float64],
-    steering_vec: NDArray[np.complex128],
+    steering_vecs: list[NDArray[np.complex128]],
     gamma: float,
     mu: float,
     iteration_count: int,
@@ -64,8 +67,8 @@ def wng_mvdr_newton(
     -----------
     Rnn : NDArray[np.float64]
         Noise covariance matrix (M x M)
-    steering_vec : NDArray[np.complex128]
-        Steering vector in target direction (M x 1)
+    steering_vecs : list[NDArray[np.complex128]]
+        Steering vectors in target directions (M x 1)
     gamma : float
         WNG constraint parameter (gamma = 10^(gamma_dB/10))
     mu : float
@@ -78,9 +81,12 @@ def wng_mvdr_newton(
     NDArray[np.complex128]
         Optimized beamformer weight vector (M x 1)
     """
+    # TODO: Update to handle multiple speakers
+    # Create constraint matrix from steering vectors
+    C = np.hstack(steering_vecs)
 
     # Create distortionless beamformer weights in steering vector direction
-    weight_vec = steering_vec / (steering_vec.conj().T @ steering_vec)
+    weight_vec = C @ np.linalg.pinv(C.conj().T @ C) @ np.ones((len(steering_vecs), 1))
 
     # Initialize list for storing noise power history
     power_history: list[np.float64] = list()
@@ -106,10 +112,8 @@ def wng_mvdr_newton(
         # Damped Newton update (mu acts as step size)
         w_tilde = weight_vec - mu * delta
 
-        # Enforce distortionless constraint (19)
-        # Equation (19) = 1  to satisfy integral (22-23)
-        alpha = (steering_vec.conj().T @ w_tilde - 1) / (steering_vec.conj().T @ steering_vec)
-        w1 = w_tilde - steering_vec * alpha
+        # Enforce distortionless constraint for all steering vectors
+        w1 = w_tilde - C @ np.linalg.pinv(C.conj().T @ C) @ (C.conj().T @ w_tilde - np.ones((len(steering_vecs), 1)))
 
         # Enforce WNG constraint
         norm2 = np.real(w1.conj().T @ w1)
@@ -121,6 +125,48 @@ def wng_mvdr_newton(
 
     # Return optimzed weight vector and power history
     return weight_vec, np.asarray(power_history)
+
+
+def compute_steering_vector(
+    mic_pos: NDArray[np.float64],
+    mic_loc: NDArray[np.float64],
+    fvec: NDArray[np.float64],
+    signal_loc: NDArray[np.float64],
+    sound_speed: float,
+) -> NDArray[np.complex128]:
+    # Extract dimensional information
+    mic_count = mic_pos.shape[1]
+    freq_bin_count = fvec.size
+
+    # Initialize steering vector list
+    steering_vecs = []
+
+    # Iterate over signal sources
+    for source_loc in signal_loc:
+        # Compute distance between microphones and signal source
+        dist = np.linalg.norm(mic_pos.T - (source_loc - mic_loc), axis=1)
+
+        # Determine time delays per microphone from signal source
+        tau = dist / sound_speed
+
+        # Initialize steering matrix
+        steering_vec = np.zeros((freq_bin_count, mic_count), dtype=complex)
+
+        # Verify frequency vector is defined
+        if fvec.size == 0:
+            msg = "No STFT was computed"
+            raise ValueError(msg)
+
+        # Iterate over frequency vectors per microphone
+        for freq_idx, freq in enumerate(fvec):
+            # Determine phase delays
+            steering_vec[freq_idx, :] = np.exp(-1j * 2 * np.pi * freq * tau)
+
+        # Add steering vector to list
+        steering_vecs.append(steering_vec)
+
+    # Return the steering vectors
+    return steering_vecs
 
 
 def apply_beamformer_stft(
