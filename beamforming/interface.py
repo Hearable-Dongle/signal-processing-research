@@ -69,6 +69,10 @@ def main():
         if fs != config.fs:
             raise ValueError("Room and audio source sampling rates do not match")
 
+        # Normalize audio to prevent clipping and ensure consistent volume
+        if np.any(source_audio):
+            source_audio /= np.max(np.abs(source_audio))
+
         room.add_source(source.loc, signal=source_audio)  # type: ignore[reportUnknownMemberType]
 
     # Visualize microphone and room layouts
