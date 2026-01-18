@@ -187,7 +187,7 @@ def main():
     # Define optimization parameters
     gamma_dB = 15
     gamma = 10 ** (gamma_dB / 10)
-    mu = 0.01
+    mu = 0.01 / np.trace(Rnn.real)
     iteration_count = 20
 
     # Initialize list for storing noise power history
@@ -291,39 +291,44 @@ def main():
         audio_dir / "mic_newton_filtered_audio.wav", time_newton, config.fs
     )  # type: ignore[reportUnknownMemberType]
 
-    for i, signal_source in enumerate(signal_sources):
-        config.log.info(f"Using signal source {i} as reference audio")
-        ref_audio, _ = librosa.load(signal_source.input, sr=config.fs)
+    config.log.info("Using combined signal sources as reference audio")
+    ref_audio = np.zeros(min_sample_count)
+    for signal_source in signal_sources:
+        audio, _ = librosa.load(signal_source.input, sr=config.fs)
 
-        if len(ref_audio) > min_sample_count:
-            ref_audio = ref_audio[:min_sample_count]
+        if len(audio) > min_sample_count:
+            audio = audio[:min_sample_count]
+        else:
+            audio = np.pad(audio, (0, min_sample_count - len(audio)))
 
-        # Compare optimization methods with RMSE and MSE
-        rmse_raw, mse_raw = calc_rmse(ref_audio, np.mean(mic_audio, axis=1))
-        rmse_steepest, mse_steepest = calc_rmse(ref_audio, time_steepest)
-        rmse_newton, mse_newton = calc_rmse(ref_audio, time_newton)
+        ref_audio += audio
 
-        config.log.info(f"Raw Audio: {rmse_raw:.4f} RMSE, {mse_raw:.4f} MSE")
-        config.log.info(f"Steepest Descent: {rmse_steepest:.4f} RMSE, {mse_steepest:.4f} MSE")
-        config.log.info(f"Newton: {rmse_newton:.4f} RMSE, {mse_newton:.4f} MSE")
+    # Compare optimization methods with RMSE and MSE
+    rmse_raw, mse_raw = calc_rmse(ref_audio, np.mean(mic_audio, axis=1))
+    rmse_steepest, mse_steepest = calc_rmse(ref_audio, time_steepest)
+    rmse_newton, mse_newton = calc_rmse(ref_audio, time_newton)
 
-        # Compare optimization methods with SNR
-        snr_raw = calc_snr(ref_audio, np.mean(mic_audio, axis=1))
-        snr_steepest = calc_snr(ref_audio, time_steepest)
-        snr_newton = calc_snr(ref_audio, time_newton)
+    config.log.info(f"Raw Audio: {rmse_raw:.4f} RMSE, {mse_raw:.4f} MSE")
+    config.log.info(f"Steepest Descent: {rmse_steepest:.4f} RMSE, {mse_steepest:.4f} MSE")
+    config.log.info(f"Newton: {rmse_newton:.4f} RMSE, {mse_newton:.4f} MSE")
 
-        config.log.info(f"Raw Audio: {snr_raw:.4f} dB SNR")
-        config.log.info(f"Steepest Descent: {snr_steepest:.4f} dB SNR")
-        config.log.info(f"Newton: {snr_newton:.4f} dB SNR")
+    # Compare optimization methods with SNR
+    snr_raw = calc_snr(ref_audio, np.mean(mic_audio, axis=1))
+    snr_steepest = calc_snr(ref_audio, time_steepest)
+    snr_newton = calc_snr(ref_audio, time_newton)
 
-        # Compare optimization methods with SI SDR
-        si_sdr_raw = calc_si_sdr(ref_audio, np.mean(mic_audio, axis=1))
-        si_sdr_steepest = calc_si_sdr(ref_audio, time_steepest)
-        si_sdr_newton = calc_si_sdr(ref_audio, time_newton)
+    config.log.info(f"Raw Audio: {snr_raw:.4f} dB SNR")
+    config.log.info(f"Steepest Descent: {snr_steepest:.4f} dB SNR")
+    config.log.info(f"Newton: {snr_newton:.4f} dB SNR")
 
-        config.log.info(f"Raw Audio: {si_sdr_raw:.4f} dB SI SDR")
-        config.log.info(f"Steepest Descent: {si_sdr_steepest:.4f} dB SI SDR")
-        config.log.info(f"Newton: {si_sdr_newton:.4f} dB SI SDR")
+    # Compare optimization methods with SI SDR
+    si_sdr_raw = calc_si_sdr(ref_audio, np.mean(mic_audio, axis=1))
+    si_sdr_steepest = calc_si_sdr(ref_audio, time_steepest)
+    si_sdr_newton = calc_si_sdr(ref_audio, time_newton)
+
+    config.log.info(f"Raw Audio: {si_sdr_raw:.4f} dB SI SDR")
+    config.log.info(f"Steepest Descent: {si_sdr_steepest:.4f} dB SI SDR")
+    config.log.info(f"Newton: {si_sdr_newton:.4f} dB SI SDR")
 
     config.log.info(f"Beamforming simulation completed - output saved to {config.output_dir}")
 
