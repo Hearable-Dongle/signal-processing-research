@@ -20,7 +20,7 @@ def calc_snr(ref: NDArray[Any], out: NDArray[Any]) -> float:
     noise = ref - out
 
     # Compute and return signal to noise ratio in dB
-    return 10 * np.log10(np.sum(ref**2) / np.sum(noise**2))
+    return 10 * np.log10(np.sum(ref**2) / (np.sum(noise**2) + 1e-8))
 
 
 def calc_si_sdr(ref: NDArray[Any], out: NDArray[Any]) -> float:
@@ -29,7 +29,7 @@ def calc_si_sdr(ref: NDArray[Any], out: NDArray[Any]) -> float:
     out_ac = out - np.mean(out)
 
     # Project AC output audio onto AC reference audio to compute optimal scaling factor
-    alpha = np.dot(out_ac, ref_ac) / np.dot(ref_ac, ref_ac)
+    alpha = np.dot(out_ac, ref_ac) / (np.dot(ref_ac, ref_ac) + 1e-8)
 
     # Apply scaling factor to AC reference audio
     s_target = alpha * ref_ac
@@ -38,4 +38,4 @@ def calc_si_sdr(ref: NDArray[Any], out: NDArray[Any]) -> float:
     out_noise = out_ac - s_target
 
     # Compute and return scale invariant signal to distortion ratio in dB
-    return 10 * np.log10(np.sum(s_target**2) / np.sum(out_noise**2))
+    return 10 * np.log10(np.sum(s_target**2) / (np.sum(out_noise**2) + 1e-8))

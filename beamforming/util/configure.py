@@ -1,3 +1,4 @@
+import shutil
 import atexit
 import dataclasses
 import json
@@ -21,7 +22,7 @@ class Audio_Sources:
     classification: str
 
     def resolve_input(self, project_dir: Path) -> None:
-        self.input = project_dir / "input" / "audio" / self.input
+        self.input = project_dir / "input" / self.input
 
 
 class Config:
@@ -34,11 +35,27 @@ class Config:
         style="{",
     )
 
-    def __init__(self) -> None:
-        with Path(self.__project_dir, "config", "config.json").open("r") as fp:
+    def __init__(
+        self,
+        config_path: Path = Path(__project_dir, "config", "config.json"),
+        output_path: Path | None = None,
+    ) -> None:
+        with config_path.open("r") as fp:
             self.__project_config = json.load(fp)
 
         self.__log = logging.getLogger(self.__project_dir.stem)
+
+        if output_path:
+            self.__output_path = output_path
+        else:
+            self.__output_path = (
+                self.__project_dir / self.__project_config["output_dir"]
+            )
+
+        if not self.__output_path.exists():
+            self.__output_path.mkdir(parents=True)
+
+        shutil.copy(config_path, self.__output_path)
 
         self.__log.setLevel(logging.INFO)
 
@@ -87,12 +104,14 @@ class Config:
 
     @property
     def output_dir(self) -> Path:
-        return Path(self.__project_dir, self.__project_config["output_dir"]).resolve()
+        return self.__output_path
 
     @property
     def checkpoint_file(self) -> Path | None:
         if self.__project_config["checkpoint_file"]:
-            checkpoint_file_path = Path(self.__project_config["checkpoint_file"]).resolve()
+            checkpoint_file_path = Path(
+                self.__project_config["checkpoint_file"]
+            ).resolve()
         else:
             checkpoint_file_path = None
 
