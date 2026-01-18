@@ -4,7 +4,12 @@ import soundfile as sf
 from numpy.typing import NDArray
 from scipy.signal import istft, stft  # type: ignore[reportUnknownMemberType]
 
-from algo.beamformer import apply_beamformer_stft, wng_mvdr_newton, wng_mvdr_steepest
+from algo.beamformer import (
+    apply_beamformer_stft,
+    compute_steering_vector,
+    wng_mvdr_newton,
+    wng_mvdr_steepest,
+)
 from algo.noise_estimation import estimate_Rnn, reduce_Rnn, regularize_Rnn
 from util.compare import calc_rmse, calc_si_sdr, calc_snr
 from util.configure import Config
@@ -33,15 +38,14 @@ room.add_microphone_array(mic)  # type: ignore[reportUnknownMemberType]
 signal_sources = [source for source in config.sources if source.classification == "signal"]
 
 # Verify only one signal is defined
-if len(signal_sources) != 1:
+if not signal_sources:
     # Print error message
-    msg = f"Expected only 1 signal source instead of {len(signal_sources)}"
+    msg = "No signal sources are defined"
     raise ValueError(msg)
 
-else:
-    # Extract signal location and reference audio
-    signal_loc = signal_sources[0].loc
-    ref_audio, _ = librosa.load(signal_sources[0].input, sr=config.fs)
+# Extract signal location and reference audio
+signal_loc = np.array([source.loc for source in signal_sources])
+ref_audio, _ = librosa.load(signal_sources[0].input, sr=config.fs)
 
 # Define minimum audio source duration, with one minute maximum
 min_sample_count = config.fs * 60
@@ -157,24 +161,15 @@ stft_output = np.stack(stft_list, axis=-1)
 # Extract dimensional information
 freq_bin_count, time_frame_count, _ = stft_output.shape
 
-# Compute distance between microphones and signal source
-dist = np.linalg.norm(mic_pos.T - (signal_loc - config.mic_loc), axis=1)
 
-# Determine time delays per microphone from signal source
-tau = dist / config.sound_speed
-
-# Initialize steering matrix
-steering_vec = np.zeros((freq_bin_count, config.mic_count), dtype=complex)
-
-# Verify frequency vector is defined
-if fvec.size == 0:  # type: ignore[reportUnknownMemberType]
-    msg = "No STFT was computed"
-    raise ValueError(msg)
-
-# Iterate over frequency vectors per microphone
-for freq_idx, freq in enumerate(fvec):  # type: ignore[reportUnknownMemberType]
-    # Determine phase delays
-    steering_vec[freq_idx, :] = np.exp(-1j * 2 * np.pi * freq * tau)
+# Compute steering vector, take first entry for now
+steering_vecs = compute_steering_vector(
+    mic_pos,
+    config.mic_loc,
+    fvec,
+    signal_loc,
+    config.sound_speed,
+)
 
 # Define optimization parameters
 gamma_dB = 15
@@ -189,8 +184,10 @@ power_history_newton: list[NDArray[np.float64]] = list()
 # Compute WNG-MVDR weights for each frequency bin with steepest descent method
 weights_steepest = np.zeros((freq_bin_count, config.mic_count), dtype=complex)
 for kf in range(freq_bin_count):
-    a = steering_vec[kf, :].reshape(-1, 1)
-    freq_bin_weights, freq_bin_power_history = wng_mvdr_steepest(Rnn, a, gamma, mu, iteration_count)
+    a_vecs = [steering_vec[kf, :].reshape(-1, 1) for steering_vec in steering_vecs]
+    freq_bin_weights, freq_bin_power_history = wng_mvdr_steepest(
+        Rnn, a_vecs, gamma, mu, iteration_count
+    )
     weights_steepest[kf, :] = freq_bin_weights[:, 0]
 
     # Append power history
@@ -199,8 +196,10 @@ for kf in range(freq_bin_count):
 # Compute WNG-MVDR weights for each frequency bin with Newton's method
 weights_newton = np.zeros((freq_bin_count, config.mic_count), dtype=complex)
 for kf in range(freq_bin_count):
-    a = steering_vec[kf, :].reshape(-1, 1)
-    freq_bin_weights, freq_bin_power_history = wng_mvdr_newton(Rnn, a, gamma, mu, iteration_count)
+    a_vecs = [steering_vec[kf, :].reshape(-1, 1) for steering_vec in steering_vecs]
+    freq_bin_weights, freq_bin_power_history = wng_mvdr_newton(
+        Rnn, a_vecs, gamma, mu, iteration_count
+    )
     weights_newton[kf, :] = freq_bin_weights[:, 0]
 
     # Append power history
