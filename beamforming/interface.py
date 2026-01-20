@@ -143,41 +143,32 @@ def main():
             "Try reducing the frame_duration in the config file."
         )
 
-    # Use 50% overlap with Hann window
+    # 50% overlap with Hann window
     hop = stft_window_size // 2
     window = np.hanning(stft_window_size)
 
-    # Initialize list to store the STFT matrices of each channel
-    stft_list: list[NDArray[np.complex128]] = list()
-    fvec: NDArray[np.float64] = np.empty(0, dtype=np.float64)
-
-    # Iterate over microphone channels
-    for mic_idx in range(config.mic_count):
-        # Extract time-domain signal for one microphone channel
-        mic_signal: NDArray[np.float64] = mic_audio[:, mic_idx]
-
-        # Compute STFT
-        fvec, _, stft_matrix = stft(  # type: ignore[reportUnknownMemberType]
-            mic_signal,
+    def create_stft_matrix(mic_channel) -> NDArray[np.complex128]:
+        fvec, _, stft_matrix = stft(  
+            mic_channel,
             fs=config.fs,
             nperseg=stft_window_size,
             noverlap=stft_window_size - hop,
-            window=window,  # type: ignore[reportUnknownMemberType]
+            window=window,  
             padded=True,
             return_onesided=True,
-        )
-
-        # Cast matrix type to ensure compatibility
+        ) 
         stft_matrix = np.asarray(stft_matrix, dtype=np.complex128)
 
-        # Append STFT of microphone channel
-        stft_list.append(stft_matrix)
+        return stft_matrix, fvec
 
-    # Convert list to array, all channel samples from time step grouped into same array
+    # stft_list = list(map(lambda mic_info: create_stft_matrix(mic_info), mic_audio.T))
+    stft_list, fvecs = zip(*map(lambda mic_index: create_stft_matrix(mic_audio[:, mic_index]), range(config.mic_count)))
+    fvec = fvecs[0]
+
+
     stft_output = np.stack(stft_list, axis=-1)
 
-    # Extract dimensional information
-    freq_bin_count, time_frame_count, _ = stft_output.shape
+    freq_bin_count, _time_frame_count, _ = stft_output.shape
 
     # Compute steering vector, take first entry for now
     steering_vecs = compute_steering_vector(
@@ -225,8 +216,22 @@ def main():
     # Plot convergence history
     plot_history(
         {
-            "Steepest Descent": np.mean(np.asarray(power_history_steepest), axis=0),
-            "Newton": np.mean(np.asarray(power_history_newton), axis=0),
+            "Steepest Descent": (
+                np.mean(np.asarray(power_history_steepest), axis=0),
+                {
+                    "marker": ".",
+                    "color": "blue",
+                    "alpha": 0.5, 
+                }
+                ),
+            "Newton": (
+                np.mean(np.asarray(power_history_newton), axis=0),
+                {
+                    "marker": "s",
+                    "color": "green",
+                    "alpha": 0.5, 
+                }
+            ),
         },
         config.output_dir,
     )

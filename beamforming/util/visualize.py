@@ -155,9 +155,9 @@ def plot_history(data: dict[str, list[np.float64]], output_dir: Path) -> None:
     plt.figure()  # type: ignore[reportUnknownMemberType]
 
     # Iterate through data
-    for label, history in data.items():
+    for label, (history, kwargs) in data.items():
         # Plot history
-        plt.semilogy(history, label=label)  # type: ignore[reportUnknownMemberType]
+        plt.semilogy(history, label=label, **kwargs)  # type: ignore[reportUnknownMemberType]
 
     # Set axis labels
     plt.xlabel("Iteration")  # type: ignore[reportUnknownMemberType]
@@ -165,6 +165,9 @@ def plot_history(data: dict[str, list[np.float64]], output_dir: Path) -> None:
 
     # Enable plot grid
     plt.grid(visible=True)  # type: ignore[reportUnknownMemberType]
+
+    # Set figure title
+    plt.title("Convergence History")  # type: ignore[reportUnknownMemberType]
 
     # Add legend to figure
     plt.legend()  # type: ignore[reportUnknownMemberType]
