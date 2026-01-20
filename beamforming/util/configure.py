@@ -192,6 +192,10 @@ class Config:
         return sources
 
     @property
+    def noise_estimation_method(self) -> str:
+        return self.__project_config.get("noise_estimation_method", "predict")
+
+    @property
     def noise_pc_count(self) -> int:
         return self.__project_config["noise_pc_count"]
 

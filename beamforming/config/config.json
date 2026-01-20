@@ -52,6 +52,7 @@
             "classification": "noise"
         }
     ],
+    "noise_estimation_method": "ground_truth",
     "noise_pc_count": 4,
     "noise_reg_factor": 1e-8,
     "frame_duration": 10
