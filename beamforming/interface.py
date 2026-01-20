@@ -165,8 +165,6 @@ def main():
     # Apply principal component analysis
     if config.noise_pc_count > 0 and mic_noise.shape[0] > 0:
         Rnn = reduce_Rnn(Rnn, config.noise_pc_count)
-
-        # Print to log
         config.log.info(f"Component Count for PCA: {config.noise_pc_count}")
 
     # Apply regularization
@@ -174,10 +172,8 @@ def main():
         Rnn = regularize_Rnn(Rnn, config.noise_reg_factor)
         config.log.info(f"Noise Regularization Factor: {config.noise_reg_factor}")
 
-    # Choose STFT window size
     stft_window_size = int(config.fs * config.frame_duration / 1000)
 
-    # Verify that STFT window size is not larger than signal
     if stft_window_size > sample_count:
         raise ValueError(
             "STFT window size is larger than signal. "
@@ -202,7 +198,6 @@ def main():
 
         return stft_matrix, fvec
 
-    # stft_list = list(map(lambda mic_info: create_stft_matrix(mic_info), mic_audio.T))
     stft_list, fvecs = zip(*map(lambda mic_index: create_stft_matrix(mic_audio[:, mic_index]), range(config.mic_count)))
     fvec = fvecs[0]
 
@@ -226,10 +221,6 @@ def main():
     mu = 0.01 / np.trace(Rnn.real)
     iteration_count = 20
 
-    # Initialize list for storing noise power history
-    power_history_steepest: list[NDArray[np.float64]] = list()
-    power_history_newton: list[NDArray[np.float64]] = list()
-    
     weights_steepest, power_history_steepest = compute_wng_mvdr_weights(
         solver_fn=wng_mvdr_steepest, 
         Rnn=Rnn, 
@@ -284,7 +275,7 @@ def main():
         "beam_pattern_steepest",
         weights_steepest[bin_idx, :],
         mic_pos,
-        fvec[bin_idx],  # type: ignore[reportUnknownMemberType]
+        fvec[bin_idx],  
         config.sound_speed,
         config.output_dir,
     )
@@ -292,28 +283,27 @@ def main():
         "beam_pattern_newton",
         weights_newton[bin_idx, :],
         mic_pos,
-        fvec[bin_idx],  # type: ignore[reportUnknownMemberType]
+        fvec[bin_idx],  
         config.sound_speed,
         config.output_dir,
     )
 
     # Apply Inverse STFT
-    _, time_steepest = istft(  # type: ignore[reportUnknownMemberType]
+    _, time_steepest = istft(  
         freq_steepest,
         fs=config.fs,
         nperseg=stft_window_size,
         noverlap=stft_window_size - hop,
-        window=window,  # type: ignore[reportUnknownMemberType]
+        window=window, 
     )
-    _, time_newton = istft(  # type: ignore[reportUnknownMemberType]
+    _, time_newton = istft(  
         freq_newton,
         fs=config.fs,
         nperseg=stft_window_size,
         noverlap=stft_window_size - hop,
-        window=window,  # type: ignore[reportUnknownMemberType]
+        window=window,  
     )
 
-    # Ensure audio is real before writing to wav file
     time_steepest = np.real(time_steepest)
     time_newton = np.real(time_newton)
 
@@ -327,13 +317,12 @@ def main():
     else:
         time_newton = np.pad(time_newton, (0, sample_count - len(time_newton)))
 
-    # Write filtered audio to wavefiles
     sf.write(
         audio_dir / "mic_steepest_filtered_audio.wav", time_steepest, config.fs
-    )  # type: ignore[reportUnknownMemberType]
+    )  
     sf.write(
         audio_dir / "mic_newton_filtered_audio.wav", time_newton, config.fs
-    )  # type: ignore[reportUnknownMemberType]
+    )  
 
     config.log.info("Using combined signal sources as reference audio")
     ref_audio = np.zeros(min_sample_count)
