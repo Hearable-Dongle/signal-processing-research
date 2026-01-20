@@ -4,7 +4,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 from numpy.typing import NDArray
-from scipy.signal import istft, stft  # type: ignore[reportUnknownMemberType]
+from scipy.signal import istft, stft
 
 from algo.beamformer import (
     apply_beamformer_stft,
@@ -99,7 +99,7 @@ def main():
         if np.any(source_audio):
             source_audio /= np.max(np.abs(source_audio))
 
-        room.add_source(source.loc, signal=source_audio)  # type: ignore[reportUnknownMemberType]
+        room.add_source(source.loc, signal=source_audio)
 
     # Visualize 
     plot_mic_pos(mic_pos, config.output_dir)
