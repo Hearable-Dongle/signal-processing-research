@@ -10,7 +10,7 @@ from scipy.signal import istft
 
 from algo.beamformer import apply_beamformer_stft
 from algo.noise_estimation import estimate_Rnn, reduce_Rnn, regularize_Rnn
-from util.compare import calc_rmse, calc_si_sdr, calc_snr
+from util.compare import align_signals, calc_rmse, calc_si_sdr, calc_snr
 from util.configure import Config
 from util.simulate import MicType, sim_mic, sim_room
 from util.visualize import plot_beam_pattern, plot_history, plot_mic_pos, plot_room_pos
@@ -68,62 +68,53 @@ def simulate_environment(config: Config) -> Tuple[NDArray, NDArray, NDArray, int
     return mic_audio, mic_pos, signal_loc, min_sample_count
 
 
-def get_noise_covariance(config: Config, min_samples: int) -> NDArray:
+def get_noise_audio(config: Config, min_samples: int) -> NDArray:
     """
-    Estimates the Noise Covariance Matrix (Rnn).
-    If 'ground_truth' is selected, runs a separate simulation with only noise sources.
+    Simulates the noise environment and returns the raw noise audio.
+    Returns:
+        mic_noise: (samples, channels)
     """
     mic_count = config.mic_count
 
-    if config.noise_estimation_method == "ground_truth":
-        config.log.info("Using ground truth for noise covariance estimation")
-        noise_sources = [s for s in config.sources if s.classification == "noise"]
+    # Default to silence/small noise if no method selected
+    if config.noise_estimation_method != "ground_truth":
+         # If using 'predict' or other methods, we might assume 
+         # the noise is just the quiet parts of the main audio.
+         # For now, return a quiet noise floor if not simulating ground truth.
+        return np.random.randn(min_samples, mic_count) * 1e-6
 
-        if noise_sources:
-            noise_room = sim_room(config.room_dim.tolist(), config.fs, config.reflection_count)
-            mic, _ = sim_mic(
-                config.mic_count, config.mic_loc, config.mic_spacing,
-                getattr(MicType, config.mic_type.upper()), config.fs
-            )
-            noise_room.add_microphone_array(mic)
+    config.log.info("Using ground truth simulation for noise audio")
+    noise_sources = [s for s in config.sources if s.classification == "noise"]
 
-            for source in noise_sources:
-                audio, _ = librosa.load(source.input, sr=config.fs)
-                if np.any(audio):
-                    audio /= np.max(np.abs(audio))
-                noise_room.add_source(source.loc, signal=audio)
+    if not noise_sources:
+        config.log.warning("No noise sources found. Returning silence.")
+        return np.zeros((min_samples, mic_count))
 
-            noise_room.simulate()
-            mic_noise = np.array(noise_room.mic_array.signals).T
+    # Create a fresh room/mic setup just for noise
+    noise_room = sim_room(config.room_dim.tolist(), config.fs, config.reflection_count)
+    mic, _ = sim_mic(
+        config.mic_count, config.mic_loc, config.mic_spacing,
+        getattr(MicType, config.mic_type.upper()), config.fs
+    )
+    noise_room.add_microphone_array(mic)
 
-            # Match lengths
-            if mic_noise.shape[0] > min_samples:
-                mic_noise = mic_noise[:min_samples, :]
-            elif mic_noise.shape[0] < min_samples:
-                pad_amt = min_samples - mic_noise.shape[0]
-                mic_noise = np.pad(mic_noise, ((0, pad_amt), (0, 0)))
+    for source in noise_sources:
+        audio, _ = librosa.load(source.input, sr=config.fs)
+        if np.any(audio):
+            audio /= np.max(np.abs(audio))
+        noise_room.add_source(source.loc, signal=audio)
 
-            Rnn = estimate_Rnn(mic_noise)
-        else:
-            config.log.warning("No noise sources found. Using identity matrix.")
-            Rnn = np.eye(mic_count) * 1e-6
-            
-    elif config.noise_estimation_method == "predict":
-        raise NotImplementedError("Predictive noise estimation is not yet implemented")
-    else:
-        raise ValueError(f"Unknown noise_estimation_method: {config.noise_estimation_method}")
+    noise_room.simulate()
+    mic_noise = np.array(noise_room.mic_array.signals).T
 
-    # Post-processing
-    if config.noise_pc_count > 0:
-        Rnn = reduce_Rnn(Rnn, config.noise_pc_count)
-        config.log.info(f"Component Count for PCA: {config.noise_pc_count}")
+    # Match lengths (Padding/Truncating)
+    if mic_noise.shape[0] > min_samples:
+        mic_noise = mic_noise[:min_samples, :]
+    elif mic_noise.shape[0] < min_samples:
+        pad_amt = min_samples - mic_noise.shape[0]
+        mic_noise = np.pad(mic_noise, ((0, pad_amt), (0, 0)))
 
-    if config.noise_reg_factor > 0:
-        Rnn = regularize_Rnn(Rnn, config.noise_reg_factor)
-        config.log.info(f"Noise Regularization Factor: {config.noise_reg_factor}")
-
-    return Rnn
-
+    return mic_noise
 
 def reconstruct_audio(
     stft_data: NDArray, 
@@ -173,9 +164,12 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
     sf.write(audio_dir / "mic_newton_filtered_audio.wav", time_newton, config.fs)
 
     def print_metrics(name, pred_sig):
-        rmse, mse = calc_rmse(ref_audio, pred_sig)
-        snr = calc_snr(ref_audio, pred_sig)
-        sdr = calc_si_sdr(ref_audio, pred_sig)
+        aligned_ref = align_signals(ref_audio, pred_sig)
+
+        rmse, _mse = calc_rmse(aligned_ref, pred_sig)
+        snr = calc_snr(aligned_ref, pred_sig)
+        sdr = calc_si_sdr(aligned_ref, pred_sig)
+        
         config.log.info(f"{name}: RMSE={rmse:.4f}, SNR={snr:.4f}dB, SI-SDR={sdr:.4f}dB")
 
     print_metrics("Raw Audio", np.mean(mic_audio, axis=1))
@@ -215,7 +209,7 @@ def main():
     config = Config(config_path=args.config, output_path=args.output)
 
     mic_audio, mic_pos, signal_loc, min_samples = simulate_environment(config)
-    Rnn = get_noise_covariance(config, min_samples)
+    noise_audio = get_noise_audio(config, min_samples)
 
     bf_config = BeamformerConfig(
         fs=config.fs,
@@ -230,7 +224,7 @@ def main():
     results = compute_beamforming_weights(
         audio_input=mic_audio,
         source_locations=signal_loc,
-        noise_covariance=Rnn,
+        noise_audio=noise_audio,
         config=bf_config
     )
 

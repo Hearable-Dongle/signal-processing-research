@@ -28,3 +28,20 @@ def calc_si_sdr(ref: NDArray[Any], out: NDArray[Any]) -> float:
     out_noise = out_ac - s_target
 
     return 10 * np.log10(np.sum(s_target**2) / (np.sum(out_noise**2) + 1e-8))
+
+
+def align_signals(ref, pred):
+    # Cross-correlate to find delay
+    corr = np.correlate(ref, pred, mode='full')
+    delay = np.argmax(corr) - (len(pred) - 1)
+    
+    # Shift reference to match prediction
+    if delay > 0:
+        ref_aligned = np.pad(ref, (0, delay))[:len(pred)]
+    else:
+        ref_aligned = ref[-delay:]
+        # pad end to match length
+        ref_aligned = np.pad(ref_aligned, (0, len(pred)-len(ref_aligned)))
+        
+    return ref_aligned
+
