@@ -1,130 +1,35 @@
-# Beamforming Simulation
+# Beamforming Simulation Project
 
-This project simulates a microphone array and applies beamforming techniques to enhance speech signals from target speakers in a multi-speaker environment.
+This directory contains a beamforming simulation project designed to process audio signals in a simulated acoustic environment.
 
-## Quickstart
+## Project Gist
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+The project implements a Frequency-Domain Beamforming pipeline:
 
-2. **Run the simulation:**
-   ```bash
-   python3 interface.py
-   ```
+1.  **Simulation**: A virtual room is created to simulate sound propagation. This is done twice:
+    *   Once for the mixed audio (speech + noise) captured by a microphone array.
+    *   Once for pure noise (ground truth) captured by the same microphone array.
+2.  **Transformation**: Both the mixed microphone audio and the pure noise audio are converted into the frequency domain using Short-Time Fourier Transform (STFT).
+3.  **Statistics (The "Brain")**:
+    *   The Spatial Covariance Matrix ($R_{nn}$) is computed using the pure noise simulation, characterizing the spatial properties of the noise.
+    *   Steering Vectors are computed based on the known locations of the target speech sources.
+4.  **Solver (The "Muscle")**: Iterative algorithms (Steepest Descent and Newton's Method) are used to calculate complex weights for each frequency bin. These weights aim to minimize noise power while maintaining a constant gain towards the target speech source.
+5.  **Reconstruction**: The processed frequency-domain signals are converted back into a waveform using Inverse STFT.
+6.  **Evaluation**: The reconstructed audio is compared against the original dry source files to assess the beamforming performance.
 
-## Configuration
+## How to Run
 
-The simulation is configured through the `config/config.json` file. This file allows you to define the room acoustics, microphone array, audio sources, and beamforming parameters.
+To set up the environment and run the simulation:
 
-### Room Configuration
+1.  **Install Dependencies**: Ensure you have Python installed. Then, create and activate a virtual environment (recommended) and install the required packages:
+    ```bash
+    python -m venv beamforming-env
+    source beamforming-env/bin/activate
+    pip install -r beamforming/requirements.txt
+    ```
 
-- `room_settings`: Defines the physical dimensions of the room and the number of reflections to simulate.
-
-### Microphone Array Configuration
-
-- `mic_settings`: Defines the number of microphones, their spacing, location, and the array type (e.g., `circular`).
-
-### Audio Sources
-
-The `sources` array allows you to define multiple audio sources within the room. Each source has the following properties:
-
-- `input`: The path to the audio file for the source.
-- `loc`: The 3D coordinates of the source in the room.
-- `classification`: The type of source. This can be either `signal` for a target speaker or `noise` for background noise.
-
-### Beamforming Parameters
-
-- `noise_pc_count`: The number of principal components to use for noise reduction.
-- `noise_reg_factor`: The regularization factor for the noise covariance matrix.
-- `frame_duration`: The duration of the STFT frames in milliseconds.
-
-## Running Simulations
-
-To run a simulation, modify the `config/config.json` file to define your desired scenario and then run the `interface.py` script.
-
-### Command-Line Arguments
-
-You can also specify the configuration file using a command-line argument:
-
-- `--config`: Path to the configuration file. Defaults to `config/config.json`.
-
-Example:
-```bash
-python3 interface.py --config my_custom_config.json
-```
-
-You can also specify a custom output directory:
-- `--output`: Path to the output directory.
-
-Example:
-```bash
-python3 interface.py --config my_custom_config.json --output my_output_directory
-```
-
-### Example: Two Target Speakers
-
-To simulate a scenario with two target speakers, you would configure the `sources` array in `config/config.json` as follows:
-
-```json
-"sources": [
-    {
-        "input": "50.flac",
-        "loc": [2.5, 1.0, 1.5],
-        "classification": "signal"
-    },
-    {
-        "input": "02.flac",
-        "loc": [2.5, 3.0, 1.5],
-        "classification": "signal"
-    },
-    {
-        "input": "noise.wav",
-        "loc": [4.0, 2.0, 1.5],
-        "classification": "noise"
-    }
-],
-```
-
-### Example: Three Target Speakers
-
-To simulate a scenario with three target speakers, you would configure the `sources` array as follows:
-
-```json
-"sources": [
-    {
-        "input": "50.flac",
-        "loc": [2.5, 1.0, 1.5],
-        "classification": "signal"
-    },
-    {
-        "input": "02.flac",
-        "loc": [2.5, 3.0, 1.5],
-        "classification": "signal"
-    },
-    {
-        "input": "another_speaker.wav",
-        "loc": [1.0, 2.0, 1.5],
-        "classification": "signal"
-    },
-    {
-        "input": "noise.wav",
-        "loc": [4.0, 2.0, 1.5],
-        "classification": "noise"
-    }
-],
-```
-
-## Output
-
-By default, the simulation output is saved to a directory in the `output` folder named after the configuration file (e.g., `output/my_config`). You can override this by using the `--output` command-line argument.
-
-The output directory will contain:
-
-- A copy of the configuration file used for the simulation.
-- `audio/`: The raw microphone audio and the filtered audio from each beamforming method.
-- `plots/`: Plots of the microphone and room layout, beam patterns, and optimization history.
-- `log.txt`: A log file containing the quantitative evaluation metrics (RMSE, MSE, SNR, and SI-SDR).
-
-You can analyze the log file to quantitatively assess the performance of the beamformer in different scenarios.
+2.  **Run the Simulation**: From the parent directory (e.g., `signal-processing-research/`), execute the main script as a Python module:
+    ```bash
+    python -m beamforming.main
+    ```
+    The simulation will read its configuration from `beamforming/config/config.json` and output results (processed audio files, plots) into the `beamforming/output/` directory.
