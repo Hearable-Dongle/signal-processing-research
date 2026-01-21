@@ -1,0 +1,59 @@
+{
+    "seed": 42,
+    "sound_speed": 343.0,
+    "input_dir": "input",
+    "output_dir": "output",
+    "training": {
+        "max_sessions": 0,
+        "batch_size": 32
+    },
+    "validation": {
+        "max_sessions": 0,
+        "batch_size": 32
+    },
+    "optimizer": {
+        "lr": 3e-4
+    },
+    "scheduler": {
+        "mode": "min",
+        "factor": 0.5,
+        "patience": 3
+    },
+    "epoch_count": 50,
+    "sampling_frequency": 16000,
+    "room_settings": {
+        "dim": {
+            "length": 5,
+            "width": 4,
+            "height": 3
+        },
+        "reflection_count": 4
+    },
+    "mic_settings": {
+        "count": 8,
+        "spacing": 0.05,
+        "loc": [2.5, 2.0, 1.5],
+        "type": "circular"
+    },
+    "sources": [
+        {
+            "input": "brit_talking.wav",
+            "loc": [2.5, 1.0, 1.5],
+            "classification": "signal"
+        },
+        {
+            "input": "matthew_talking.wav",
+            "loc": [2.5, 1.0, 1.5],
+            "classification": "signal"
+        },
+        {
+            "input": "babble_10dB.wav",
+            "loc": [2.5, 3.0, 1.5],
+            "classification": "noise"
+        }
+    ],
+    "noise_estimation_method": "ground_truth",
+    "noise_pc_count": 4,
+    "noise_reg_factor": 1e-8,
+    "frame_duration": 10
+}
