@@ -159,6 +159,12 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
         results_dict["params"], 
         len(ref_audio)
     )
+    time_mvdr = reconstruct_audio(
+        results_dict["mvdr_stft"],
+        config.fs,
+        results_dict["params"],
+        len(ref_audio)
+    )
 
     audio_dir = config.output_dir / "audio"
     if not audio_dir.exists():
@@ -167,6 +173,7 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
     sf.write(audio_dir / "mic_raw_audio.wav", mic_audio, config.fs)
     sf.write(audio_dir / "mic_steepest_filtered_audio.wav", time_steepest, config.fs)
     sf.write(audio_dir / "mic_newton_filtered_audio.wav", time_newton, config.fs)
+    sf.write(audio_dir / "mic_mvdr_filtered_audio.wav", time_mvdr, config.fs)
 
     def print_metrics(name, pred_sig):
         aligned_ref = align_signals(ref_audio, pred_sig)
@@ -180,6 +187,7 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
     print_metrics("Raw Audio", np.mean(mic_audio, axis=1))
     print_metrics("Steepest Descent", time_steepest)
     print_metrics("Newton", time_newton)
+    print_metrics("Neural MVDR", time_mvdr)
 
     plot_history(
         {
@@ -194,7 +202,13 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
     fvec = results_dict["fvec"]
     bin_idx = int(np.argmin(np.abs(fvec - 4400.0)))
     
-    for name, weights in [("steepest", results_dict["steepest_weights"]), ("newton", results_dict["newton_weights"])]:
+    methods_to_plot = [
+        ("steepest", results_dict["steepest_weights"]),
+        ("newton", results_dict["newton_weights"]),
+        ("mvdr", results_dict["mvdr_weights"])
+    ]
+    
+    for name, weights in methods_to_plot:
         plot_beam_pattern(
             f"beam_pattern_{name}",
             weights[bin_idx, :],
@@ -235,6 +249,7 @@ def main():
 
     freq_steepest = apply_beamformer_stft(results["stft_tensor"], results["steepest"][0])
     freq_newton = apply_beamformer_stft(results["stft_tensor"], results["newton"][0])
+    freq_mvdr = apply_beamformer_stft(results["stft_tensor"], results["mvdr"][0])
 
     results_packet = {
         "params": results["params"],
@@ -246,6 +261,8 @@ def main():
         "newton_weights": results["newton"][0],
         "newton_hist": results["newton"][1],
         "newton_stft": freq_newton,
+        "mvdr_weights": results["mvdr"][0],
+        "mvdr_stft": freq_mvdr,
     }
 
     ref_audio = np.zeros(min_samples)
