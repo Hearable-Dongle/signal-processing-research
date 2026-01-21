@@ -2,7 +2,7 @@
 
 This directory contains a beamforming simulation project designed to process audio signals in a simulated acoustic environment.
 
-## Project Gist
+## Project Outline
 
 The project implements a Frequency-Domain Beamforming pipeline:
 
