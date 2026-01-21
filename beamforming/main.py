@@ -8,14 +8,13 @@ import soundfile as sf
 from numpy.typing import NDArray
 from scipy.signal import istft
 
-from algo.beamformer import apply_beamformer_stft
-from algo.noise_estimation import estimate_Rnn, reduce_Rnn, regularize_Rnn
-from util.compare import align_signals, calc_rmse, calc_si_sdr, calc_snr
-from util.configure import Config
-from util.simulate import MicType, sim_mic, sim_room
-from util.visualize import plot_beam_pattern, plot_history, plot_mic_pos, plot_room_pos
-
-from beamformer_core import compute_beamforming_weights, BeamformerConfig
+from beamforming.algo.beamformer import apply_beamformer_stft
+from beamforming.algo.noise_estimation import estimate_Rnn, reduce_Rnn, regularize_Rnn
+from beamforming.util.compare import align_signals, calc_rmse, calc_si_sdr, calc_snr
+from beamforming.util.configure import Config
+from beamforming.util.simulate import MicType, sim_mic, sim_room
+from beamforming.util.visualize import plot_beam_pattern, plot_history, plot_mic_pos, plot_room_pos
+from beamforming.beamformer_core import compute_beamforming_weights, BeamformerConfig
 
 
 def simulate_environment(config: Config) -> Tuple[NDArray, NDArray, NDArray, int]:
@@ -208,7 +207,7 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
 
 def main():
     parser = argparse.ArgumentParser(description="Beamforming simulation")
-    parser.add_argument("--config", type=Path, default=Path("config") / "config.json")
+    parser.add_argument("--config", type=Path, default=Path(__file__).parent / "config" / "config.json")
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 

@@ -26,7 +26,7 @@ class Audio_Sources:
 
 
 class Config:
-    __project_dir = Path(__file__, "../..").resolve()
+    __project_dir = Path(__file__).parent.parent.resolve()
     __log_str = f"{'Date/Time:':<19}  |  {'Level:':<8}  |  Message:\n"
 
     __log_fmt = Formatter(

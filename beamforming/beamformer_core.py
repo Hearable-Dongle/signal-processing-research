@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from typing import Dict, Tuple, Callable, Optional
+from typing import Dict, Tuple, Callable
 import numpy as np
 from scipy.signal import stft
 from numpy.typing import NDArray
 
-from algo.beamformer import (
+from beamforming.algo.beamformer import (
     compute_steering_vector,
     wng_mvdr_newton,
     wng_mvdr_steepest,
