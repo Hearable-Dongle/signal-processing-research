@@ -59,7 +59,13 @@ def simulate_environment(config: Config) -> Tuple[NDArray, NDArray, NDArray, int
 
     # Run Simulation
     room.simulate()
+    
     mic_audio = np.array(room.mic_array.signals).T
+
+    # Normalize to prevent clipping artifacts
+    max_val = np.max(np.abs(mic_audio))
+    if max_val > 1.0:
+        mic_audio = mic_audio / max_val
 
     # Truncate to valid length
     if mic_audio.shape[0] > min_sample_count:

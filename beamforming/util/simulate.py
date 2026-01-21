@@ -75,4 +75,5 @@ def sim_room(room_dim: list[int], fs: int, reflection_count: int) -> pra.ShoeBox
         room_dim,
         fs=fs,
         max_order=reflection_count,
+        materials=pra.Material(0.2), # 20% absorption to all walls
     )
