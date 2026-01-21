@@ -151,7 +151,7 @@ def solve_weights_per_bin(
     
     return np.array(weights_list, dtype=complex), list(power_histories)
 
-def classical_beamforming_weights(
+def compute_beamforming_weights_classical(
         fvec, 
         stft_noise,
         source_locations, 
@@ -189,6 +189,40 @@ def classical_beamforming_weights(
         "weights_newton": weights_newton,
         "hist_newton": hist_newton,
     }
+
+    
+def compute_beamforming_weights_mvdr(stft_tensor: NDArray) -> NDArray:
+    mag_tensor = np.abs(stft_tensor).astype(np.float32)
+    nn_input = torch.from_numpy(mag_tensor).unsqueeze(0)
+    
+    n_freq, _n_frames, n_mics = stft_tensor.shape
+    model = MaskEstimationNetwork(input_channels=n_mics, freq_bins=n_freq)
+    model.eval()
+    
+    with torch.no_grad():
+        masks = model(nn_input)
+        
+    masks_np = masks.squeeze(0).numpy()
+    mask_speech = masks_np[0, :, :]
+    mask_noise = masks_np[1, :, :]
+    
+    R_nn_neural = compute_spatial_covariance_matrix(stft_tensor, mask_noise)
+    R_ss_neural = compute_spatial_covariance_matrix(stft_tensor, mask_speech)
+    
+    steering_vecs_neural = compute_principal_eigenvector(R_ss_neural) 
+
+    def compute_wieight_for_frequency_bin(f):
+        R_inv = np.linalg.pinv(R_nn_neural[f])
+        d = steering_vecs_neural[f].reshape(-1, 1)
+        
+        num = R_inv @ d
+        denom = d.conj().T @ num
+        w = num / (denom + 1e-10)
+        return w.reshape(-1)    
+
+    weights_mvdr = np.array(list(map(compute_wieight_for_frequency_bin, range(n_freq))), dtype=np.complex128)
+
+    return weights_mvdr
 
 
 def compute_beamforming_weights(
@@ -232,7 +266,7 @@ def compute_beamforming_weights(
         audio_input, config.fs, stft_window_size, hop
     )
     
-    results = classical_beamforming_weights(
+    classical_beamforming_weights = compute_beamforming_weights_classical(
         fvec=fvec,
         stft_noise=stft_noise,
         source_locations=source_locations, 
@@ -242,48 +276,12 @@ def compute_beamforming_weights(
         gamma_dB=config.gamma_dB,
     )
 
-    weights_steepest = results["weights_steepest"]
-    hist_steepest = results["hist_steepest"]
-    weights_newton = results["weights_newton"]
-    hist_newton = results["hist_newton"]
+    weights_steepest = classical_beamforming_weights["weights_steepest"]
+    hist_steepest = classical_beamforming_weights["hist_steepest"]
+    weights_newton = classical_beamforming_weights["weights_newton"]
+    hist_newton = classical_beamforming_weights["hist_newton"]
 
-    # --- NEURAL PIPELINE ---
-    
-    # 1. Neural Mask Prediction
-    # Need magnitude spectra: [1, Mics, Freq, Time]
-    mag_tensor = np.abs(stft_tensor).astype(np.float32)
-    nn_input = torch.from_numpy(mag_tensor).unsqueeze(0)
-    
-    n_freq, _n_frames, n_mics = stft_tensor.shape
-    model = MaskEstimationNetwork(input_channels=n_mics, freq_bins=n_freq)
-    model.eval()
-    
-    with torch.no_grad():
-        masks = model(nn_input)
-        
-    masks_np = masks.squeeze(0).numpy()
-    mask_speech = masks_np[0, :, :]
-    mask_noise = masks_np[1, :, :]
-    
-    # 2. Compute Weighted Covariance Matrices
-    R_nn_neural = compute_spatial_covariance_matrix(stft_tensor, mask_noise)
-    R_ss_neural = compute_spatial_covariance_matrix(stft_tensor, mask_speech)
-    
-    # 3. Estimate Steering Vector (Principal Eigenvector of R_ss)
-    steering_vecs_neural = compute_principal_eigenvector(R_ss_neural) 
-    
-    # 4. Compute Weights (Closed-Form MVDR)
-    weights_list = []
-    for f in range(n_freq):
-        R_inv = np.linalg.pinv(R_nn_neural[f])
-        d = steering_vecs_neural[f].reshape(-1, 1)
-        
-        num = R_inv @ d
-        denom = d.conj().T @ num
-        w = num / (denom + 1e-10)
-        weights_list.append(w.reshape(-1))
-
-    weights_mvdr = np.array(weights_list, dtype=np.complex128)
+    weights_mvdr = compute_beamforming_weights_mvdr(stft_tensor=stft_tensor)
 
     return {
         "stft_tensor": stft_tensor,
