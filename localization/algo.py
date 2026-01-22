@@ -56,6 +56,8 @@ class LocalizationSystem:
         
         # Iterate over Time-Frequency Bins (or Zones)
         # Group frequency bins by d_freq
+        ssz_history = [] # List of (time, angle)
+
         for t_idx in range(T):
             for f_idx in range(f_idx_start, f_idx_end - self.d_freq + 1, self.d_freq):
                 # Extract block: (M, d_freq)
@@ -106,6 +108,7 @@ class LocalizationSystem:
                     
                     best_angle = self._cics_doa(R, freqs, search_angles)
                     ssz_doas.append(best_angle)
+                    ssz_history.append((t_vec[t_idx], best_angle))
 
         # 2. Histogram Construction
         # Simple histogram
@@ -114,7 +117,7 @@ class LocalizationSystem:
         # 3. Matching Pursuit (Updated)
         final_doas = self._matching_pursuit(hist, edges)
         
-        return final_doas, hist
+        return final_doas, hist, ssz_history
 
     def _cics_doa(self, R, freqs, angles):
         """
