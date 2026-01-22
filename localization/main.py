@@ -9,6 +9,7 @@ from beamforming.util.configure import Audio_Sources
 
 # Import our localization system
 from localization.algo import LocalizationSystem
+from localization.visualization import plot_source_comparison
 
 def main():
     # --- Configuration ---
@@ -100,6 +101,7 @@ def main():
          base_signal = base_signal[:num_samples]
 
     audio_sources_objects = []
+    true_doas = []
     
     print("Adding sources:")
     for i, loc in enumerate(source_locs):
@@ -120,7 +122,9 @@ def main():
         dy = loc[1] - mic_center[1]
         angle = np.arctan2(dy, dx)
         if angle < 0: angle += 2*np.pi
-        print(f"  Source {i}: {loc} -> True DOA: {np.degrees(angle):.2f} deg")
+        angle_deg = np.degrees(angle)
+        true_doas.append(angle_deg)
+        print(f"  Source {i}: {loc} -> True DOA: {angle_deg:.2f} deg")
 
     # --- Simulate ---
     print("Simulating audio...")
@@ -158,6 +162,9 @@ def main():
         
     # --- Visualization ---
     print(f"\nSaving visualizations to {output_dir}")
+    
+    # Plot Comparison
+    plot_source_comparison(true_doas, estimated_doas_deg, output_dir)
     
     # Plot Room
     plot_room_pos(
