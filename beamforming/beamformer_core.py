@@ -151,7 +151,7 @@ def solve_weights_per_bin(
     
     return np.array(weights_list, dtype=complex), list(power_histories)
 
-def compute_beamforming_weights_classical(
+def compute_beamforming_weights_mvdr(
         fvec, 
         stft_noise,
         source_locations, 
@@ -266,7 +266,7 @@ def compute_beamforming_weights(
         audio_input, config.fs, stft_window_size, hop
     )
     
-    classical_beamforming_weights = compute_beamforming_weights_classical(
+    classical_beamforming_weights = compute_beamforming_weights_mvdr(
         fvec=fvec,
         stft_noise=stft_noise,
         source_locations=source_locations, 
