@@ -193,3 +193,76 @@ def apply_beamformer_stft(
 
     # Return filtered data
     return filtered_data
+
+
+def lcmv_solver(
+    Rnn: NDArray[np.float64],
+    steering_vecs: list[NDArray[np.complex128]],
+    response_vec: NDArray[np.complex128] | None = None
+) -> NDArray[np.complex128]:
+    """
+    Standard closed-form LCMV solver.
+    """
+    # Create constraint matrix from steering vectors
+    C = np.hstack(steering_vecs)
+    
+    if response_vec is None:
+        # Default to distortionless response (1.0) for all constraints
+        response_vec = np.ones((C.shape[1], 1), dtype=np.complex128)
+        
+    R_inv = np.linalg.pinv(Rnn)
+    
+    # w = R^-1 C (C^H R^-1 C)^-1 g
+    # Compute C^H R^-1 C
+    inner_matrix = C.conj().T @ R_inv @ C
+    
+    # Compute inverse of inner matrix
+    inner_inv = np.linalg.pinv(inner_matrix)
+    
+    # Compute weights
+    w = R_inv @ C @ inner_inv @ response_vec
+    
+    return w
+
+
+def gsc_solver(
+    Rnn: NDArray[np.float64],
+    steering_vecs: list[NDArray[np.complex128]],
+    response_vec: NDArray[np.complex128] | None = None
+) -> NDArray[np.complex128]:
+    """
+    Generalized Sidelobe Canceler (GSC) solver.
+    """
+    # Create constraint matrix from steering vectors
+    C = np.hstack(steering_vecs)
+    M, K = C.shape
+    
+    if response_vec is None:
+        response_vec = np.ones((K, 1), dtype=np.complex128)
+        
+    # 1. Quiescent vector w_q = C (C^H C)^-1 g
+    w_q = C @ np.linalg.pinv(C.conj().T @ C) @ response_vec
+    
+    # 2. Blocking Matrix B
+    # Use QR decomposition to find null space of C^H
+    # Q matrix from QR of C contains basis for range(C) and null(C^H)
+    # C is M x K. Q is M x M.
+    Q, _ = np.linalg.qr(C, mode='complete')
+    B = Q[:, K:] # M x (M-K)
+    
+    if B.shape[1] == 0:
+        # No degrees of freedom left
+        return w_q
+        
+    # 3. Adaptive weights w_a
+    # w_a = (B^H R B)^-1 B^H R w_q
+    
+    denom = B.conj().T @ Rnn @ B
+    num = B.conj().T @ Rnn @ w_q
+    
+    w_a = np.linalg.pinv(denom) @ num
+    
+    # Total weights
+    w = w_q - B @ w_a
+    
+    return w
