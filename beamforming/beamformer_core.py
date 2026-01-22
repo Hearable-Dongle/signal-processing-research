@@ -10,6 +10,9 @@ from beamforming.algo.beamformer import (
     compute_steering_vector,
     wng_mvdr_newton,
     wng_mvdr_steepest,
+    lcmv_solver,
+    gsc_solver,
+    gsc_solver_steepest,
 )
 from beamforming.nn.mask_nn import MaskEstimationNetwork
 
@@ -151,7 +154,28 @@ def solve_weights_per_bin(
     
     return np.array(weights_list, dtype=complex), list(power_histories)
 
-def compute_beamforming_weights_classical(
+def solve_weights_per_bin_closed_form(
+    solver_fn: Callable,
+    Rnn_tensor: NDArray,
+    steering_vecs: NDArray,
+) -> NDArray:
+    
+    freq_bin_count = steering_vecs[0].shape[0]
+    
+    def process_bin(kf):
+        # steering_vecs is a list of arrays (one per source).
+        # Each array is (n_freq, n_mics).
+        # We need to extract the kf-th row from each and reshape to (n_mics, 1)
+        # to get a list of [ (M,1), (M,1), ... ] which the solver expects.
+        a_vecs_bin = [sv[kf, :].reshape(-1, 1) for sv in steering_vecs]
+        Rnn_bin = Rnn_tensor[kf, :, :]
+        w_bin = solver_fn(Rnn_bin, a_vecs_bin)
+        return w_bin.reshape(-1) # return as 1D array
+
+    weights_list = [process_bin(kf) for kf in range(freq_bin_count)]
+    return np.array(weights_list, dtype=np.complex128)
+
+def compute_beamforming_weights_mvdr_classical(
         fvec, 
         stft_noise,
         source_locations, 
@@ -190,8 +214,95 @@ def compute_beamforming_weights_classical(
         "hist_newton": hist_newton,
     }
 
+def compute_beamforming_weights_lcmv(
+        fvec, 
+        stft_noise,
+        source_locations, 
+        mic_geometry,
+        mic_array_center,
+        sound_speed,
+    ):
+ 
+    Rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
+
+    steering_vecs = compute_steering_vector(
+        mic_geometry,
+        mic_array_center,
+        fvec,
+        source_locations,
+        sound_speed,
+    )
     
-def compute_beamforming_weights_mvdr(stft_tensor: NDArray) -> NDArray:
+    weights = solve_weights_per_bin_closed_form(
+        lcmv_solver, Rnn_tensor, steering_vecs
+    )
+    
+    return weights
+
+def compute_beamforming_weights_gsc(
+        fvec, 
+        stft_noise,
+        source_locations, 
+        mic_geometry,
+        mic_array_center,
+        sound_speed,
+    ):
+ 
+    Rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
+
+    steering_vecs = compute_steering_vector(
+        mic_geometry,
+        mic_array_center,
+        fvec,
+        source_locations,
+        sound_speed,
+    )
+    
+    weights = solve_weights_per_bin_closed_form(
+        gsc_solver, Rnn_tensor, steering_vecs
+    )
+    
+    return weights
+
+def compute_beamforming_weights_gsc_iterative(
+        fvec, 
+        stft_noise,
+        source_locations, 
+        mic_geometry,
+        mic_array_center,
+        sound_speed,
+        iterations=20
+    ):
+ 
+    Rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
+
+    steering_vecs = compute_steering_vector(
+        mic_geometry,
+        mic_array_center,
+        fvec,
+        source_locations,
+        sound_speed,
+    )
+    
+    freq_bin_count = steering_vecs[0].shape[0]
+    
+    def process_bin(kf):
+        a_vecs_bin = [sv[kf, :].reshape(-1, 1) for sv in steering_vecs]
+        Rnn_bin = Rnn_tensor[kf, :, :]
+        
+        # Calculate naive step size based on trace of Rnn (approx power)
+        # This is passed to gsc_solver_steepest, or we can let it auto-tune if we pass None.
+        # Let's pass None for auto-tuning inside the solver.
+        w_bin, hist = gsc_solver_steepest(Rnn_bin, a_vecs_bin, iterations=iterations, mu=None)
+        return w_bin.reshape(-1), hist
+
+    results = [process_bin(kf) for kf in range(freq_bin_count)]
+    weights_list, power_histories = zip(*results)
+    
+    return np.array(weights_list, dtype=np.complex128), list(power_histories)
+
+    
+def compute_beamforming_weights_mvdr_neural(stft_tensor: NDArray) -> NDArray:
     mag_tensor = np.abs(stft_tensor).astype(np.float32)
     nn_input = torch.from_numpy(mag_tensor).unsqueeze(0)
     
@@ -255,18 +366,7 @@ def compute_beamforming_weights(
         audio_input, config.fs, stft_window_size, hop
     )
     
-    stft_window_size = int(config.fs * config.frame_duration_ms / 1000)
-    hop = stft_window_size // 2
-
-    stft_noise, _ = compute_spectral_features(
-        noise_audio, config.fs, stft_window_size, hop
-    )
-
-    stft_tensor, fvec = compute_spectral_features(
-        audio_input, config.fs, stft_window_size, hop
-    )
-    
-    classical_beamforming_weights = compute_beamforming_weights_classical(
+    classical_beamforming_weights = compute_beamforming_weights_mvdr_classical(
         fvec=fvec,
         stft_noise=stft_noise,
         source_locations=source_locations, 
@@ -281,7 +381,35 @@ def compute_beamforming_weights(
     weights_newton = classical_beamforming_weights["weights_newton"]
     hist_newton = classical_beamforming_weights["hist_newton"]
 
-    weights_mvdr = compute_beamforming_weights_mvdr(stft_tensor=stft_tensor)
+    weights_mvdr = compute_beamforming_weights_mvdr_neural(stft_tensor=stft_tensor)
+    
+    weights_lcmv = compute_beamforming_weights_lcmv(
+        fvec=fvec,
+        stft_noise=stft_noise,
+        source_locations=source_locations, 
+        mic_geometry=config.mic_geometry,
+        mic_array_center=config.mic_array_center,
+        sound_speed=config.sound_speed,
+    )
+
+    weights_gsc = compute_beamforming_weights_gsc(
+        fvec=fvec,
+        stft_noise=stft_noise,
+        source_locations=source_locations, 
+        mic_geometry=config.mic_geometry,
+        mic_array_center=config.mic_array_center,
+        sound_speed=config.sound_speed,
+    )
+    
+    weights_gsc_iter, hist_gsc_iter = compute_beamforming_weights_gsc_iterative(
+        fvec=fvec,
+        stft_noise=stft_noise,
+        source_locations=source_locations, 
+        mic_geometry=config.mic_geometry,
+        mic_array_center=config.mic_array_center,
+        sound_speed=config.sound_speed,
+        iterations=config.iterations
+    )
 
     return {
         "stft_tensor": stft_tensor,
@@ -289,5 +417,8 @@ def compute_beamforming_weights(
         "steepest": (weights_steepest, hist_steepest),
         "newton": (weights_newton, hist_newton),
         "mvdr": (weights_mvdr, []),
+        "lcmv": (weights_lcmv, []),
+        "gsc": (weights_gsc, []),
+        "gsc_iterative": (weights_gsc_iter, hist_gsc_iter),
         "params": (stft_window_size, hop, np.hanning(stft_window_size))
     }
