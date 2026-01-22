@@ -57,16 +57,55 @@ def main():
     room.add_microphone_array(mic_array_pra)
     
     # --- Add Sources ---
-    # Generate 1 second of white noise
     duration = 1.0
     num_samples = int(fs * duration)
     
+    # Load a speech file if possible, else generate bursty noise
+    try:
+        from scipy.io import wavfile
+        import scipy.signal as signal_ops
+        
+        wav_path = Path("beamforming/input/matthew_talking.wav")
+        if wav_path.exists():
+            sr_wav, audio_wav = wavfile.read(wav_path)
+            # Resample if needed
+            if sr_wav != fs:
+                # simple resample (this might be slow for long files, but fine for 1s)
+                # Actually, let's just use it if close, or resample.
+                # calculate number of samples needed
+                num_samples_wav = int(len(audio_wav) * fs / sr_wav)
+                audio_wav = signal_ops.resample(audio_wav, num_samples_wav)
+            
+            # Normalize
+            audio_wav = audio_wav.astype(float)
+            audio_wav /= np.max(np.abs(audio_wav))
+            
+            base_signal = audio_wav
+            print(f"Using speech file: {wav_path}")
+        else:
+            raise FileNotFoundError("Wav file not found")
+    except Exception as e:
+        print(f"Fallback to synthetic bursty noise: {e}")
+        # Generate bursty noise (white noise modulated by low freq sine)
+        t = np.linspace(0, duration, num_samples)
+        envelope = np.abs(np.sin(2 * np.pi * 3 * t)) # 3Hz modulation
+        base_signal = np.random.randn(num_samples) * envelope
+
+    # Ensure base_signal is long enough
+    if len(base_signal) < num_samples:
+         # Loop it
+         repeats = int(np.ceil(num_samples / len(base_signal)))
+         base_signal = np.tile(base_signal, repeats)[:num_samples]
+    else:
+         base_signal = base_signal[:num_samples]
+
     audio_sources_objects = []
     
     print("Adding sources:")
     for i, loc in enumerate(source_locs):
-        # Create independent white noise
-        signal = np.random.randn(num_samples)
+        # Time shift signal for different sources to make them distinct/decorrelated
+        shift = int(fs * 0.5 * i)
+        signal = np.roll(base_signal, shift)
         
         # Add to room
         room.add_source(loc, signal=signal)
@@ -105,8 +144,9 @@ def main():
         fs=fs,
         nfft=512,
         overlap=0.5,
-        epsilon=0.2,
-        d_freq=2
+        epsilon=0.1, # Updated epsilon for correlation metric (1 - 0.9 = 0.1)
+        d_freq=8, # Increased d_freq for better correlation estimate
+        max_sources=2
     )
     
     estimated_doas_rad, histogram = loc_system.process(mic_signals)
