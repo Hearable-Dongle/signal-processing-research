@@ -13,13 +13,11 @@ from localization.config_loader import load_config
 import argparse
 
 def main():
-    # Parse Command Line Arguments
     parser = argparse.ArgumentParser(description="Run Audio Localization Simulation")
     parser.add_argument("--config", type=str, default="localization/configs/base_config.json", 
                         help="Path to the JSON configuration file")
     args = parser.parse_args()
 
-    # Load Configuration
     config_path = Path(args.config)
     if not config_path.exists():
         print(f"Error: Configuration file not found at {config_path}")
@@ -30,7 +28,6 @@ def main():
     sim_config = config["simulation"]
     algo_config = config["algorithm"]
 
-    # --- Simulation Setup ---
     fs = sim_config["fs"]
     room_dim = sim_config["room_dim"]
     mic_center = np.array(sim_config["mic_center"])
@@ -60,87 +57,36 @@ def main():
     num_samples = int(fs * duration)
     
     # --- Source Signal Generation ---
-    input_type = sim_config.get("input_type", "file")
+    source_files = sim_config.get("source_files", [])
     source_signals = []
-
-    if input_type == "file_list":
-        source_files = sim_config.get("source_files", [])
-        from scipy.io import wavfile
-        import scipy.signal as signal_ops
-
-        for i, wav_path_str in enumerate(source_files):
-            wav_path = Path(wav_path_str)
-            if wav_path.exists():
-                sr_wav, audio_wav = wavfile.read(wav_path)
-                if sr_wav != fs:
-                    num_samples_wav = int(len(audio_wav) * fs / sr_wav)
-                    audio_wav = signal_ops.resample(audio_wav, num_samples_wav)
-                
-                # Normalize
-                audio_wav = audio_wav.astype(float)
-                if np.max(np.abs(audio_wav)) > 0:
-                    audio_wav /= np.max(np.abs(audio_wav))
-                
-                # Loop or crop
-                if len(audio_wav) < num_samples:
-                    repeats = int(np.ceil(num_samples / len(audio_wav)))
-                    sig = np.tile(audio_wav, repeats)[:num_samples]
-                else:
-                    sig = audio_wav[:num_samples]
-                source_signals.append(sig)
-                print(f"Loaded source {i} from {wav_path}")
-            else:
-                print(f"Warning: File {wav_path} not found. Using silence.")
-                source_signals.append(np.zeros(num_samples))
     
-    else:
-        # Legacy/Single File logic
-        base_signal = None
-        if input_type == "gaussian_white_noise":
-             print("Using Gaussian White Noise sources.")
-        else:
-            try:
-                from scipy.io import wavfile
-                import scipy.signal as signal_ops
-                
-                wav_path_str = sim_config.get("input_file", "beamforming/input/babble_10dB.wav")
-                wav_path = Path(wav_path_str)
-                
-                if wav_path.exists():
-                    sr_wav, audio_wav = wavfile.read(wav_path)
-                    if sr_wav != fs:
-                        num_samples_wav = int(len(audio_wav) * fs / sr_wav)
-                        audio_wav = signal_ops.resample(audio_wav, num_samples_wav)
-                    
-                    audio_wav = audio_wav.astype(float)
-                    if np.max(np.abs(audio_wav)) > 0:
-                        audio_wav /= np.max(np.abs(audio_wav))
-                    
-                    base_signal = audio_wav
-                    print(f"Using input file: {wav_path}")
-                    
-                    if len(base_signal) < num_samples:
-                        repeats = int(np.ceil(num_samples / len(base_signal)))
-                        base_signal = np.tile(base_signal, repeats)[:num_samples]
-                    else:
-                        base_signal = base_signal[:num_samples]
-                else:
-                    print(f"Warning: Input file {wav_path} not found. Fallback to bursty noise.")
-            except Exception as e:
-                print(f"Error reading file: {e}. Fallback to bursty noise.")
+    from scipy.io import wavfile
+    import scipy.signal as signal_ops
 
-        # Generate signals per source based on base_signal
-        for i in range(len(source_locs)):
-            if input_type == "gaussian_white_noise":
-                source_signals.append(np.random.randn(num_samples))
-            elif base_signal is not None:
-                shift = int(fs * 0.5 * i)
-                source_signals.append(np.roll(base_signal, shift))
+    for i, wav_path_str in enumerate(source_files):
+        wav_path = Path(wav_path_str)
+        if wav_path.exists():
+            sr_wav, audio_wav = wavfile.read(wav_path)
+            if sr_wav != fs:
+                num_samples_wav = int(len(audio_wav) * fs / sr_wav)
+                audio_wav = signal_ops.resample(audio_wav, num_samples_wav)
+            
+            # Normalize
+            audio_wav = audio_wav.astype(float)
+            if np.max(np.abs(audio_wav)) > 0:
+                audio_wav /= np.max(np.abs(audio_wav))
+            
+            # Loop or crop
+            if len(audio_wav) < num_samples:
+                repeats = int(np.ceil(num_samples / len(audio_wav)))
+                sig = np.tile(audio_wav, repeats)[:num_samples]
             else:
-                 # Fallback bursty
-                 t = np.linspace(0, duration, num_samples)
-                 envelope = np.abs(np.sin(2 * np.pi * 3 * t))
-                 source_signals.append(np.random.randn(num_samples) * envelope)
+                sig = audio_wav[:num_samples]
+            source_signals.append(sig)
+            print(f"Loaded source {i} from {wav_path}")
+        else:
+            print(f"Warning: File {wav_path} not found. Using silence.")
+            source_signals.append(np.zeros(num_samples))
 
     audio_sources_objects = []
     true_doas = []
@@ -170,6 +116,57 @@ def main():
     
     mic_signals = room.mic_array.signals
     print(f"Captured signals shape: {mic_signals.shape}")
+
+    # --- Add Background Noise ---
+    noise_config = sim_config.get("noise", None)
+    if noise_config:
+        print(f"Adding background noise: {noise_config}")
+        noise_signal = None
+        n_samples_out = mic_signals.shape[1]
+        
+        if noise_config == "white_noise":
+            # Add uncorrelated white noise
+            noise_signal = np.random.randn(*mic_signals.shape)
+        else:
+            # Assume file path
+            noise_path = Path(noise_config)
+            if noise_path.exists():
+                sr_wav, audio_noise = wavfile.read(noise_path)
+                if sr_wav != fs:
+                    ns_noise = int(len(audio_noise) * fs / sr_wav)
+                    audio_noise = signal_ops.resample(audio_noise, ns_noise)
+                
+                audio_noise = audio_noise.astype(float)
+                if np.max(np.abs(audio_noise)) > 0:
+                    audio_noise /= np.max(np.abs(audio_noise))
+                
+                # Make long enough
+                if len(audio_noise) < n_samples_out:
+                    repeats = int(np.ceil(n_samples_out / len(audio_noise)))
+                    full_noise = np.tile(audio_noise, repeats)
+                else:
+                    full_noise = audio_noise
+                
+                # Add to mics (rolling to decorrelate)
+                noise_signal = np.zeros_like(mic_signals)
+                for m in range(mic_signals.shape[0]):
+                    # Random start index
+                    start = np.random.randint(0, len(full_noise) - n_samples_out + 1) if len(full_noise) > n_samples_out else 0
+                    # Or just roll
+                    shift = np.random.randint(0, len(full_noise))
+                    rolled = np.roll(full_noise, shift)
+                    noise_signal[m, :] = rolled[:n_samples_out]
+            else:
+                print(f"Warning: Noise file {noise_path} not found.")
+
+        if noise_signal is not None:
+            # Scale noise. Let's assume 10% amplitude of current max signal
+            current_max = np.max(np.abs(mic_signals))
+            noise_max = np.max(np.abs(noise_signal))
+            if noise_max > 0:
+                scale_factor = (current_max * 0.1) / noise_max
+                mic_signals += noise_signal * scale_factor
+                print(f"Added noise with scale factor {scale_factor:.4f}")
     
     # Save simulated audio
     from scipy.io import wavfile

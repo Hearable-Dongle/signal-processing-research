@@ -10,11 +10,11 @@
             [1.5, 3.5, 1.5]
         ],
         "duration": 10.0,
-        "input_type": "file_list", 
         "source_files": [
             "beamforming/input/matthew_talking.wav",
             "beamforming/input/brit_talking.wav"
         ],
+        "noise": "white_noise",
         "output_dir": "localization/output/2_speakers"
     },
     "algorithm": {
