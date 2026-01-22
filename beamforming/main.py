@@ -147,33 +147,33 @@ def reconstruct_audio(
 def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref_audio: NDArray):
     """Calculates metrics (RMSE, SNR, SI-SDR) and plots results."""
     
-    time_steepest = reconstruct_audio(
-        results_dict["steepest_stft"], 
-        config.fs, 
-        results_dict["params"], 
-        len(ref_audio)
-    )
-    time_newton = reconstruct_audio(
-        results_dict["newton_stft"], 
-        config.fs, 
-        results_dict["params"], 
-        len(ref_audio)
-    )
-    time_mvdr = reconstruct_audio(
-        results_dict["mvdr_stft"],
-        config.fs,
-        results_dict["params"],
-        len(ref_audio)
-    )
+    methods = {
+        "MVDR (Iterative Steepest)": "steepest_stft",
+        "MVDR (Iterative Newton)": "newton_stft",
+        "MVDR (Neural)": "mvdr_stft",
+        "LCMV (Closed Form)": "lcmv_stft",
+        "GSC (Closed Form)": "gsc_stft",
+        "GSC (Iterative)": "gsc_iterative_stft"
+    }
 
     audio_dir = config.output_dir / "audio"
     if not audio_dir.exists():
         audio_dir.mkdir(parents=True)
         
     sf.write(audio_dir / "mic_raw_audio.wav", mic_audio, config.fs)
-    sf.write(audio_dir / "mic_steepest_filtered_audio.wav", time_steepest, config.fs)
-    sf.write(audio_dir / "mic_newton_filtered_audio.wav", time_newton, config.fs)
-    sf.write(audio_dir / "mic_mvdr_filtered_audio.wav", time_mvdr, config.fs)
+    
+    reconstructed_signals = {}
+    for label, key in methods.items():
+        if key in results_dict:
+            time_sig = reconstruct_audio(
+                results_dict[key], 
+                config.fs, 
+                results_dict["params"], 
+                len(ref_audio)
+            )
+            reconstructed_signals[label] = time_sig
+            filename = label.lower().replace(" ", "_").replace("(", "").replace(")", "") + ".wav"
+            sf.write(audio_dir / filename, time_sig, config.fs)
 
     def print_metrics(name, pred_sig):
         aligned_ref = align_signals(ref_audio, pred_sig)
@@ -182,41 +182,49 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
         snr = calc_snr(aligned_ref, pred_sig)
         sdr = calc_si_sdr(aligned_ref, pred_sig)
         
-        config.log.info(f"{name}: RMSE={rmse:.4f}, SNR={snr:.4f}dB, SI-SDR={sdr:.4f}dB")
+        config.log.info(f"{name: <25}: RMSE={rmse:.4f}, SNR={snr:.4f}dB, SI-SDR={sdr:.4f}dB")
 
-    print_metrics("Raw Audio", np.mean(mic_audio, axis=1))
-    print_metrics("Steepest Descent", time_steepest)
-    print_metrics("Newton", time_newton)
-    print_metrics("Neural MVDR", time_mvdr)
+    config.log.info("-" * 50)
+    print_metrics("Raw Audio (Mean)", np.mean(mic_audio, axis=1))
+    for label, sig in reconstructed_signals.items():
+        print_metrics(label, sig)
+    config.log.info("-" * 50)
 
-    plot_history(
-        {
-            "Steepest Descent": (np.mean(results_dict["steepest_hist"], axis=0), {"color": "blue", "alpha": 0.5}),
-            "Newton": (np.mean(results_dict["newton_hist"], axis=0), {"color": "green", "alpha": 0.5}),
-        },
-        config.output_dir,
-    )
+    # Plot Convergence History
+    hist_data = {}
+    if "steepest_hist" in results_dict:
+        hist_data["MVDR Steepest"] = (np.mean(results_dict["steepest_hist"], axis=0), {"color": "blue", "alpha": 0.5})
+    if "newton_hist" in results_dict:
+        hist_data["MVDR Newton"] = (np.mean(results_dict["newton_hist"], axis=0), {"color": "green", "alpha": 0.5})
+    if "gsc_iterative_hist" in results_dict:
+        hist_data["GSC Iterative"] = (np.mean(results_dict["gsc_iterative_hist"], axis=0), {"color": "red", "alpha": 0.5})
+
+    if hist_data:
+        plot_history(hist_data, config.output_dir)
 
     # Beam Patterns
-    # Find bin for target freq (e.g. 4400Hz)
     fvec = results_dict["fvec"]
     bin_idx = int(np.argmin(np.abs(fvec - 4400.0)))
     
-    methods_to_plot = [
-        ("steepest", results_dict["steepest_weights"]),
-        ("newton", results_dict["newton_weights"]),
-        ("mvdr", results_dict["mvdr_weights"])
-    ]
+    patterns_to_plot = {
+        "MVDR_Steepest": "steepest_weights",
+        "MVDR_Newton": "newton_weights",
+        "MVDR_Neural": "mvdr_weights",
+        "LCMV": "lcmv_weights",
+        "GSC": "gsc_weights",
+        "GSC_Iterative": "gsc_iterative_weights"
+    }
     
-    for name, weights in methods_to_plot:
-        plot_beam_pattern(
-            f"beam_pattern_{name}",
-            weights[bin_idx, :],
-            results_dict["mic_pos"], 
-            fvec[bin_idx],
-            config.sound_speed,
-            config.output_dir,
-        )
+    for name, weight_key in patterns_to_plot.items():
+        if weight_key in results_dict:
+            plot_beam_pattern(
+                f"beam_pattern_{name}",
+                results_dict[weight_key][bin_idx, :],
+                results_dict["mic_pos"], 
+                fvec[bin_idx],
+                config.sound_speed,
+                config.output_dir,
+            )
 
 
 def main():
@@ -235,7 +243,7 @@ def main():
         frame_duration_ms=config.frame_duration,
         sound_speed=config.sound_speed,
         gamma_dB=15,
-        iterations=20,
+        iterations=10,
         mic_array_center=config.mic_loc,
         mic_geometry=mic_pos
     )
@@ -247,22 +255,36 @@ def main():
         config=bf_config
     )
 
-    freq_steepest = apply_beamformer_stft(results["stft_tensor"], results["steepest"][0])
-    freq_newton = apply_beamformer_stft(results["stft_tensor"], results["newton"][0])
-    freq_mvdr = apply_beamformer_stft(results["stft_tensor"], results["mvdr"][0])
-
+    stft_tensor = results["stft_tensor"]
+    
     results_packet = {
         "params": results["params"],
         "fvec": results["fvec"],
         "mic_pos": mic_pos,
+        
+        # MVDR
         "steepest_weights": results["steepest"][0],
         "steepest_hist": results["steepest"][1],
-        "steepest_stft": freq_steepest,
+        "steepest_stft": apply_beamformer_stft(stft_tensor, results["steepest"][0]),
+        
         "newton_weights": results["newton"][0],
         "newton_hist": results["newton"][1],
-        "newton_stft": freq_newton,
+        "newton_stft": apply_beamformer_stft(stft_tensor, results["newton"][0]),
+        
         "mvdr_weights": results["mvdr"][0],
-        "mvdr_stft": freq_mvdr,
+        "mvdr_stft": apply_beamformer_stft(stft_tensor, results["mvdr"][0]),
+        
+        # LCMV
+        "lcmv_weights": results["lcmv"][0],
+        "lcmv_stft": apply_beamformer_stft(stft_tensor, results["lcmv"][0]),
+        
+        # GSC
+        "gsc_weights": results["gsc"][0],
+        "gsc_stft": apply_beamformer_stft(stft_tensor, results["gsc"][0]),
+        
+        "gsc_iterative_weights": results["gsc_iterative"][0],
+        "gsc_iterative_hist": results["gsc_iterative"][1],
+        "gsc_iterative_stft": apply_beamformer_stft(stft_tensor, results["gsc_iterative"][0]),
     }
 
     ref_audio = np.zeros(min_samples)

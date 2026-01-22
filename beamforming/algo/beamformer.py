@@ -266,3 +266,66 @@ def gsc_solver(
     w = w_q - B @ w_a
     
     return w
+
+
+def gsc_solver_steepest(
+    Rnn: NDArray[np.float64],
+    steering_vecs: list[NDArray[np.complex128]],
+    iterations: int = 10,
+    mu: float | None = None,
+    response_vec: NDArray[np.complex128] | None = None
+) -> tuple[NDArray[np.complex128], list[np.float64]]:
+    """
+    Iterative Generalized Sidelobe Canceler (GSC) using Steepest Descent.
+    This allows tracking the convergence (power history) of the adaptive section.
+    """
+    # Create constraint matrix from steering vectors
+    C = np.hstack(steering_vecs)
+    M, K = C.shape
+    
+    if response_vec is None:
+        response_vec = np.ones((K, 1), dtype=np.complex128)
+        
+    # 1. Quiescent vector w_q (Fixed)
+    w_q = C @ np.linalg.pinv(C.conj().T @ C) @ response_vec
+    
+    # 2. Blocking Matrix B (Fixed)
+    Q, _ = np.linalg.qr(C, mode='complete')
+    B = Q[:, K:] # M x (M-K)
+    
+    if B.shape[1] == 0:
+        return w_q, [np.real(w_q.conj().T @ Rnn @ w_q)]
+        
+    # 3. Iteratively solve for w_a
+    # Initialize w_a to zeros
+    w_a = np.zeros((B.shape[1], 1), dtype=np.complex128)
+    
+    power_history = []
+    
+    # Auto-tune step size if not provided
+    if mu is None:
+        # Simple heuristic: 1 / trace(B^H R B)
+        # This roughly normalizes the update by the power in the blocking subspace
+        subspace_power = np.trace(np.real(B.conj().T @ Rnn @ B))
+        mu = 0.5 / (subspace_power + 1e-10)
+
+    for _ in range(iterations):
+        # Current total weight
+        w = w_q - B @ w_a
+        
+        # Calculate Power (Objective Function)
+        power = np.real(w.conj().T @ Rnn @ w)
+        power_history.append(float(power))
+        
+        # Gradient of J = w^H R w with respect to w_a^*
+        # J = (w_q - B w_a)^H R (w_q - B w_a)
+        # grad = -B^H R w
+        grad = -B.conj().T @ (Rnn @ w)
+        
+        # Update w_a
+        w_a = w_a - mu * grad
+        
+    # Final weights
+    w_final = w_q - B @ w_a
+    
+    return w_final, power_history
