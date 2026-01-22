@@ -7,15 +7,19 @@
         "mic_count": 8,
         "source_locs": [
             [3.5, 3.5, 1.5],
-            [1.5, 3.5, 1.5]
+            [1.5, 3.5, 1.5],
+            [1.5, 1.5, 1.5],
+            [3.5, 1.5, 1.5]
         ],
         "duration": 10.0,
         "input_type": "file_list", 
         "source_files": [
             "beamforming/input/matthew_talking.wav",
-            "beamforming/input/brit_talking.wav"
+            "beamforming/input/brit_talking.wav",
+            "beamforming/input/babble_10dB.wav",
+            "beamforming/input/babble_20dB.wav"
         ],
-        "output_dir": "localization/output/2_speakers"
+        "output_dir": "localization/output/4_speakers"
     },
     "algorithm": {
         "nfft": 512,
@@ -23,6 +27,6 @@
         "epsilon": 0.1,
         "d_freq": 8,
         "freq_range": [200, 3000],
-        "max_sources": 2
+        "max_sources": 4
     }
 }

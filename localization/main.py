@@ -10,9 +10,21 @@ from localization.algo import LocalizationSystem
 from localization.visualization import plot_source_comparison
 from localization.config_loader import load_config
 
+import argparse
+
 def main():
+    # Parse Command Line Arguments
+    parser = argparse.ArgumentParser(description="Run Audio Localization Simulation")
+    parser.add_argument("--config", type=str, default="localization/configs/base_config.json", 
+                        help="Path to the JSON configuration file")
+    args = parser.parse_args()
+
     # Load Configuration
-    config_path = Path("localization/configs/base_config.json")
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"Error: Configuration file not found at {config_path}")
+        return
+
     config = load_config(config_path)
     
     sim_config = config["simulation"]
@@ -27,7 +39,7 @@ def main():
     source_locs = sim_config["source_locs"]
     duration = sim_config["duration"]
     
-    output_dir = Path("localization/output")
+    output_dir = Path(sim_config.get("output_dir", "localization/output"))
     output_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Setting up simulation in {room_dim}m room...")
