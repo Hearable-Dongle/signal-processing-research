@@ -67,6 +67,9 @@ def run_simulation(config: SimulationConfig) -> Tuple[np.ndarray, np.ndarray, Li
         if np.max(np.abs(audio)) > 0:
             audio = audio / np.max(np.abs(audio))
             
+        # Apply gain
+        audio = audio * source_conf.gain
+
         room.add_source(source_conf.loc, signal=audio)
         source_signals.append(audio)
 
