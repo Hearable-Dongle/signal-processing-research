@@ -2,7 +2,7 @@ import numpy as np
 import scipy.signal as signal
 from scipy.linalg import eigh
 
-class LocalizationSystem:
+class SSZLocalization:
     def __init__(self, mic_pos, fs=16000, nfft=512, overlap=0.5, epsilon=0.2, d_freq=2, freq_range=(200, 3000), max_sources=4):
         """
         Args:
@@ -223,3 +223,355 @@ class LocalizationSystem:
         wrap_indices = indices % N
         
         hist[wrap_indices] = np.maximum(0, hist[wrap_indices] - atom * scale)
+
+
+class GMDALaplace:
+    def __init__(self, mic_pos, fs=16000, nfft=512, overlap=0.5, 
+                 freq_range=(200, 3000), max_sources=4,
+                 power_thresh_percentile=90, mdl_beta=3.0,
+                 mic_type_is_circular=True):
+        """
+        Implementation of Zhang & Rao (2010) GMDA-Laplace localization.
+        
+        Args:
+            mic_pos: (3, M) numpy array of microphone positions.
+            fs: Sampling frequency.
+            nfft: FFT size.
+            overlap: Overlap fraction (0 to 1).
+            freq_range: Tuple (min_freq, max_freq) in Hz.
+            max_sources: Max sources to consider for MDL.
+            power_thresh_percentile: Percentile for power thresholding (e.g. 90 = top 10%).
+            mdl_beta: Penalty factor for MDL (> 0.5).
+        """
+        self.mic_pos = mic_pos
+        self.fs = fs
+        self.nfft = nfft
+        self.overlap = overlap
+        self.freq_range = freq_range
+        self.max_sources = max_sources
+        self.power_thresh_percentile = power_thresh_percentile
+        self.mdl_beta = mdl_beta
+        self.c = 343.0
+        self.mic_type_is_circular = mic_type_is_circular
+        
+    def process(self, audio):
+        """
+        Process multichannel audio to find sources using GMDA-Laplace.
+        
+        Returns:
+            estimated_doas: List of estimated angles (radians).
+            histogram: (Dummy) Angular histogram for viz compatibility.
+            history: (Dummy) History for viz compatibility.
+        """
+        # 1. STFT
+        f_vec, t_vec, Zxx = signal.stft(audio, fs=self.fs, nperseg=self.nfft, 
+                                       noverlap=int(self.nfft * self.overlap))
+        # Zxx: (M, F, T)
+        M_mics, F, T = Zxx.shape
+        
+        # Frequency Mask
+        f_min, f_max = self.freq_range
+        f_mask = (f_vec >= f_min) & (f_vec <= f_max)
+        f_indices = np.where(f_mask)[0]
+        
+        # 2. Data Selection (High SNR)
+        # Power of ref mic (0)
+        power = np.abs(Zxx[0, f_mask, :])**2 # (F_sub, T)
+        if power.size == 0:
+            return [], np.zeros(360), []
+
+        threshold = np.percentile(power, self.power_thresh_percentile)
+        mask_snr = power >= threshold # (F_sub, T) boolean
+        
+        indices_f_sub, indices_t = np.where(mask_snr) 
+        
+        obs_Y = []
+        obs_Omega = []
+        
+        for i in range(len(indices_f_sub)):
+            f_idx = f_indices[indices_f_sub[i]]
+            t_idx = indices_t[i]
+            
+            omega = 2 * np.pi * f_vec[f_idx]
+            if omega == 0: continue
+
+            # Phase diffs relative to mic 0
+            ref_spec = Zxx[0, f_idx, t_idx]
+            y_i = []
+            for m in range(1, M_mics):
+                mic_spec = Zxx[m, f_idx, t_idx]
+                phase_diff = np.angle(ref_spec * np.conjugate(mic_spec))
+                y_i.append(phase_diff)
+            
+            obs_Y.append(y_i)
+            obs_Omega.append(omega)
+            
+        obs_Y = np.array(obs_Y) # (N_obs, M-1)
+        obs_Omega = np.array(obs_Omega) # (N_obs,)
+        N_obs = len(obs_Y)
+        
+        if N_obs == 0:
+            return [], np.zeros(360), []
+            
+        print(f"GMDA: Selected {N_obs} TF points.")
+
+        # 3. Initialization using ITD Histogram (via SRP/Grid Search for robustness)
+        # We need to propose initial slopes for candidate sources.
+        # Paper says "Convert IPDs to ITDs, bin them".
+        # We'll generate a histogram of DOAs using a simple SRP-like method on the selected points.
+        
+        search_angles = np.linspace(0, 2*np.pi, 72, endpoint=False) # 5 deg resolution for init
+        init_hist = np.zeros(len(search_angles))
+        
+        # Precompute delays for grid: (M-1, A)
+        grid_delays = np.zeros((M_mics-1, len(search_angles)))
+        for m in range(1, M_mics):
+            diff = self.mic_pos[:, m] - self.mic_pos[:, 0] # Vector from 0 to m
+            for ai, ang in enumerate(search_angles):
+                u = np.array([np.cos(ang), np.sin(ang), 0])
+                # Delay tau_1m = - (r_m - r_1) . u / c
+                grid_delays[m-1, ai] = -np.dot(diff, u) / self.c
+        
+        # Populate histogram (Accumulate consistency)
+        # For each obs, find closest angle
+        for i in range(N_obs):
+            # Cost: sum | wrap(psi - omega * delay) |
+            # Vectorized over angles
+            psi = obs_Y[i][:, np.newaxis] # (M-1, 1)
+            omega = obs_Omega[i]
+            pred_phase = omega * grid_delays # (M-1, A)
+            
+            # Wrap error to [-pi, pi]
+            err = np.angle(np.exp(1j * (psi - pred_phase)))
+            cost = np.sum(np.abs(err), axis=0) # (A,)
+            
+            best_ang_idx = np.argmin(cost)
+            init_hist[best_ang_idx] += 1
+            
+        # Smooth histogram
+        init_hist = np.convolve(np.pad(init_hist, 2, 'wrap'), np.ones(3)/3, 'same')[2:-2]
+
+        # Find peaks
+        # Simple peak finding
+        peaks = []
+        for i in range(len(init_hist)):
+            prev = init_hist[(i-1)%len(init_hist)]
+            curr = init_hist[i]
+            next_val = init_hist[(i+1)%len(init_hist)]
+            if curr > prev and curr > next_val:
+                peaks.append((curr, i))
+        
+        peaks.sort(key=lambda x: x[0], reverse=True)
+        candidate_indices = [p[1] for p in peaks[:self.max_sources]]
+        
+        # 4. Model Selection (MDL) loop
+        best_model = None
+        best_mdl_score = -np.inf
+        
+        # Test m from 1 to max_sources (or len(peaks))
+        limit_sources = min(len(peaks), self.max_sources)
+        if limit_sources == 0: limit_sources = 1
+        
+        # Pre-convert candidate angles to slopes for initialization
+        # Slopes alpha_{k} correspond to delay tau_{1,k}
+        # We need a set of slopes for each source.
+        
+        all_candidate_slopes = [] # List of (M-1,) arrays
+        for idx in candidate_indices:
+             all_candidate_slopes.append(grid_delays[:, idx])
+        
+        # Fallback if no peaks
+        while len(all_candidate_slopes) < self.max_sources:
+             all_candidate_slopes.append(np.zeros(M_mics-1))
+
+        for m_sources in range(1, limit_sources + 1):
+            # Init Parameters
+            # alpha: (m_sources, M-1)
+            alpha = np.array(all_candidate_slopes[:m_sources])
+            
+            # b: (m_sources,) variance
+            # Init b somewhat large? Paper doesn't specify.
+            # E[|x|] = b. Residuals roughly uniform in [-pi, pi] -> avg |x| ~ pi/2?
+            # Start with 1.0
+            b = np.ones(m_sources)
+            
+            # priors: (m_sources,)
+            pi_mix = np.ones(m_sources) / m_sources
+            
+            # EM Loop
+            max_iter = 20
+            for iter_num in range(max_iter):
+                # E-step
+                # P(j|i) propto pi_j * prod_k p(y_ik | j)
+                # log P_unnorm(j, i) = log pi_j - (M-1) log(2b_j) - sum_k |err|/b_j
+                
+                log_probs = np.zeros((N_obs, m_sources))
+                
+                for j in range(m_sources):
+                    # Calc error for source j
+                    # err: (N_obs, M-1)
+                    # wrap(psi - alpha * omega)
+                    
+                    pred = np.outer(obs_Omega, alpha[j]) # (N, M-1)
+                    diff = obs_Y - pred
+                    # Wrap
+                    err = np.angle(np.exp(1j * diff))
+                    abs_err = np.abs(err)
+                    sum_abs_err = np.sum(abs_err, axis=1) # (N,)
+                    
+                    log_probs[:, j] = np.log(pi_mix[j] + 1e-10) \
+                                      - (M_mics - 1) * np.log(2 * b[j] + 1e-10) \
+                                      - sum_abs_err / (b[j] + 1e-10)
+                
+                # Normalize via log-sum-exp
+                max_log = np.max(log_probs, axis=1, keepdims=True)
+                log_probs -= max_log
+                probs = np.exp(log_probs)
+                probs /= np.sum(probs, axis=1, keepdims=True) # (N, m_src)
+                
+                # M-step
+                
+                # Update priors
+                N_j = np.sum(probs, axis=0) # (m_src,)
+                pi_mix = N_j / N_obs
+                
+                # Update b
+                # b_j = (1 / (N * (M-1) * pi_j)) * sum_i P(j|i) sum_k |err|
+                for j in range(m_sources):
+                    pred = np.outer(obs_Omega, alpha[j])
+                    diff = obs_Y - pred
+                    err = np.angle(np.exp(1j * diff))
+                    sum_abs_err = np.sum(np.abs(err), axis=1)
+                    
+                    weighted_err = np.sum(probs[:, j] * sum_abs_err)
+                    denom = N_obs * (M_mics - 1) * pi_mix[j]
+                    b[j] = weighted_err / (denom + 1e-10)
+                
+                # Update alpha using Newton (IRLS)
+                for j in range(m_sources):
+                    # For each mic pair k, update alpha_{j,k}
+                    # We can update them independently as cross-terms don't exist in likelihood (diagonal cov)
+                    
+                    for k in range(M_mics - 1):
+                        # Data for this regression: obs_Y[:, k], obs_Omega[:]
+                        # Weights: probs[:, j]
+                        
+                        self._newton_update(alpha, j, k, obs_Y[:, k], obs_Omega, probs[:, j])
+
+            # Calculate MDL
+            # Log Likelihood
+            # L = sum_i log( sum_j pi_j p(y_i|j) )
+            # We can recompute this or approx
+            
+            final_log_probs = np.zeros((N_obs, m_sources))
+            for j in range(m_sources):
+                 pred = np.outer(obs_Omega, alpha[j])
+                 diff = obs_Y - pred
+                 err = np.angle(np.exp(1j * diff))
+                 sum_abs_err = np.sum(np.abs(err), axis=1)
+                 
+                 term = np.log(pi_mix[j] + 1e-10) - (M_mics - 1)*np.log(2*b[j] + 1e-10) - sum_abs_err/(b[j]+1e-10)
+                 final_log_probs[:, j] = term
+            
+            # Sum over sources in log domain
+            # log(sum exp(x))
+            m_max = np.max(final_log_probs, axis=1)
+            ll_per_point = m_max + np.log(np.sum(np.exp(final_log_probs - m_max[:, np.newaxis]), axis=1))
+            total_ll = np.sum(ll_per_point)
+            
+            # Penalty
+            # params = m*(M_mics + 1) - 1
+            n_params = m_sources * ( (M_mics - 1) + 2 ) - 1
+            # Paper says beta * k * ln N
+            penalty = self.mdl_beta * n_params * np.log(N_obs)
+            
+            mdl = total_ll - penalty
+            
+            if mdl > best_mdl_score:
+                best_mdl_score = mdl
+                best_model = {
+                    'alpha': alpha.copy(),
+                    'b': b.copy(),
+                    'pi': pi_mix.copy(),
+                    'm': m_sources
+                }
+        
+        # 5. Extract DOAs from best model
+        final_doas = []
+        if best_model is not None:
+            alphas = best_model['alpha'] # (m, M-1)
+            
+            # Use finer grid for final readout
+            fine_angles = np.linspace(0, 2*np.pi, 720, endpoint=False)
+            fine_delays = np.zeros((M_mics-1, len(fine_angles)))
+            for m in range(1, M_mics):
+                diff = self.mic_pos[:, m] - self.mic_pos[:, 0]
+                for ai, ang in enumerate(fine_angles):
+                    u = np.array([np.cos(ang), np.sin(ang), 0])
+                    fine_delays[m-1, ai] = -np.dot(diff, u) / self.c
+            
+            # Convert slopes back to DOAs
+            # Minimize error between alpha and grid_delays
+            for j in range(best_model['m']):
+                if best_model['pi'][j] < 0.1: 
+                    # Ignore this detection as it doesn't represent enough data
+                    continue    
+                src_alpha = alphas[j] # (M-1,)
+                
+                # Check against grid
+                # fine_delays: (M-1, A)
+                dist = np.sum((fine_delays - src_alpha[:, np.newaxis])**2, axis=0)
+                best_ang_idx = np.argmin(dist)
+                final_doas.append(fine_angles[best_ang_idx])
+        
+        # Viz data (just return init histogram for debug)
+        viz_hist = init_hist if len(init_hist) == 360 else np.interp(np.linspace(0, 72, 360), np.arange(72), init_hist)
+        
+        return final_doas, viz_hist, []
+
+    def _newton_update(self, alpha, j, k, y_vec, omega_vec, weights):
+        """
+        Update alpha_{j,k} using Newton/IRLS for L1 regression.
+        Minimize sum_i w_i |wrap(y_i - alpha * omega_i)|
+        """
+        # Current estimate
+        curr_alpha = alpha[j, k]
+        
+        # IRLS Loop (just 1 or 2 steps is usually enough per EM iter)
+        for _ in range(2):
+            # Calculate residual
+            # Unwrapped target estimate:
+            # We want y_i ~ alpha * omega.
+            # Residual r = wrap(y - alpha*omega)
+            # Linearized target Y_lin = alpha*omega + r
+            
+            pred = curr_alpha * omega_vec
+            diff = y_vec - pred
+            r = np.angle(np.exp(1j * diff))
+            
+            # Weight for L1: W' = W / |r|
+            # Regularize |r| to avoid div by zero
+            denom = np.abs(r)
+            denom[denom < 1e-6] = 1e-6
+            
+            W_prime = weights / denom
+            
+            # Weighted Least Squares
+            # Minimize sum W' (r)^2  -> sum W' (Y_lin - a*w)^2 ?
+            # Wait, r is the error.
+            # We want to find shift da such that r_new ~ 0.
+            # r_new = r_old - da * omega
+            # Minimize sum W' (r_old - da * omega)^2
+            
+            # da = sum(W' * r_old * omega) / sum(W' * omega^2)
+            
+            num = np.sum(W_prime * r * omega_vec)
+            den = np.sum(W_prime * omega_vec**2)
+            
+            if den < 1e-10:
+                break
+                
+            d_alpha = num / den
+            curr_alpha += d_alpha
+            
+        alpha[j, k] = curr_alpha

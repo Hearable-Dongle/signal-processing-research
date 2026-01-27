@@ -1,12 +1,18 @@
 import numpy as np
 from pathlib import Path
+import sys
+
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
 import matplotlib.pyplot as plt
 
 from beamforming.util.simulate import sim_mic, sim_room, MicType
 from beamforming.util.visualize import plot_room_pos, plot_mic_pos
 from beamforming.util.configure import Audio_Sources
 
-from localization.algo import LocalizationSystem
+from localization.algo import SSZLocalization, GMDALaplace
 from localization.visualization import plot_source_comparison
 from localization.config_loader import load_config
 
@@ -36,7 +42,7 @@ def main():
     source_locs = sim_config["source_locs"]
     duration = sim_config["duration"]
     
-    output_dir = Path(sim_config.get("output_dir", "localization/output"))
+    output_dir = Path(sim_config.get("output_dir", f"localization/output/{config_path.stem}"))
     output_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Setting up simulation in {room_dim}m room...")
@@ -179,16 +185,32 @@ def main():
     
     print("Running localization algorithm...")
     
-    loc_system = LocalizationSystem(
-        mic_pos=mic_pos_rel,
-        fs=fs,
-        nfft=algo_config["nfft"],
-        overlap=algo_config["overlap"],
-        epsilon=algo_config["epsilon"],
-        d_freq=algo_config["d_freq"],
-        freq_range=tuple(algo_config["freq_range"]),
-        max_sources=algo_config["max_sources"]
-    )
+    algo_type = algo_config.get("type", "SSZ")
+    
+    if algo_type == "GMDA":
+        print("Using GMDA-Laplace algorithm...")
+        loc_system = GMDALaplace(
+            mic_pos=mic_pos_rel,
+            fs=fs,
+            nfft=algo_config.get("nfft", 512),
+            overlap=algo_config.get("overlap", 0.5),
+            freq_range=tuple(algo_config.get("freq_range", [200, 3000])),
+            max_sources=algo_config.get("max_sources", 4),
+            power_thresh_percentile=algo_config.get("power_thresh_percentile", 90),
+            mdl_beta=algo_config.get("mdl_beta", 0.6)
+        )
+    else:
+        print("Using SSZ Localization algorithm...")
+        loc_system = SSZLocalization(
+            mic_pos=mic_pos_rel,
+            fs=fs,
+            nfft=algo_config.get("nfft", 512),
+            overlap=algo_config.get("overlap", 0.5),
+            epsilon=algo_config.get("epsilon", 0.2),
+            d_freq=algo_config.get("d_freq", 2),
+            freq_range=tuple(algo_config.get("freq_range", [200, 3000])),
+            max_sources=algo_config.get("max_sources", 4)
+        )
     
     estimated_doas_rad, histogram, ssz_history = loc_system.process(mic_signals)
     
