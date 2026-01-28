@@ -24,6 +24,7 @@ class SimulationSource:
     loc: List[float]
     audio_path: str
     gain: float = 1.0
+    classification: str = "signal"
 
     def get_absolute_path(self) -> Path:
         """Returns the absolute path to the audio file."""
@@ -44,12 +45,8 @@ class SimulationConfig:
     audio: SimulationAudio
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "SimulationConfig":
-        """Loads configuration from a JSON file."""
-        path = Path(path)
-        with path.open("r") as f:
-            data = json.load(f)
-
+    def from_dict(cls, data: dict) -> "SimulationConfig":
+        """Loads configuration from a dictionary."""
         room = Room(
             dimensions=data["room"]["dimensions"],
             absorption=data["room"]["absorption"],
@@ -66,6 +63,7 @@ class SimulationConfig:
                 loc=s["loc"],
                 audio_path=s["audio"],
                 gain=s.get("gain", 1.0),
+                classification=s.get("classification", "signal")
             )
             for s in data["audio"]["sources"]
         ]
@@ -77,6 +75,31 @@ class SimulationConfig:
         )
 
         return cls(room=room, microphone_array=mic_array, audio=audio)
+
+    def create_noise_config(self) -> "SimulationConfig":
+        """Creates a new SimulationConfig containing only noise sources."""
+        noise_sources = [s for s in self.audio.sources if s.classification != "signal"]
+        
+        new_audio = SimulationAudio(
+            sources=noise_sources,
+            duration=self.audio.duration,
+            fs=self.audio.fs
+        )
+        
+        return SimulationConfig(
+            room=self.room,
+            microphone_array=self.microphone_array,
+            audio=new_audio
+        )
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> "SimulationConfig":
+        """Loads configuration from a JSON file."""
+        path = Path(path)
+        with path.open("r") as f:
+            data = json.load(f)
+        
+        return cls.from_dict(data)
 
     def to_file(self, path: str | Path) -> None:
         """Saves configuration to a JSON file."""
