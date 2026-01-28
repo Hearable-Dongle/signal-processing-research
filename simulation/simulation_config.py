@@ -23,6 +23,7 @@ class MicrophoneArray:
 class SimulationSource:
     loc: List[float]
     audio_path: str
+    gain: float = 1.0
 
     def get_absolute_path(self) -> Path:
         """Returns the absolute path to the audio file."""
@@ -64,6 +65,7 @@ class SimulationConfig:
             SimulationSource(
                 loc=s["loc"],
                 audio_path=s["audio"],
+                gain=s.get("gain", 1.0),
             )
             for s in data["audio"]["sources"]
         ]
@@ -75,3 +77,36 @@ class SimulationConfig:
         )
 
         return cls(room=room, microphone_array=mic_array, audio=audio)
+
+    def to_file(self, path: str | Path) -> None:
+        """Saves configuration to a JSON file."""
+        path = Path(path)
+        
+        data = {
+            "room": {
+                "dimensions": self.room.dimensions,
+                "absorption": self.room.absorption,
+            },
+            "microphone_array": {
+                "mic_center": self.microphone_array.mic_center,
+                "mic_radius": self.microphone_array.mic_radius,
+                "mic_count": self.microphone_array.mic_count,
+            },
+            "audio": {
+                "sources": [
+                    {
+                        "loc": s.loc,
+                        "audio": s.audio_path,
+                        "gain": s.gain,
+                    }
+                    for s in self.audio.sources
+                ],
+                "duration": self.audio.duration,
+                "fs": self.audio.fs,
+            },
+        }
+        
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with path.open("w") as f:
+            json.dump(data, f, indent=4)
