@@ -1,0 +1,61 @@
+{
+    "room": {
+        "dimensions": [
+            9.51,
+            6.69,
+            3.92
+        ],
+        "absorption": 0.2
+    },
+    "microphone_array": {
+        "mic_center": [
+            4.3,
+            3.71,
+            1.5
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    7.06,
+                    2.01,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/7800/283493/7800-283493-0036.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    2.29,
+                    3.76,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/1970/26100/1970-26100-0035.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    5.76,
+                    0.67,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/19/227/19-227-0054.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    2.97,
+                    5.94,
+                    1.75
+                ],
+                "audio": "wham_noise/tr/023a0101_0.56645_022a0108_-0.56645.wav",
+                "gain": 0.44
+            }
+        ],
+        "duration": 10.0,
+        "fs": 16000
+    }
+}
