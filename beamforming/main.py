@@ -137,9 +137,15 @@ def main():
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
-    sim_config = SimulationConfig.from_file(args.config)
+    # Load Configs
     with args.config.open("r") as f:
-        raw_config = json.load(f)
+        full_config_data = json.load(f)
+
+    # Load Simulation Config
+    sim_config = SimulationConfig.from_dict(full_config_data["simulation"])
+    
+    # Load Beamformer Config
+    bf_config = BeamformerConfig.from_dict(full_config_data, fs=sim_config.audio.fs)
 
     log = logging.getLogger("Beamforming")
     if not log.handlers:
@@ -148,11 +154,11 @@ def main():
         log.addHandler(handler)
         log.setLevel(logging.INFO)
 
-    output_dir_str = args.output if args.output else raw_config["beamforming"]["output_dir"]
+    output_dir_str = args.output if args.output else bf_config.output_dir
     output_dir = Path(output_dir_str)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    sound_speed = raw_config["beamforming"]["sound_speed"]
+    sound_speed = bf_config.sound_speed
     fs = sim_config.audio.fs
 
     # Run Simulation for Mixed Audio
@@ -163,56 +169,39 @@ def main():
     # Reconstruct source objects for plot_room_pos
     plot_sources = []
     signal_locs = []
-    noise_indices = []
 
-    for i, s_conf in enumerate(raw_config["audio"]["sources"]):
-        classification = s_conf.get("classification", "signal")
-        plot_sources.append(Audio_Sources(
-            input=s_conf["audio"], 
-            loc=s_conf["loc"], 
-            classification=classification)
-            )
+    for i, s_conf in enumerate(sim_config.audio.sources):
+        cls = s_conf.classification
+        plot_sources.append(Audio_Sources(input=s_conf.audio_path, loc=s_conf.loc, classification=cls))
         
-        if classification == "signal":
-            signal_locs.append(s_conf["loc"])
-        else:
-            noise_indices.append(i)
+        if cls == "signal":
+            signal_locs.append(s_conf.loc)
     
     # Plot Setup
-    plot_mic_pos(mic_pos, output_dir)
-    plot_room_pos(np.array(sim_config.room.dimensions), np.array(sim_config.microphone_array.mic_center), plot_sources, output_dir)
+    # mic_pos from run_simulation is absolute
+    mic_array_center = np.array(sim_config.microphone_array.mic_center)
+    mic_pos_rel = mic_pos - mic_array_center.reshape(3, 1)
+
+    plot_mic_pos(mic_pos_rel, output_dir)
+    plot_room_pos(np.array(sim_config.room.dimensions), mic_array_center, plot_sources, output_dir)
     
     signal_loc = np.array(signal_locs)
 
     # Run Simulation for Noise Only (Ground Truth Noise)
     print("Running Simulation (Noise Only)...")
-    # Create a copy of config with only noise sources
-    noise_config = SimulationConfig.from_file(args.config) # Reload clean copy
-    # Filter sources
-    noise_config.audio.sources = [
-        s for i, s in enumerate(noise_config.audio.sources) if i in noise_indices
-    ]
+    noise_config = sim_config.create_noise_config()
     
     mic_noise, _, _ = run_simulation(noise_config)
     
-    # Ensure lengths match
     if mic_noise.shape[0] > min_samples:
         mic_noise = mic_noise[:min_samples, :]
     elif mic_noise.shape[0] < min_samples:
         pad_amt = min_samples - mic_noise.shape[0]
         mic_noise = np.pad(mic_noise, ((0, pad_amt), (0, 0)))
 
-    # Beamforming Config
-    bf_params = raw_config["beamforming"]
-    bf_config = BeamformerConfig(
-        fs=sim_config.audio.fs,
-        frame_duration_ms=bf_params["frame_duration"],
-        sound_speed=bf_params["sound_speed"],
-        gamma_dB=bf_params["gamma_dB"],
-        iterations=bf_params["iterations"],
-        mic_array_center=np.array(sim_config.microphone_array.mic_center),
-        mic_geometry=mic_pos
-    )
+    # Update Beamformer Config with geometry. TODO: make this consistent across beamforming and simulation
+    bf_config.mic_array_center = mic_array_center
+    bf_config.mic_geometry = mic_pos_rel
 
     print("Computing Beamforming Weights...")
     results = compute_beamforming_weights(
@@ -227,7 +216,7 @@ def main():
     results_packet = {
         "params": results["params"],
         "fvec": results["fvec"],
-        "mic_pos": mic_pos,
+        "mic_pos": mic_pos_rel,
         
         # MVDR
         "steepest_weights": results["steepest"][0],
@@ -256,8 +245,8 @@ def main():
 
     # Construct Ref Audio (Sum of clean signals)
     ref_audio = np.zeros(min_samples)
-    for i, s_conf in enumerate(raw_config["audio"]["sources"]):
-        if s_conf.get("classification", "signal") == "signal":
+    for i, s_conf in enumerate(sim_config.audio.sources):
+        if s_conf.classification == "signal":
             # source_signals is aligned with config.audio.sources indices from first run
             sig = source_signals[i]
             if len(sig) > min_samples: sig = sig[:min_samples]

@@ -1,33 +1,35 @@
 {
-    "room": {
-        "dimensions": [5, 4, 3],
-        "absorption": 0.2
-    },
-    "microphone_array": {
-        "mic_center": [2.5, 2.0, 1.5],
-        "mic_radius": 0.05,
-        "mic_count": 8
-    },
-    "audio": {
-        "sources": [
-            {
-                "loc": [2.5, 1.0, 1.5],
-                "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/brit_talking.wav",
-                "classification": "signal"
-            },
-            {
-                "loc": [2.5, 1.0, 1.5],
-                "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/matthew_talking.wav",
-                "classification": "signal"
-            },
-            {
-                "loc": [2.5, 3.0, 1.5],
-                "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/babble_10dB.wav",
-                "classification": "noise"
-            }
-        ],
-        "duration": 10.0,
-        "fs": 16000
+    "simulation": {
+        "room": {
+            "dimensions": [5, 4, 3],
+            "absorption": 0.2
+        },
+        "microphone_array": {
+            "mic_center": [2.5, 2.0, 1.5],
+            "mic_radius": 0.05,
+            "mic_count": 8
+        },
+        "audio": {
+            "sources": [
+                {
+                    "loc": [2.5, 1.0, 1.5],
+                    "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/brit_talking.wav",
+                    "classification": "signal"
+                },
+                {
+                    "loc": [2.5, 1.0, 1.5],
+                    "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/matthew_talking.wav",
+                    "classification": "signal"
+                },
+                {
+                    "loc": [2.5, 3.0, 1.5],
+                    "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/babble_10dB.wav",
+                    "classification": "noise"
+                }
+            ],
+            "duration": 10.0,
+            "fs": 16000
+        }
     },
     "beamforming": {
         "sound_speed": 343.0,

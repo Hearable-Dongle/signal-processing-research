@@ -3,6 +3,7 @@ from typing import Dict, Tuple, Callable
 import numpy as np
 from scipy.signal import stft
 from numpy.typing import NDArray
+from pathlib import Path
 
 import torch
 
@@ -24,8 +25,29 @@ class BeamformerConfig:
     sound_speed: float
     gamma_dB: float
     iterations: int
-    mic_array_center: NDArray  # config.mic_loc
-    mic_geometry: NDArray      # mic_pos
+    output_dir: Path | str | None = None
+    mic_array_center: NDArray | None = None  # config.mic_loc
+    mic_geometry: NDArray | None = None      # mic_pos
+
+    @classmethod
+    def from_dict(cls, data: dict, fs: int) -> "BeamformerConfig":
+        """
+        Creates BeamformerConfig from a dictionary.
+        Args:
+            data: Dictionary containing beamforming parameters (e.g. from config.json)
+            fs: Sampling frequency (usually from simulation config)
+        """
+        # If passed the root config dict, extract the 'beamforming' section
+        bf_data = data.get("beamforming", data)
+        
+        return cls(
+            fs=fs,
+            frame_duration_ms=bf_data.get("frame_duration", 10.0),
+            sound_speed=bf_data.get("sound_speed", 343.0),
+            gamma_dB=bf_data.get("gamma_dB", 15.0),
+            iterations=bf_data.get("iterations", 10),
+            output_dir=bf_data.get("output_dir")
+        )
 
 def compute_spectral_features(
     audio_multichannel: NDArray, 
