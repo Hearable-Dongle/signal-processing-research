@@ -1,125 +1,21 @@
 import argparse
+import json
+import logging
 from pathlib import Path
-from typing import Tuple, List, Optional
 
-import librosa
 import numpy as np
 import soundfile as sf
 from numpy.typing import NDArray
 from scipy.signal import istft
 
 from beamforming.algo.beamformer import apply_beamformer_stft
-from beamforming.algo.noise_estimation import estimate_Rnn, reduce_Rnn, regularize_Rnn
 from beamforming.util.compare import align_signals, calc_rmse, calc_si_sdr, calc_snr
-from beamforming.util.configure import Config
-from beamforming.util.simulate import MicType, sim_mic, sim_room
 from beamforming.util.visualize import plot_beam_pattern, plot_history, plot_mic_pos, plot_room_pos
+from beamforming.util.configure import Audio_Sources
 from beamforming.beamformer_core import compute_beamforming_weights, BeamformerConfig
+from simulation.simulation_config import SimulationConfig
+from simulation.simulator import run_simulation
 
-
-def simulate_environment(config: Config) -> Tuple[NDArray, NDArray, NDArray, int]:
-    """
-    Sets up the room, microphones, and signal sources, then runs the simulation.
-    Returns:
-        mic_audio: Simulated audio from microphones (samples, channels)
-        mic_pos: Microphone positions
-        signal_loc: Locations of signal sources
-        min_samples: The minimum sample count (for truncation)
-    """
-    room = sim_room(config.room_dim.tolist(), config.fs, config.reflection_count)
-    mic, mic_pos = sim_mic(
-        config.mic_count,
-        config.mic_loc,
-        config.mic_spacing,
-        getattr(MicType, config.mic_type.upper()),
-        config.fs,
-    )
-    room.add_microphone_array(mic)
-
-    signal_sources = [s for s in config.sources if s.classification == "signal"]
-    if not signal_sources:
-        raise ValueError("No signal sources are defined")
-
-    signal_loc = np.array([source.loc for source in signal_sources])
-    
-    # Determine simulation duration based on sources
-    min_sample_count = config.fs * 60
-    for source in config.sources:
-        audio, fs = librosa.load(source.input, sr=config.fs)
-        min_sample_count = min(min_sample_count, len(audio))
-        
-        if np.any(audio):
-            audio /= np.max(np.abs(audio))
-        
-        room.add_source(source.loc, signal=audio)
-
-    plot_mic_pos(mic_pos, config.output_dir)
-    plot_room_pos(config.room_dim, config.mic_loc, config.sources, config.output_dir)
-
-    # Run Simulation
-    room.simulate()
-    
-    mic_audio = np.array(room.mic_array.signals).T
-
-    # Normalize to prevent clipping artifacts
-    max_val = np.max(np.abs(mic_audio))
-    if max_val > 1.0:
-        mic_audio = mic_audio / max_val
-
-    # Truncate to valid length
-    if mic_audio.shape[0] > min_sample_count:
-        mic_audio = mic_audio[:min_sample_count, :]
-    
-    return mic_audio, mic_pos, signal_loc, min_sample_count
-
-
-def get_noise_audio(config: Config, min_samples: int) -> NDArray:
-    """
-    Simulates the noise environment and returns the raw noise audio.
-    Returns:
-        mic_noise: (samples, channels)
-    """
-    mic_count = config.mic_count
-
-    # Default to silence/small noise if no method selected
-    if config.noise_estimation_method != "ground_truth":
-         # If using 'predict' or other methods, we might assume 
-         # the noise is just the quiet parts of the main audio.
-         # For now, return a quiet noise floor if not simulating ground truth.
-        return np.random.randn(min_samples, mic_count) * 1e-6
-
-    config.log.info("Using ground truth simulation for noise audio")
-    noise_sources = [s for s in config.sources if s.classification == "noise"]
-
-    if not noise_sources:
-        config.log.warning("No noise sources found. Returning silence.")
-        return np.zeros((min_samples, mic_count))
-
-    # Create a fresh room/mic setup just for noise
-    noise_room = sim_room(config.room_dim.tolist(), config.fs, config.reflection_count)
-    mic, _ = sim_mic(
-        config.mic_count, config.mic_loc, config.mic_spacing,
-        getattr(MicType, config.mic_type.upper()), config.fs
-    )
-    noise_room.add_microphone_array(mic)
-
-    for source in noise_sources:
-        audio, _ = librosa.load(source.input, sr=config.fs)
-        if np.any(audio):
-            audio /= np.max(np.abs(audio))
-        noise_room.add_source(source.loc, signal=audio)
-
-    noise_room.simulate()
-    mic_noise = np.array(noise_room.mic_array.signals).T
-
-    # Match lengths (Padding/Truncating)
-    if mic_noise.shape[0] > min_samples:
-        mic_noise = mic_noise[:min_samples, :]
-    elif mic_noise.shape[0] < min_samples:
-        pad_amt = min_samples - mic_noise.shape[0]
-        mic_noise = np.pad(mic_noise, ((0, pad_amt), (0, 0)))
-
-    return mic_noise
 
 def reconstruct_audio(
     stft_data: NDArray, 
@@ -144,7 +40,15 @@ def reconstruct_audio(
         return np.pad(time_signal, (0, target_length - len(time_signal)))
 
 
-def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref_audio: NDArray):
+def evaluate_results(
+    output_dir: Path, 
+    fs: int, 
+    log: logging.Logger, 
+    mic_audio: NDArray, 
+    results_dict: dict, 
+    ref_audio: NDArray, 
+    sound_speed: float
+):
     """Calculates metrics (RMSE, SNR, SI-SDR) and plots results."""
     
     methods = {
@@ -156,24 +60,24 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
         "GSC (Iterative)": "gsc_iterative_stft"
     }
 
-    audio_dir = config.output_dir / "audio"
+    audio_dir = output_dir / "audio"
     if not audio_dir.exists():
         audio_dir.mkdir(parents=True)
         
-    sf.write(audio_dir / "mic_raw_audio.wav", mic_audio, config.fs)
+    sf.write(audio_dir / "mic_raw_audio.wav", mic_audio, fs)
     
     reconstructed_signals = {}
     for label, key in methods.items():
         if key in results_dict:
             time_sig = reconstruct_audio(
                 results_dict[key], 
-                config.fs, 
+                fs, 
                 results_dict["params"], 
                 len(ref_audio)
             )
             reconstructed_signals[label] = time_sig
             filename = label.lower().replace(" ", "_").replace("(", "").replace(")", "") + ".wav"
-            sf.write(audio_dir / filename, time_sig, config.fs)
+            sf.write(audio_dir / filename, time_sig, fs)
 
     def print_metrics(name, pred_sig):
         aligned_ref = align_signals(ref_audio, pred_sig)
@@ -182,13 +86,13 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
         snr = calc_snr(aligned_ref, pred_sig)
         sdr = calc_si_sdr(aligned_ref, pred_sig)
         
-        config.log.info(f"{name: <25}: RMSE={rmse:.4f}, SNR={snr:.4f}dB, SI-SDR={sdr:.4f}dB")
+        log.info(f"{name: <25}: RMSE={rmse:.4f}, SNR={snr:.4f}dB, SI-SDR={sdr:.4f}dB")
 
-    config.log.info("-" * 50)
+    log.info("-" * 50)
     print_metrics("Raw Audio (Mean)", np.mean(mic_audio, axis=1))
     for label, sig in reconstructed_signals.items():
         print_metrics(label, sig)
-    config.log.info("-" * 50)
+    log.info("-" * 50)
 
     # Plot Convergence History
     hist_data = {}
@@ -200,7 +104,7 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
         hist_data["GSC Iterative"] = (np.mean(results_dict["gsc_iterative_hist"], axis=0), {"color": "red", "alpha": 0.5})
 
     if hist_data:
-        plot_history(hist_data, config.output_dir)
+        plot_history(hist_data, output_dir)
 
     # Beam Patterns
     fvec = results_dict["fvec"]
@@ -222,8 +126,8 @@ def evaluate_results(config: Config, mic_audio: NDArray, results_dict: dict, ref
                 results_dict[weight_key][bin_idx, :],
                 results_dict["mic_pos"], 
                 fvec[bin_idx],
-                config.sound_speed,
-                config.output_dir,
+                sound_speed,
+                output_dir,
             )
 
 
@@ -233,25 +137,88 @@ def main():
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
-    config = Config(config_path=args.config, output_path=args.output)
+    sim_config = SimulationConfig.from_file(args.config)
+    with args.config.open("r") as f:
+        raw_config = json.load(f)
 
-    mic_audio, mic_pos, signal_loc, min_samples = simulate_environment(config)
-    noise_audio = get_noise_audio(config, min_samples)
+    log = logging.getLogger("Beamforming")
+    if not log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        log.addHandler(handler)
+        log.setLevel(logging.INFO)
 
+    output_dir_str = args.output if args.output else raw_config["beamforming"]["output_dir"]
+    output_dir = Path(output_dir_str)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    sound_speed = raw_config["beamforming"]["sound_speed"]
+    fs = sim_config.audio.fs
+
+    # Run Simulation for Mixed Audio
+    print("Running Simulation (Mixture)...")
+    mic_audio, mic_pos, source_signals = run_simulation(sim_config)
+    min_samples = mic_audio.shape[0]
+
+    # Reconstruct source objects for plot_room_pos
+    plot_sources = []
+    signal_locs = []
+    noise_indices = []
+
+    for i, s_conf in enumerate(raw_config["audio"]["sources"]):
+        classification = s_conf.get("classification", "signal")
+        plot_sources.append(Audio_Sources(
+            input=s_conf["audio"], 
+            loc=s_conf["loc"], 
+            classification=classification)
+            )
+        
+        if classification == "signal":
+            signal_locs.append(s_conf["loc"])
+        else:
+            noise_indices.append(i)
+    
+    # Plot Setup
+    plot_mic_pos(mic_pos, output_dir)
+    plot_room_pos(np.array(sim_config.room.dimensions), np.array(sim_config.microphone_array.mic_center), plot_sources, output_dir)
+    
+    signal_loc = np.array(signal_locs)
+
+    # Run Simulation for Noise Only (Ground Truth Noise)
+    print("Running Simulation (Noise Only)...")
+    # Create a copy of config with only noise sources
+    noise_config = SimulationConfig.from_file(args.config) # Reload clean copy
+    # Filter sources
+    noise_config.audio.sources = [
+        s for i, s in enumerate(noise_config.audio.sources) if i in noise_indices
+    ]
+    
+    mic_noise, _, _ = run_simulation(noise_config)
+    
+    # Ensure lengths match
+    if mic_noise.shape[0] > min_samples:
+        mic_noise = mic_noise[:min_samples, :]
+    elif mic_noise.shape[0] < min_samples:
+        pad_amt = min_samples - mic_noise.shape[0]
+        mic_noise = np.pad(mic_noise, ((0, pad_amt), (0, 0)))
+
+    # Beamforming Config
+    bf_params = raw_config["beamforming"]
     bf_config = BeamformerConfig(
-        fs=config.fs,
-        frame_duration_ms=config.frame_duration,
-        sound_speed=config.sound_speed,
-        gamma_dB=15,
-        iterations=10,
-        mic_array_center=config.mic_loc,
+        fs=sim_config.audio.fs,
+        frame_duration_ms=bf_params["frame_duration"],
+        sound_speed=bf_params["sound_speed"],
+        gamma_dB=bf_params["gamma_dB"],
+        iterations=bf_params["iterations"],
+        mic_array_center=np.array(sim_config.microphone_array.mic_center),
         mic_geometry=mic_pos
     )
 
+    print("Computing Beamforming Weights...")
     results = compute_beamforming_weights(
         audio_input=mic_audio,
         source_locations=signal_loc,
-        noise_audio=noise_audio,
+        noise_audio=mic_noise,
         config=bf_config
     )
 
@@ -287,16 +254,19 @@ def main():
         "gsc_iterative_stft": apply_beamformer_stft(stft_tensor, results["gsc_iterative"][0]),
     }
 
+    # Construct Ref Audio (Sum of clean signals)
     ref_audio = np.zeros(min_samples)
-    for source in [s for s in config.sources if s.classification == "signal"]:
-        audio, _ = librosa.load(source.input, sr=config.fs)
-        if len(audio) > min_samples: audio = audio[:min_samples]
-        else: audio = np.pad(audio, (0, min_samples - len(audio)))
-        ref_audio += audio
+    for i, s_conf in enumerate(raw_config["audio"]["sources"]):
+        if s_conf.get("classification", "signal") == "signal":
+            # source_signals is aligned with config.audio.sources indices from first run
+            sig = source_signals[i]
+            if len(sig) > min_samples: sig = sig[:min_samples]
+            else: sig = np.pad(sig, (0, min_samples - len(sig)))
+            ref_audio += sig
 
-    evaluate_results(config, mic_audio, results_packet, ref_audio)
+    evaluate_results(output_dir, fs, log, mic_audio, results_packet, ref_audio, sound_speed)
     
-    config.log.info(f"Beamforming simulation completed - output saved to {config.output_dir}")
+    log.info(f"Beamforming simulation completed - output saved to {output_dir}")
 
 
 if __name__ == "__main__":
