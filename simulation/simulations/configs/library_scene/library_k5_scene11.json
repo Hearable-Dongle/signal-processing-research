@@ -1,0 +1,79 @@
+{
+    "room": {
+        "dimensions": [
+            5.7,
+            8.73,
+            3.24
+        ],
+        "absorption": 0.6
+    },
+    "microphone_array": {
+        "mic_center": [
+            2.52,
+            4.75,
+            1.5
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    3.93,
+                    3.1,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/4340/15220/4340-15220-0078.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    0.55,
+                    2.12,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/7859/102518/7859-102518-0024.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    3.76,
+                    3.21,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/625/132118/625-132118-0002.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    4.2,
+                    6.07,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/4297/13006/4297-13006-0016.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    0.73,
+                    3.89,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/4853/27670/4853-27670-0028.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    4.66,
+                    4.31,
+                    2.44
+                ],
+                "audio": "wham_noise/tr/019a0101_2.0041_40jc0205_-2.0041sp08.wav",
+                "gain": 0.11
+            }
+        ],
+        "duration": 10.0,
+        "fs": 16000
+    }
+}

@@ -1,0 +1,79 @@
+{
+    "room": {
+        "dimensions": [
+            6.79,
+            7.96,
+            3.7
+        ],
+        "absorption": 0.2
+    },
+    "microphone_array": {
+        "mic_center": [
+            3.25,
+            4.05,
+            1.5
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    5.6,
+                    3.93,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/7264/92316/7264-92316-0004.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    2.29,
+                    3.91,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/4813/248638/4813-248638-0008.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    1.02,
+                    2.12,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/8108/274318/8108-274318-0048.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    1.77,
+                    4.16,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/7226/86965/7226-86965-0049.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    0.5,
+                    6.89,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/6367/65536/6367-65536-0031.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    2.47,
+                    1.74,
+                    2.11
+                ],
+                "audio": "wham_noise/tr/20mo0109_1.1076_025o0316_-1.1076sp08.wav",
+                "gain": 0.66
+            }
+        ],
+        "duration": 10.0,
+        "fs": 16000
+    }
+}
