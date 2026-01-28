@@ -49,7 +49,7 @@ class Config:
             self.__output_path = output_path
         else:
             self.__output_path = (
-                self.__project_dir / self.__project_config["output_dir"]
+                self.__project_dir / self.__project_config["beamforming"]["output_dir"]
             )
 
         if not self.__output_path.exists():
@@ -70,7 +70,7 @@ class Config:
 
         atexit.register(self.close)
 
-        self.set_all_seeds(self.__project_config["seed"])
+        self.set_all_seeds(self.__project_config.get("seed", 42))
         self.__device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.__log.info(f"Using device: {self.__device}")
 
@@ -96,120 +96,28 @@ class Config:
 
     @property
     def sound_speed(self) -> float:
-        return self.__project_config["sound_speed"]
-
-    @property
-    def input_dir(self) -> Path:
-        return Path(self.__project_dir, self.__project_config["input_dir"]).resolve()
+        return self.__project_config["beamforming"]["sound_speed"]
 
     @property
     def output_dir(self) -> Path:
         return self.__output_path
 
     @property
-    def checkpoint_file(self) -> Path | None:
-        if self.__project_config["checkpoint_file"]:
-            checkpoint_file_path = Path(
-                self.__project_config["checkpoint_file"]
-            ).resolve()
-        else:
-            checkpoint_file_path = None
-
-        return checkpoint_file_path
-
-    @property
-    def train_max_sessions(self) -> int | None:
-        max_sessions = self.__project_config["training"]["max_sessions"]
-        if max_sessions == 0:
-            max_sessions = None
-
-        return max_sessions
-
-    @property
-    def val_max_sessions(self) -> int | None:
-        max_sessions = self.__project_config["validation"]["max_sessions"]
-        if max_sessions == 0:
-            max_sessions = None
-
-        return max_sessions
-
-    @property
-    def train_batch_size(self) -> int:
-        return self.__project_config["training"]["batch_size"]
-
-    @property
-    def val_batch_size(self) -> int:
-        return self.__project_config["validation"]["batch_size"]
-
-    @property
-    def optimizer_params(self) -> dict[str, Any]:
-        return self.__project_config["optimizer"]
-
-    @property
-    def scheduler_params(self) -> dict[str, Any]:
-        return self.__project_config["scheduler"]
-
-    @property
-    def epoch_count(self) -> int:
-        return self.__project_config["epoch_count"]
-
-    @property
     def fs(self) -> int:
-        return self.__project_config["sampling_frequency"]
-
-    @property
-    def room_dim(self) -> NDArray[np.float64]:
-        return np.array(
-            list(self.__project_config["room_settings"]["dim"].values()), dtype=np.float64
-        )
-
-    @property
-    def reflection_count(self) -> int:
-        return self.__project_config["room_settings"]["reflection_count"]
-
-    @property
-    def mic_count(self) -> int:
-        return self.__project_config["mic_settings"]["count"]
-
-    @property
-    def mic_spacing(self) -> float:
-        return self.__project_config["mic_settings"]["spacing"]
-
-    @property
-    def mic_loc(self) -> NDArray[np.float64]:
-        return np.array(self.__project_config["mic_settings"]["loc"], dtype=np.float64)
-
-    @property
-    def mic_type(self) -> str:
-        return self.__project_config["mic_settings"]["type"]
-
-    @property
-    def sources(self) -> list[Audio_Sources]:
-        sources = [Audio_Sources(**source) for source in self.__project_config["sources"]]
-        for source in sources:
-            source.resolve_input(self.__project_dir)
-
-        return sources
+        return self.__project_config["audio"]["fs"]
 
     @property
     def noise_estimation_method(self) -> str:
-        return self.__project_config.get("noise_estimation_method", "predict")
-
-    @property
-    def noise_pc_count(self) -> int:
-        return self.__project_config["noise_pc_count"]
-
-    @property
-    def noise_reg_factor(self) -> float:
-        return self.__project_config["noise_reg_factor"]
+        return self.__project_config.get("noise_estimation_method", "ground_truth")
 
     @property
     def frame_duration(self) -> float:
-        return self.__project_config["frame_duration"]
+        return self.__project_config["beamforming"]["frame_duration"]
 
     def close(self) -> None:
-        for log_hdlr in self.__log.handlers:
-            self.__log.removeHandler(log_hdlr)
-            log_hdlr.close()
+        if hasattr(self, '__log'):
+            for log_hdlr in self.__log.handlers:
+                self.__log.removeHandler(log_hdlr)
+                log_hdlr.close()
 
-        del self.__log
+            del self.__log
