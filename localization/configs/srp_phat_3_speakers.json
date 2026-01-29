@@ -1,0 +1,44 @@
+{
+    "simulation": {
+        "room": {
+            "dimensions": [5, 5, 3],
+            "absorption": 0.2
+        },
+        "microphone_array": {
+            "mic_center": [2.5, 2.5, 1.5],
+            "mic_radius": 0.1,
+            "mic_count": 8
+        },
+        "audio": {
+            "sources": [
+                {
+                    "loc": [3.5, 3.5, 1.5],
+                    "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/matthew_talking.wav",
+                    "classification": "signal"
+                },
+                {
+                    "loc": [1.5, 3.5, 1.5],
+                    "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/brit_talking.wav",
+                    "classification": "signal"
+                },
+                {
+                    "loc": [2.5, 1.0, 1.5],
+                    "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/matthew_talking.wav",
+                    "classification": "signal"
+                }
+            ],
+            "duration": 10.0,
+            "fs": 16000
+        }
+    },
+    "localization": {
+        "nfft": 512,
+        "overlap": 0.5,
+        "epsilon": 0.1,
+        "d_freq": 8,
+        "freq_range": [200, 3000],
+        "max_sources": 3,
+        "type": "SRP-PHAT",
+        "output_dir": "localization/output/srp_phat_3_speakers"
+    }
+}

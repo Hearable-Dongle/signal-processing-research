@@ -8,7 +8,7 @@ from scipy.io import wavfile
 
 from beamforming.util.visualize import plot_room_pos, plot_mic_pos
 from beamforming.util.configure import Audio_Sources
-from localization.algo import SSZLocalization, GMDALaplace
+from localization.algo import SSZLocalization, GMDALaplace, SRPPHATLocalization
 from localization.visualization import plot_source_comparison
 from localization.localization_config import LocalizationConfig
 from simulation.simulation_config import SimulationConfig
@@ -73,6 +73,16 @@ def main():
             max_sources=algo_config.max_sources,
             power_thresh_percentile=algo_config.power_thresh_percentile,
             mdl_beta=algo_config.mdl_beta
+        )
+    elif algo_type == "SRP-PHAT":
+        print("Using SRP-PHAT (Power-Weighted) algorithm...")
+        loc_system = SRPPHATLocalization(
+            mic_pos=mic_pos_rel,
+            fs=fs,
+            nfft=algo_config.nfft,
+            overlap=algo_config.overlap,
+            freq_range=algo_config.freq_range,
+            max_sources=algo_config.max_sources
         )
     else:
         print("Using SSZ Localization algorithm...")
