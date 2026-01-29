@@ -807,5 +807,40 @@ class SRPPHATLocalization:
             if not is_ghost:
                 final_doas.append(angle)
                 accepted_sources.append((angle_deg, p_val))
+
+        # 7. Generate Time-History for Visualization
+        # Re-run SRP per frame for the history plot
+        history = []
+        
+        # We use a coarser grid or fewer frames if T is very large, but T ~ 500 is fine.
+        # Construct exponent for all search angles
+        omega = 2 * np.pi * relevant_freqs
+        phase = omega[np.newaxis, :, np.newaxis] * delays[:, np.newaxis, :]
+        steer_vec = np.exp(1j * phase)
+        
+        # Process each time frame
+        for t_idx in range(len(t_vec)):
+            # Check if frame is active
+            if not active_mask[t_idx]:
+                continue
             
-        return final_doas, P_theta, []
+            # Instantaneous GCC-PHAT
+            X_inst = Zxx_roi[:, :, t_idx] # (M, F)
+            frame_GCC = np.zeros((n_pairs, len(relevant_freqs)), dtype=complex)
+            for p_idx, (i, j) in enumerate(pairs):
+                prod = X_inst[i] * np.conj(X_inst[j])
+                denom = np.abs(prod)
+                denom[denom < 1e-10] = 1e-10
+                frame_GCC[p_idx, :] = prod / denom
+            
+            # Apply frequency weighting
+            weighted_GCC = (frame_GCC * W_f[np.newaxis, :])[:, :, np.newaxis]
+            
+            # SRP for this frame
+            P_frame = np.sum(np.sum(np.real(weighted_GCC * steer_vec), axis=1), axis=0)
+            
+            if np.max(P_frame) > 0:
+                best_idx = np.argmax(P_frame)
+                history.append((t_vec[t_idx], search_angles[best_idx]))
+            
+        return final_doas, P_theta, history
