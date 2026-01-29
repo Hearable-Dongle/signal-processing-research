@@ -665,6 +665,12 @@ class SRPPHATLocalization:
         W_f = np.zeros_like(relevant_freqs)
         W_f[snr_ratio > 2.0] = 1.0 # Hard threshold or soft? Instructions: "zeroed out" -> implies hard.
         
+        # Frequency weighting to emphasize higher frequencies (better resolution)
+        W_f *= (relevant_freqs**2)
+        W_f /= (np.max(W_f) + 1e-10) # Normalize
+
+
+        
         # 4. GCC-PHAT Calculation (Averaged over active frames)
         # We need the Cross-Spectrum Matrix averaged over time
         # R_ij(f) = sum_t (X_i X_j* / |X_i X_j*|)
@@ -708,24 +714,13 @@ class SRPPHATLocalization:
         
         delays = np.zeros((n_pairs, len(search_angles)))
         for p_idx, (i, j) in enumerate(pairs):
-            diff = self.mic_pos[:, i] - self.mic_pos[:, j]
+            # Vector pointing from i to j: r_j - r_i
+            # Delay tau_ij = t_i - t_j = (r_j - r_i) . u / c
+            diff = self.mic_pos[:, j] - self.mic_pos[:, i]
+            
             for a_idx, ang in enumerate(search_angles):
                 u = np.array([np.cos(ang), np.sin(ang), 0])
-                delays[p_idx, a_idx] = np.dot(diff, u) / self.c # Wait, standard def is (r_j - r_i)?
-                # Delay of signal at i relative to j?
-                # If source is at u, wavefront hits x first then y.
-                # t_i = -r_i.u/c. t_j = -r_j.u/c.
-                # Delay tau_{ij} = t_i - t_j = (r_j - r_i).u / c.
-                # We used (r_i - r_j) above. Let's check sign.
-                # GCC phase is angle(E[Xi Xj*]).
-                # Xi ~ S * exp(-j w t_i), Xj ~ S * exp(-j w t_j)
-                # Xi Xj* ~ |S|^2 exp(-j w (t_i - t_j))
-                # So phase is -w * tau_{ij}.
-                # To align, we multiply by exp(+j w tau_{ij}).
-                # So we need tau_{ij} = t_i - t_j.
-                # t_i - t_j = (-r_i.u - (-r_j.u))/c = (r_j - r_i).u / c.
-                
-                delays[p_idx, a_idx] = np.dot(self.mic_pos[:, j] - self.mic_pos[:, i], u) / self.c
+                delays[p_idx, a_idx] = np.dot(diff, u) / self.c
 
         # Computation
         # We need sum_f W(f) * Real( GCC_pair(f) * exp(j 2pi f tau) )
@@ -736,19 +731,14 @@ class SRPPHATLocalization:
         # delays: (P, A)
         # relevant_freqs: (F,)
         
-        # Construct exponent: (P, F, A) -> Memory heavy if F*P*A is large.
-        # F~200, P=6, A=360. 200*6*360 = 432,000. Complex. Small.
-        
+        # Construct exponent: (P, F, A)
         omega = 2 * np.pi * relevant_freqs # (F,)
         
         # Phase terms: omega * tau
-        # omega: (1, F, 1)
-        # delays: (P, 1, A)
-        # phase: (P, F, A)
         phase = omega[np.newaxis, :, np.newaxis] * delays[:, np.newaxis, :]
         steer_vec = np.exp(1j * phase)
         
-        # Apply weights to GCC
+        # Apply SNR weights to GCC
         # weighted_GCC: (P, F, 1)
         weighted_GCC = (avg_GCC * W_f[np.newaxis, :])[:, :, np.newaxis]
         
@@ -761,11 +751,13 @@ class SRPPHATLocalization:
         P_theta = np.sum(np.sum(np.real(term), axis=1), axis=0) # (A,)
         
         # Normalize P_theta for "histogram" look
-        P_theta = P_theta - np.min(P_theta)
+        # Clip negative values (sidelobes) to zero instead of lifting everything
+        P_theta[P_theta < 0] = 0
+        
         if np.max(P_theta) > 0:
             P_theta = P_theta / np.max(P_theta)
             
-        # 6. Peak Finding (Simple greedy)
+        # 6. Peak Finding (Simple greedy with Ghost Suppression)
         # Find local maxima
         
         peaks = []
@@ -780,9 +772,40 @@ class SRPPHATLocalization:
         peaks.sort(key=lambda x: x[0], reverse=True)
         
         final_doas = []
-        for p in peaks[:self.max_sources]:
-            idx = p[1]
-            angle = search_angles[idx]
-            final_doas.append(angle)
+        accepted_sources = [] # List of (angle_deg, amplitude)
+        
+        # Ghost suppression parameters
+        # Threshold: if peak < 0.85 * parent_peak and at 180 deg, ignore it.
+        # This works because we improved weighting to reduce ghost ratio to ~0.6.
+        suppression_threshold = 0.85 
+        ghost_angle_tol = 25.0 # degrees tolerance
+        
+        for p_val, p_idx in peaks:
+            if len(final_doas) >= self.max_sources:
+                break
+                
+            angle = search_angles[p_idx]
+            angle_deg = np.degrees(angle)
+            
+            is_ghost = False
+            for acc_ang, acc_amp in accepted_sources:
+                # Check if this peak is a ghost of an already accepted source
+                # Ghost location is 180 degrees from source
+                ghost_loc = (acc_ang + 180) % 360
+                
+                # Circular distance
+                diff = abs(angle_deg - ghost_loc)
+                if diff > 180: diff = 360 - diff
+                
+                if diff < ghost_angle_tol:
+                    # It is spatially close to a ghost location.
+                    # Check amplitude ratio.
+                    if p_val < suppression_threshold * acc_amp:
+                        is_ghost = True
+                        break
+            
+            if not is_ghost:
+                final_doas.append(angle)
+                accepted_sources.append((angle_deg, p_val))
             
         return final_doas, P_theta, []

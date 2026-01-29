@@ -36,7 +36,7 @@
         "overlap": 0.5,
         "epsilon": 0.1,
         "d_freq": 8,
-        "freq_range": [200, 3000],
+        "freq_range": [200, 1500],
         "max_sources": 3,
         "type": "SRP-PHAT",
         "output_dir": "localization/output/srp_phat_3_speakers"
