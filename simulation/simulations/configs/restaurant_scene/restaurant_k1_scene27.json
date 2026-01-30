@@ -1,0 +1,43 @@
+{
+    "room": {
+        "dimensions": [
+            8.91,
+            7.06,
+            3.67
+        ],
+        "absorption": 0.2
+    },
+    "microphone_array": {
+        "mic_center": [
+            4.69,
+            3.28,
+            1.5
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    6.73,
+                    1.16,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/27/124992/27-124992-0033.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    4.22,
+                    1.71,
+                    0.58
+                ],
+                "audio": "wham_noise/tr/40ca010j_0.11601_20la0105_-0.11601sp08.wav",
+                "gain": 0.74
+            }
+        ],
+        "duration": 10.0,
+        "fs": 16000
+    }
+}

@@ -1,0 +1,79 @@
+{
+    "room": {
+        "dimensions": [
+            9.61,
+            5.66,
+            3.71
+        ],
+        "absorption": 0.6
+    },
+    "microphone_array": {
+        "mic_center": [
+            4.48,
+            2.87,
+            1.5
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    3.53,
+                    2.74,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/4853/27671/4853-27671-0011.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    5.41,
+                    3.61,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/8238/274553/8238-274553-0037.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    4.09,
+                    3.99,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/4898/28461/4898-28461-0007.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    7.74,
+                    1.83,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/7078/271888/7078-271888-0111.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    7.8,
+                    4.27,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/7190/90542/7190-90542-0000.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    3.78,
+                    0.75,
+                    0.71
+                ],
+                "audio": "wham_noise/tr/40fc020z_2.0848_027o0319_-2.0848sp12.wav",
+                "gain": 0.06
+            }
+        ],
+        "duration": 10.0,
+        "fs": 16000
+    }
+}

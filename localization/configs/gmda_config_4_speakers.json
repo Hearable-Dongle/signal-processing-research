@@ -1,0 +1,33 @@
+{
+    "simulation": {
+        "fs": 16000,
+        "room_dim": [5, 5, 3],
+        "mic_center": [2.5, 2.5, 1.5],
+        "mic_radius": 0.1,
+        "mic_count": 8,
+        "source_locs": [
+            [3.5, 3.5, 1.5],
+            [1.5, 3.5, 1.5],
+            [1.5, 1.5, 1.5],
+            [3.5, 1.5, 1.5]
+        ],
+        "duration": 10.0,
+        "source_files": [
+            "beamforming/input/matthew_talking.wav",
+            "beamforming/input/brit_talking.wav",
+            "beamforming/input/matthew_talking.wav",
+            "beamforming/input/brit_talking.wav"
+        ],
+        "noise": "beamforming/input/babble_20dB.wav",
+         "output_dir": "localization/output/gmda_4_speakers"
+    },
+    "algorithm": {
+        "type": "GMDA",
+        "nfft": 512,
+        "overlap": 0.5,
+        "freq_range": [500, 3000],
+        "max_sources": 4,
+        "power_thresh_percentile": 80,
+        "mdl_beta": 3.0
+    }
+}

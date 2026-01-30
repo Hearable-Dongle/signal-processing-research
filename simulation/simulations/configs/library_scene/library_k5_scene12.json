@@ -1,0 +1,79 @@
+{
+    "room": {
+        "dimensions": [
+            7.73,
+            5.51,
+            3.48
+        ],
+        "absorption": 0.57
+    },
+    "microphone_array": {
+        "mic_center": [
+            4.02,
+            2.94,
+            1.5
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    0.72,
+                    0.59,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/1867/148436/1867-148436-0033.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    2.26,
+                    0.97,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/39/121914/39-121914-0042.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    2.8,
+                    4.5,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/7302/86814/7302-86814-0004.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    1.58,
+                    0.84,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/248/130644/248-130644-0007.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    6.84,
+                    4.91,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/5163/39921/5163-39921-0045.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    4.63,
+                    2.68,
+                    1.69
+                ],
+                "audio": "wham_noise/tr/021c0214_0.71098_028o030u_-0.71098.wav",
+                "gain": 0.05
+            }
+        ],
+        "duration": 10.0,
+        "fs": 16000
+    }
+}

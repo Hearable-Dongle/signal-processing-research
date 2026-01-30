@@ -1,0 +1,79 @@
+{
+    "room": {
+        "dimensions": [
+            7.73,
+            5.51,
+            3.48
+        ],
+        "absorption": 0.2
+    },
+    "microphone_array": {
+        "mic_center": [
+            4.23,
+            2.91,
+            1.5
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    5.88,
+                    0.65,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/8609/283227/8609-283227-0051.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    0.64,
+                    1.68,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/8770/295465/8770-295465-0026.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    1.2,
+                    2.04,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/1867/148436/1867-148436-0033.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    6.48,
+                    1.23,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/39/121914/39-121914-0042.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    1.0,
+                    4.75,
+                    1.5
+                ],
+                "audio": "LibriSpeech/train-clean-100/7302/86814/7302-86814-0004.flac",
+                "gain": 1.0
+            },
+            {
+                "loc": [
+                    7.13,
+                    4.53,
+                    1.18
+                ],
+                "audio": "wham_noise/tr/207o0103_0.99646_011c020x_-0.99646sp08.wav",
+                "gain": 0.59
+            }
+        ],
+        "duration": 10.0,
+        "fs": 16000
+    }
+}
