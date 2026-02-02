@@ -13,6 +13,7 @@ class LocalizationConfig:
     mdl_beta: float = 0.6
     power_thresh_percentile: float = 90.0
     output_dir: str | None = None
+    model_path: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "LocalizationConfig":
@@ -26,5 +27,6 @@ class LocalizationConfig:
             algo_type=data.get("type", "SSZ"),
             mdl_beta=data.get("mdl_beta", 0.6),
             power_thresh_percentile=data.get("power_thresh_percentile", 90.0),
-            output_dir=data.get("output_dir")
+            output_dir=data.get("output_dir"),
+            model_path=data.get("model_path")
         )
