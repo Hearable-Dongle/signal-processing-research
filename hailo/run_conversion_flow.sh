@@ -9,16 +9,16 @@ OUTPUT_FILENAME=${2:-"${BASE_NAME}.har"}
 SCRIPT_DIR=$(dirname "$0")
 ROOT_DIR="$SCRIPT_DIR/.."
 
-# Move to project roop
+# Move to project root
 if [[ "$PWD" == */hailo ]]; then
     cd ..
 fi
 
-# Define Python Interpreters
+# Interpreters
 ONNX_PYTHON="hailo/to-onnx-env/bin/python"
 HAILO_PYTHON="hailo/to-hailo-env/bin/python"
 
-# Intermediate File Names
+# Intermediate file names
 RAW_ONNX="hailo/${BASE_NAME}_raw.onnx"
 PATCHED_ONNX="hailo/${BASE_NAME}_patched.onnx"
 HAR_OUTPUT="hailo/${OUTPUT_FILENAME}"
