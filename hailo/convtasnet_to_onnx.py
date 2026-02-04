@@ -76,7 +76,6 @@ def tdconvnet_forward_4d(self, mixture_w):
 
 TDConvNet.forward = tdconvnet_forward_4d
 
-# --------------------
 
 def convert_model_to_4d(model):
     """Recursively replace Conv1d/ConvTranspose1d with Conv2d/ConvTranspose2d (Horizontal)."""
@@ -166,6 +165,7 @@ def convert_model_to_4d(model):
 
         else:
             convert_model_to_4d(module)
+
 
 class HailoExportWrapper(nn.Module):
     def __init__(self, original_model):
