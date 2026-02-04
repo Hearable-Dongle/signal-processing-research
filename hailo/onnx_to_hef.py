@@ -4,7 +4,7 @@ from hailo_sdk_client import ClientRunner
 
 def main():
     # onnx_path = "hailo/convtas_fixed.onnx"
-    onnx_path = "hailo/convtas_hailo_ready_fixed.onnx"
+    onnx_path = "hailo/convtas_hailo_ready_patched.onnx"
     model_name = "convtas"
     har_path = f"hailo/{model_name}.har"
     hef_path = f"hailo/{model_name}.hef"
@@ -15,32 +15,20 @@ def main():
     
     print("Starting Translation...")
     
-    # The compiler suggested these nodes in your error log. 
-    # This cuts off the unsupported Expand/Reshape layers.
+    # Suggested end nodes (commented out as per previous success on parsing)
     # suggested_end_nodes = [
-    #     "node_var", 
+    #     "node_Sub_10", 
     #     "node_unsqueeze", 
-    #     "node_Sub_29", 
-    #     "node_Concat_823", 
-    #     "node_Concat_828", 
-    #     "node_Concat_818", 
-    #     "node_Concat_36", 
-    #     "node_Concat_833", 
-    #     "node_Concat_41"
+    #     "node_var"
     # ]
-    suggested_end_nodes = [
-        "node_Sub_10", 
-        "node_unsqueeze", 
-        "node_var"
-    ]
 
     try:
         runner.translate_onnx_model(
             onnx_path, 
             model_name,
             start_node_names=['input'],
-            end_node_names=suggested_end_nodes,
-            net_input_shapes={'input': [1, 1, 16000]} 
+            # end_node_names=['node_convolution'],
+            net_input_shapes={'input': [1, 1, 1, 16000]} 
         )
     except Exception as e:
         print(f"Translation failed with error: {e}")
@@ -51,9 +39,23 @@ def main():
 
     print("Starting Optimization (with random calibration data)...")
     # 8 samples of random noise
-    calib_data = [np.random.randn(1, 1, 16000).astype(np.float32) for _ in range(8)]
+    calib_data = [np.random.randn(1, 1, 1, 16000).astype(np.float32) for _ in range(8)]
     
-    runner.optimize(calib_data=calib_data)
+    print(f"Calib data type: {type(calib_data)}")
+    if isinstance(calib_data, list):
+        print(f"Calib data len: {len(calib_data)}")
+        if len(calib_data) > 0:
+            print(f"Calib data item type: {type(calib_data[0])}")
+            print(f"Calib data item shape: {calib_data[0].shape}")
+
+    # Use dict to be explicit, and convert list to numpy array
+    # Input name is mapped to convtas/input_layer1
+    # Transpose NCHW [1, 1, 1, 16000] -> NHWC [1, 1, 16000, 1]
+    # And remove batch dim -> [1, 16000, 1]
+    calib_data_transposed = [d.transpose(0, 2, 3, 1)[0] for d in calib_data]
+    calib_data_dict = {'convtas/input_layer1': np.array(calib_data_transposed)}
+
+    runner.optimize(calib_data=calib_data_dict)
 
     print("Starting Compilation...")
     hef = runner.compile() 

@@ -13,6 +13,12 @@ initializers = {init.name: init for init in model.graph.initializer}
 count = 0
 for node in model.graph.node:
     if node.op_type in ["Conv", "ConvTranspose"]:
+        if count == 0:
+            print(f"Inspecting first Conv node: {node.name}")
+            print(f"Inputs: {node.input}")
+            for attr in node.attribute:
+                print(f"Attr: {attr.name} = {attr}")
+
         # Check if kernel_shape exists
         exists = any(a.name == "kernel_shape" for a in node.attribute)
         if exists:
@@ -27,17 +33,24 @@ for node in model.graph.node:
         if weight_name in initializers:
             init = initializers[weight_name]
             dims = init.dims
-            # Assume 1D convolution for this model (3 dims: Out, In, K)
-            # The kernel size is the last dimension.
-            # If it were 2D, it would be last 2. But we know this is ConvTasNet (audio).
-            # Safety check:
+            # Assume 1D convolution converted to 2D Horizontal
+            # Dims: [Out, In, 1, K] or [Out, In, K]
+            
+            kernel_size = []
             if len(dims) == 3:
-                kernel_size = [dims[-1]]
+                # [Out, In, K] -> [1, K]
+                kernel_size = [1, dims[-1]]
             elif len(dims) == 4:
-                # Could be 2D conv? e.g. [Out, In, H, W]
-                # But wait, checking node_conv1d_1: [128, 512, 1]
-                # If we encounter [Out, In, H, W], we probably want [H, W]
-                kernel_size = [d for d in dims[2:]]
+                # [Out, In, 1, K] -> [1, K]
+                # Check if dim 2 is 1?
+                if dims[2] == 1:
+                    kernel_size = [1, dims[3]]
+                else:
+                    # Maybe [Out, In, K, 1]? (Vertical)
+                    # But we switched to Horizontal.
+                    # Let's assume standard behavior based on convert script.
+                    # We expect [Out, In, 1, K]
+                    kernel_size = [dims[2], dims[3]]
             else:
                  print(f"Node {node.name}: Weight dims {dims} unexpected. Skipping.")
                  continue
