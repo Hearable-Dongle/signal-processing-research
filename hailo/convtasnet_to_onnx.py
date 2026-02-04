@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from typing import List
 import os
+import argparse
 from asteroid.models import ConvTasNet
 from asteroid.masknn import norms, TDConvNet
 from asteroid.masknn.convolutional import Conv1DBlock
@@ -252,6 +253,10 @@ def replace_prelu_with_custom(model):
             replace_prelu_with_custom(module)
 
 def main():
+    parser = argparse.ArgumentParser(description="Export ConvTasNet to ONNX")
+    parser.add_argument("output", nargs="?", default="hailo/convtas_hailo_ready.onnx", help="Output ONNX file path")
+    args = parser.parse_args()
+
     # 1. Load trained model
     pretrained_model = ConvTasNet.from_pretrained("mpariente/ConvTasNet_WHAM!_sepclean")
     print(f"Model Config: {pretrained_model.masker.get_config()}")
@@ -270,7 +275,7 @@ def main():
     # 4. Dummy Input [1, 1, 1, 16000]
     dummy_input = torch.randn(1, 1, 1, 16000) 
     
-    output_path = "hailo/convtas_hailo_ready.onnx"
+    output_path = args.output
     
     print(f"Exporting model to {output_path}...")
     torch.onnx.export(
