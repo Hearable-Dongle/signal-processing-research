@@ -46,9 +46,6 @@ for node in model.graph.node:
                 if dims[2] == 1:
                     kernel_size = [1, dims[3]]
                 else:
-                    # Maybe [Out, In, K, 1]? (Vertical)
-                    # But we switched to Horizontal.
-                    # Let's assume standard behavior based on convert script.
                     # We expect [Out, In, 1, K]
                     kernel_size = [dims[2], dims[3]]
             else:
