@@ -1,4 +1,3 @@
-import os
 import numpy as np
 from hailo_sdk_client import ClientRunner
 
