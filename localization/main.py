@@ -9,6 +9,7 @@ from scipy.io import wavfile
 from beamforming.util.visualize import plot_room_pos, plot_mic_pos
 from beamforming.util.configure import Audio_Sources
 from localization.algo import SSZLocalization, GMDALaplace, SRPPHATLocalization
+from localization.ai_algo import AILocalization
 from localization.visualization import plot_source_comparison
 from localization.localization_config import LocalizationConfig
 from simulation.simulation_config import SimulationConfig
@@ -83,6 +84,16 @@ def main():
             overlap=algo_config.overlap,
             freq_range=algo_config.freq_range,
             max_sources=algo_config.max_sources
+        )
+    elif algo_type == "AI":
+        print("Using AI-based localization (HailoDOANet)...")
+        loc_system = AILocalization(
+            mic_pos=mic_pos_rel,
+            fs=fs,
+            nfft=algo_config.nfft,
+            overlap=algo_config.overlap,
+            max_sources=algo_config.max_sources,
+            model_path=algo_config.model_path
         )
     else:
         print("Using SSZ Localization algorithm...")
