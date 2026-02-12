@@ -188,17 +188,31 @@ def _plot_overall_method(summary_method: list[dict[str, Any]], out_dir: Path) ->
     f1 = [r.get("f1_mean") for r in summary_method]
 
     x = np.arange(len(methods))
-    width = 0.25
+    mae_arr = np.array([np.nan if v is None else float(v) for v in mae], dtype=float)
+    acc10_arr = np.array([np.nan if v is None else float(v) for v in acc10], dtype=float)
+    f1_arr = np.array([np.nan if v is None else float(v) for v in f1], dtype=float)
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.bar(x - width, [v if v is not None else np.nan for v in mae], width=width, label="MAE (deg)")
-    ax.bar(x, [v if v is not None else np.nan for v in acc10], width=width, label="Acc@10")
-    ax.bar(x + width, [v if v is not None else np.nan for v in f1], width=width, label="F1")
-    ax.set_title("Overall Method Comparison")
-    ax.set_xticks(x)
-    ax.set_xticklabels(methods)
-    ax.grid(axis="y", alpha=0.3)
-    ax.legend()
+    fig, axes = plt.subplots(3, 1, figsize=(12, 11), sharex=True)
+
+    axes[0].bar(x, mae_arr, color="#4c78a8")
+    axes[0].set_title("Overall Method Comparison: MAE")
+    axes[0].set_ylabel("MAE (deg, lower is better)")
+    axes[0].grid(axis="y", alpha=0.3)
+
+    axes[1].bar(x, acc10_arr, color="#59a14f")
+    axes[1].set_title("Overall Method Comparison: Acc@10")
+    axes[1].set_ylabel("Acc@10 (higher is better)")
+    axes[1].set_ylim(0, 1.05)
+    axes[1].grid(axis="y", alpha=0.3)
+
+    axes[2].bar(x, f1_arr, color="#f28e2b")
+    axes[2].set_title("Overall Method Comparison: F1")
+    axes[2].set_ylabel("F1 (higher is better)")
+    axes[2].set_ylim(0, 1.05)
+    axes[2].grid(axis="y", alpha=0.3)
+    axes[2].set_xticks(x)
+    axes[2].set_xticklabels(methods, rotation=20, ha="right")
+
     fig.tight_layout()
 
     out_path = out_dir / "overall_method_comparison.png"
