@@ -11,6 +11,7 @@ from beamforming.util.configure import Audio_Sources
 from localization.algo import SSZLocalization, GMDALaplace, SRPPHATLocalization
 from localization.visualization import plot_source_comparison
 from localization.localization_config import LocalizationConfig
+from localization.target_policy import true_target_doas_deg
 from simulation.simulation_config import SimulationConfig
 from simulation.simulator import run_simulation
 
@@ -114,25 +115,14 @@ def main():
     print(f"\nSaving visualizations to {output_dir}")
     
     # Reconstruct objects for visualization
-    true_doas = []
-    audio_sources_objects = []
-    
+    true_doas = true_target_doas_deg(sim_config)
     mic_center_flat = sim_config.microphone_array.mic_center
-    
-    for i, s_conf in enumerate(sim_config.audio.sources):
+    audio_sources_objects = []
+
+    for s_conf in sim_config.audio.sources:
         loc = s_conf.loc
         cls = s_conf.classification
-        
-        # Calculate True DOA
-        dx = loc[0] - mic_center_flat[0]
-        dy = loc[1] - mic_center_flat[1]
-        angle = np.arctan2(dy, dx)
-        if angle < 0: angle += 2*np.pi
-        angle_deg = np.degrees(angle)
-        
-        if cls == "signal":
-             true_doas.append(angle_deg)
-        
+
         as_obj = Audio_Sources(input=s_conf.audio_path, loc=loc, classification=cls)
         audio_sources_objects.append(as_obj)
 

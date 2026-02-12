@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from localization.algo import GMDALaplace, SRPPHATLocalization, SSZLocalization
+from localization.target_policy import true_target_doas_deg
 from simulation.simulation_config import SimulationConfig
 from simulation.simulator import run_simulation
 
@@ -19,19 +20,6 @@ class AlgorithmResult:
 
 def _normalize_deg(angle_deg: float) -> float:
     return float(angle_deg % 360.0)
-
-
-def _true_target_doas_deg(sim_config: SimulationConfig) -> list[float]:
-    center = sim_config.microphone_array.mic_center
-    out: list[float] = []
-    for source in sim_config.audio.sources:
-        audio_path = source.audio_path.replace("\\", "/")
-        if "LibriSpeech/" not in audio_path:
-            continue
-        dx = source.loc[0] - center[0]
-        dy = source.loc[1] - center[1]
-        out.append(_normalize_deg(math.degrees(math.atan2(dy, dx))))
-    return out
 
 
 def _build_algorithm(method: str, mic_pos_rel: np.ndarray, fs: int, n_true_targets: int, cfg: dict):
@@ -73,7 +61,7 @@ def run_method_on_scene(method: str, method_cfg: dict, sim_config: SimulationCon
     center = np.array(sim_config.microphone_array.mic_center).reshape(3, 1)
     mic_pos_rel = mic_pos_abs - center
 
-    true_doas = _true_target_doas_deg(sim_config)
+    true_doas = true_target_doas_deg(sim_config)
 
     algo = _build_algorithm(
         method=method,
