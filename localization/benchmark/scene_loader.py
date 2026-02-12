@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from localization.target_policy import iter_speech_target_indices
 from simulation.simulation_config import SimulationConfig
 
 
@@ -52,11 +53,8 @@ def load_simulation_config(path: Path) -> SimulationConfig:
 
 
 def iter_target_source_indices(sim_config: SimulationConfig) -> Iterable[int]:
-    # Benchmark policy: speech-only targets via source audio path pattern.
-    for idx, source in enumerate(sim_config.audio.sources):
-        audio_path = source.audio_path.replace("\\", "/")
-        if "LibriSpeech/" in audio_path:
-            yield idx
+    # Shared policy with manual flow: speech-only targets.
+    yield from iter_speech_target_indices(sim_config)
 
 
 def scene_targets_count(sim_config: SimulationConfig) -> int:
