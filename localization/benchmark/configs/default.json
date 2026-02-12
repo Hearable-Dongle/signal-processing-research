@@ -1,0 +1,35 @@
+{
+  "scene_roots": {
+    "library": "simulation/simulations/configs/library_scene",
+    "restaurant": "simulation/simulations/configs/restaurant_scene"
+  },
+  "presets": {
+    "quick": {
+      "sample_per_bucket": 5
+    },
+    "full": {
+      "sample_per_bucket": null
+    }
+  },
+  "methods": {
+    "SSZ": {
+      "nfft": 512,
+      "overlap": 0.5,
+      "epsilon": 0.1,
+      "d_freq": 8,
+      "freq_range": [200, 3000]
+    },
+    "SRP-PHAT": {
+      "nfft": 512,
+      "overlap": 0.5,
+      "freq_range": [200, 3000]
+    },
+    "GMDA": {
+      "nfft": 512,
+      "overlap": 0.5,
+      "freq_range": [500, 3000],
+      "power_thresh_percentile": 80,
+      "mdl_beta": 3.0
+    }
+  }
+}

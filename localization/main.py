@@ -84,7 +84,7 @@ def main():
             freq_range=algo_config.freq_range,
             max_sources=algo_config.max_sources
         )
-    else:
+    elif algo_type == "SSZ":
         print("Using SSZ Localization algorithm...")
         loc_system = SSZLocalization(
             mic_pos=mic_pos_rel,
@@ -95,6 +95,13 @@ def main():
             d_freq=algo_config.d_freq,
             freq_range=algo_config.freq_range,
             max_sources=algo_config.max_sources
+        )
+    else:
+        supported = ["SSZ", "SRP-PHAT", "GMDA"]
+        raise ValueError(
+            f"Unsupported localization type '{algo_type}'. "
+            f"Supported types: {supported}. "
+            "Note: AI localization configs are no longer supported."
         )
     
     estimated_doas_rad, histogram, ssz_history = loc_system.process(mic_signals)
