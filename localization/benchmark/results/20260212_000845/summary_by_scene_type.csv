@@ -1,0 +1,4 @@
+acc_within_10deg_mean,acc_within_15deg_mean,acc_within_5deg_mean,f1_mean,false_alarms_mean,mae_deg_matched_mean,median_ae_deg_mean,method,misses_mean,n_pred_mean,n_scenes,n_true_mean,precision_mean,recall_mean,rmse_deg_matched_mean,runtime_seconds_mean,scene_type
+1.0,1.0,1.0,1.0,0.0,1.22732181698394,1.22732181698394,GMDA,0.0,1.0,2,1.0,1.0,1.0,1.22732181698394,1.22508976298559,library
+1.0,1.0,1.0,1.0,0.0,2.5675135628938524,2.5675135628938524,SRP-PHAT,0.0,1.0,2,1.0,1.0,1.0,2.5675135628938524,1.189903021499049,library
+1.0,1.0,1.0,1.0,0.0,1.067513562893856,1.067513562893856,SSZ,0.0,1.0,2,1.0,1.0,1.0,1.067513562893856,2.7876069299964,library
