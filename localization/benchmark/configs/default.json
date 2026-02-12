@@ -30,6 +30,32 @@
       "freq_range": [500, 3000],
       "power_thresh_percentile": 80,
       "mdl_beta": 3.0
+    },
+    "MUSIC": {
+      "nfft": 512,
+      "overlap": 0.5,
+      "freq_range": [200, 3000],
+      "grid_size": 360
+    },
+    "NormMUSIC": {
+      "nfft": 512,
+      "overlap": 0.5,
+      "freq_range": [200, 3000],
+      "grid_size": 360
+    },
+    "CSSM": {
+      "nfft": 512,
+      "overlap": 0.5,
+      "freq_range": [200, 3000],
+      "grid_size": 360,
+      "num_iter": 5
+    },
+    "WAVES": {
+      "nfft": 512,
+      "overlap": 0.5,
+      "freq_range": [200, 3000],
+      "grid_size": 360,
+      "num_iter": 5
     }
   }
 }

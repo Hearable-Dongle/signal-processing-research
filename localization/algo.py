@@ -1,4 +1,5 @@
 import numpy as np
+import pyroomacoustics as pra
 import scipy.signal as signal
 from scipy.linalg import eigh
 
@@ -844,3 +845,109 @@ class SRPPHATLocalization:
                 history.append((t_vec[t_idx], search_angles[best_idx]))
             
         return final_doas, P_theta, history
+
+
+class PyroomacousticsDOABase:
+    def __init__(
+        self,
+        mic_pos,
+        fs=16000,
+        nfft=512,
+        overlap=0.5,
+        freq_range=(200, 3000),
+        max_sources=4,
+        grid_size=360,
+        num_iter=5,
+        method_name="MUSIC",
+        frequency_normalization=None,
+    ):
+        self.mic_pos = mic_pos
+        self.fs = fs
+        self.nfft = nfft
+        self.overlap = overlap
+        self.freq_range = freq_range
+        self.max_sources = max_sources
+        self.grid_size = grid_size
+        self.num_iter = num_iter
+        self.method_name = method_name
+        self.frequency_normalization = frequency_normalization
+
+    def _build_estimator(self):
+        doa_cls = getattr(pra.doa, self.method_name)
+        search_angles = np.linspace(0, 2 * np.pi, self.grid_size, endpoint=False)
+        kwargs = {
+            "L": self.mic_pos,
+            "fs": self.fs,
+            "nfft": self.nfft,
+            "num_src": self.max_sources,
+            "mode": "far",
+            "azimuth": search_angles,
+        }
+
+        if self.method_name in {"CSSM", "WAVES"}:
+            kwargs["num_iter"] = self.num_iter
+
+        if self.frequency_normalization is not None:
+            kwargs["frequency_normalization"] = self.frequency_normalization
+
+        return doa_cls(**kwargs), search_angles
+
+    def process(self, audio):
+        _, _, Zxx = signal.stft(
+            audio,
+            fs=self.fs,
+            nperseg=self.nfft,
+            noverlap=int(self.nfft * self.overlap),
+        )
+        # Zxx shape expected by pyroomacoustics DOA: (M, F, snapshots)
+        if Zxx.shape[1] == 0 or Zxx.shape[2] == 0:
+            return [], np.zeros(self.grid_size), []
+
+        estimator, _ = self._build_estimator()
+        try:
+            estimator.locate_sources(
+                Zxx,
+                num_src=self.max_sources,
+                freq_range=list(self.freq_range),
+            )
+        except Exception:
+            # Subspace methods can fail on degenerate bins/snapshots (e.g., singular matrix).
+            # Keep pipeline robust by returning no detections for this chunk.
+            return [], np.zeros(self.grid_size), []
+
+        doa_est = getattr(estimator, "azimuth_recon", None)
+        if doa_est is None:
+            estimated_doas = []
+        else:
+            estimated_doas = [float(a % (2 * np.pi)) for a in np.asarray(doa_est).tolist()]
+
+        spectrum = np.asarray(estimator.grid.values, dtype=float).reshape(-1)
+        if spectrum.size != self.grid_size:
+            x_old = np.linspace(0, 1, spectrum.size, endpoint=False)
+            x_new = np.linspace(0, 1, self.grid_size, endpoint=False)
+            spectrum = np.interp(x_new, x_old, spectrum)
+        if np.max(spectrum) > 0:
+            spectrum = spectrum / np.max(spectrum)
+        spectrum[spectrum < 0] = 0
+
+        return estimated_doas, spectrum, []
+
+
+class MUSICLocalization(PyroomacousticsDOABase):
+    def __init__(self, **kwargs):
+        super().__init__(method_name="MUSIC", frequency_normalization=False, **kwargs)
+
+
+class NormMUSICLocalization(PyroomacousticsDOABase):
+    def __init__(self, **kwargs):
+        super().__init__(method_name="NormMUSIC", frequency_normalization=True, **kwargs)
+
+
+class CSSMLocalization(PyroomacousticsDOABase):
+    def __init__(self, **kwargs):
+        super().__init__(method_name="CSSM", **kwargs)
+
+
+class WAVESLocalization(PyroomacousticsDOABase):
+    def __init__(self, **kwargs):
+        super().__init__(method_name="WAVES", **kwargs)

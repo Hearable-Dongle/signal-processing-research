@@ -9,8 +9,12 @@ Localization algorithms and benchmarking tools for simulated multi-speaker scene
   - `SSZ` (`localization.algo.SSZLocalization`)
   - `SRP-PHAT` (`localization.algo.SRPPHATLocalization`)
   - `GMDA` (`localization.algo.GMDALaplace`)
+  - `MUSIC` (`localization.algo.MUSICLocalization`)
+  - `NormMUSIC` (`localization.algo.NormMUSICLocalization`)
+  - `CSSM` (`localization.algo.CSSMLocalization`)
+  - `WAVES` (`localization.algo.WAVESLocalization`)
 
-AI localization modules/configs were removed. Valid `localization.type` values are now only: `SSZ`, `SRP-PHAT`, `GMDA`.
+AI localization modules/configs were removed. Valid `localization.type` values are now: `SSZ`, `SRP-PHAT`, `GMDA`, `MUSIC`, `NormMUSIC`, `CSSM`, `WAVES`.
 - Benchmark framework:
   - `python -m localization.benchmark.run`
   - `python -m localization.benchmark.report`
@@ -34,6 +38,7 @@ Default benchmark policy:
 
 - Ground truth targets: speech sources only (`LibriSpeech/...`)
 - Methods: `SSZ`, `SRP-PHAT`, `GMDA`
+- Optional methods: `MUSIC`, `NormMUSIC`, `CSSM`, `WAVES`
 - Presets:
   - `quick`: stratified sample per `(scene_type, k)`
   - `full`: all scenes
@@ -55,7 +60,7 @@ Optional controls:
 ```bash
 python -m localization.benchmark.run \
   --preset quick \
-  --methods SSZ SRP-PHAT GMDA \
+  --methods SSZ SRP-PHAT GMDA MUSIC NormMUSIC CSSM WAVES \
   --workers 8 \
   --seed 42 \
   --max-scenes 20
@@ -84,7 +89,7 @@ Code added under `localization/benchmark/`:
 - `run.py`: benchmark orchestration CLI
 - `report.py`: CSV/markdown report generation CLI
 - `scene_loader.py`: scene discovery and speech-target filtering
-- `algo_runner.py`: unified execution for `SSZ`, `SRP-PHAT`, `GMDA`
+- `algo_runner.py`: unified execution for `SSZ`, `SRP-PHAT`, `GMDA`, `MUSIC`, `NormMUSIC`, `CSSM`, `WAVES`
 - `matching.py`: circular-distance assignment matching
 - `metrics.py`: per-scene comparable metrics
 - `configs/default.json`: default methods, scene roots, and preset behavior

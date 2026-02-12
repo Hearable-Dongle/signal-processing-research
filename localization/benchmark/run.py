@@ -55,7 +55,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=["SSZ", "SRP-PHAT", "GMDA"],
+        default=["SSZ", "SRP-PHAT", "GMDA", "MUSIC", "NormMUSIC", "CSSM", "WAVES"],
         help="Methods to run.",
     )
     parser.add_argument("--max-scenes", type=int, default=None)

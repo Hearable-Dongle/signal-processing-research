@@ -5,7 +5,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from localization.algo import GMDALaplace, SRPPHATLocalization, SSZLocalization
+from localization.algo import (
+    CSSMLocalization,
+    GMDALaplace,
+    MUSICLocalization,
+    NormMUSICLocalization,
+    SRPPHATLocalization,
+    SSZLocalization,
+    WAVESLocalization,
+)
 from localization.target_policy import true_target_doas_deg
 from simulation.simulation_config import SimulationConfig
 from simulation.simulator import run_simulation
@@ -45,6 +53,28 @@ def _build_algorithm(method: str, mic_pos_rel: np.ndarray, fs: int, n_true_targe
             **common,
             power_thresh_percentile=cfg.get("power_thresh_percentile", 90),
             mdl_beta=cfg.get("mdl_beta", 3.0),
+        )
+    if method == "MUSIC":
+        return MUSICLocalization(
+            **common,
+            grid_size=cfg.get("grid_size", 360),
+        )
+    if method == "NormMUSIC":
+        return NormMUSICLocalization(
+            **common,
+            grid_size=cfg.get("grid_size", 360),
+        )
+    if method == "CSSM":
+        return CSSMLocalization(
+            **common,
+            grid_size=cfg.get("grid_size", 360),
+            num_iter=cfg.get("num_iter", 5),
+        )
+    if method == "WAVES":
+        return WAVESLocalization(
+            **common,
+            grid_size=cfg.get("grid_size", 360),
+            num_iter=cfg.get("num_iter", 5),
         )
 
     raise ValueError(f"Unsupported method: {method}")
