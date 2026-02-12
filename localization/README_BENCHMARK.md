@@ -15,6 +15,13 @@ Default benchmark methods:
 - `SRP-PHAT`
 - `GMDA`
 
+Additional available methods:
+
+- `MUSIC`
+- `NormMUSIC`
+- `CSSM`
+- `WAVES`
+
 ## Metrics
 
 Per scene:

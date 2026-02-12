@@ -8,7 +8,15 @@ from scipy.io import wavfile
 
 from beamforming.util.visualize import plot_room_pos, plot_mic_pos
 from beamforming.util.configure import Audio_Sources
-from localization.algo import SSZLocalization, GMDALaplace, SRPPHATLocalization
+from localization.algo import (
+    CSSMLocalization,
+    GMDALaplace,
+    MUSICLocalization,
+    NormMUSICLocalization,
+    SRPPHATLocalization,
+    SSZLocalization,
+    WAVESLocalization,
+)
 from localization.visualization import plot_source_comparison
 from localization.localization_config import LocalizationConfig
 from localization.target_policy import true_target_doas_deg
@@ -97,8 +105,48 @@ def main():
             freq_range=algo_config.freq_range,
             max_sources=algo_config.max_sources
         )
+    elif algo_type == "MUSIC":
+        print("Using MUSIC algorithm...")
+        loc_system = MUSICLocalization(
+            mic_pos=mic_pos_rel,
+            fs=fs,
+            nfft=algo_config.nfft,
+            overlap=algo_config.overlap,
+            freq_range=algo_config.freq_range,
+            max_sources=algo_config.max_sources
+        )
+    elif algo_type == "NormMUSIC":
+        print("Using NormMUSIC algorithm...")
+        loc_system = NormMUSICLocalization(
+            mic_pos=mic_pos_rel,
+            fs=fs,
+            nfft=algo_config.nfft,
+            overlap=algo_config.overlap,
+            freq_range=algo_config.freq_range,
+            max_sources=algo_config.max_sources
+        )
+    elif algo_type == "CSSM":
+        print("Using CSSM algorithm...")
+        loc_system = CSSMLocalization(
+            mic_pos=mic_pos_rel,
+            fs=fs,
+            nfft=algo_config.nfft,
+            overlap=algo_config.overlap,
+            freq_range=algo_config.freq_range,
+            max_sources=algo_config.max_sources
+        )
+    elif algo_type == "WAVES":
+        print("Using WAVES algorithm...")
+        loc_system = WAVESLocalization(
+            mic_pos=mic_pos_rel,
+            fs=fs,
+            nfft=algo_config.nfft,
+            overlap=algo_config.overlap,
+            freq_range=algo_config.freq_range,
+            max_sources=algo_config.max_sources
+        )
     else:
-        supported = ["SSZ", "SRP-PHAT", "GMDA"]
+        supported = ["SSZ", "SRP-PHAT", "GMDA", "MUSIC", "NormMUSIC", "CSSM", "WAVES"]
         raise ValueError(
             f"Unsupported localization type '{algo_type}'. "
             f"Supported types: {supported}. "
