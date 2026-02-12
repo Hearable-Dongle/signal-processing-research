@@ -9,6 +9,8 @@ Localization algorithms and benchmarking tools for simulated multi-speaker scene
   - `SSZ` (`localization.algo.SSZLocalization`)
   - `SRP-PHAT` (`localization.algo.SRPPHATLocalization`)
   - `GMDA` (`localization.algo.GMDALaplace`)
+
+AI localization modules/configs were removed. Valid `localization.type` values are now only: `SSZ`, `SRP-PHAT`, `GMDA`.
 - Benchmark framework:
   - `python -m localization.benchmark.run`
   - `python -m localization.benchmark.report`
