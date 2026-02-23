@@ -20,6 +20,16 @@ from asteroid.masknn.hailo_activations import get_hailo_activation
 from asteroid.masknn.hailo_convolutional import HailoConv1DBlock2D, HailoConv1DBlockAsTensor, HailoTDConvNet2D
 from asteroid.masknn.hailo_norms import HailoChannelAffineNorm2D, HailoIdentityNorm2D
 from asteroid.models.hailo_conv_tasnet import HailoConvTasNet, HailoDecoderConv1x1Head, HailoEncoder2D
+from asteroid.models.hailo_conv_tasnet_submodules import (
+    HailoConv1x1PartialBlock,
+    HailoDecoderHeadSingleSrc,
+    HailoDecoderPreConvOrIdentity1x1,
+    HailoDecoderPreSlice,
+    HailoMaskerBottleneckOnly,
+    HailoMaskerFirstTCNBlockAsTensor,
+    HailoMaskerHeadOnly,
+    HailoSourceProjectorSlice,
+)
 
 
 class ActivationWrapper(nn.Module):
@@ -29,6 +39,28 @@ class ActivationWrapper(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.act(x)
+
+
+def _build_hailo_convtas(args: argparse.Namespace) -> HailoConvTasNet:
+    return HailoConvTasNet(
+        n_src=args.n_src,
+        n_filters=args.n_filters,
+        kernel_size=args.encdec_kernel_size,
+        stride=args.encdec_stride,
+        bn_chan=args.bn_chan,
+        hid_chan=args.hid_chan,
+        skip_chan=args.skip_chan,
+        n_blocks=args.n_blocks,
+        n_repeats=args.n_repeats,
+        conv_kernel_size=args.kernel_size,
+        mask_act=args.mask_act,
+        norm_mode=args.norm_mode,
+        mask_mul_mode=args.mask_mul_mode,
+        force_n_src_1=args.force_n_src_1,
+        skip_topology_mode=args.skip_topology_mode,
+        decoder_mode=args.decoder_mode,
+        truncate_k_blocks=args.truncate_k_blocks,
+    )
 
 
 def set_seed(seed: int) -> None:
@@ -94,32 +126,217 @@ def build_module(args: argparse.Namespace):
         dummy = torch.randn(args.batch, 1, 1, t)
         return module, dummy
 
+    if args.module == "encoder_conv_only":
+        module = HailoEncoder2D(n_filters=args.n_filters, kernel_size=args.encdec_kernel_size, stride=args.encdec_stride).conv
+        dummy = torch.randn(args.batch, 1, 1, t)
+        return module, dummy
+
     if args.module == "decoder":
         module = HailoDecoderConv1x1Head(args.in_chan, args.n_src)
         dummy = torch.randn(args.batch, args.in_chan, 1, t)
         return module, dummy
 
     if args.module == "hailo_convtasnet":
-        module = HailoConvTasNet(
-            n_src=args.n_src,
-            n_filters=args.n_filters,
-            kernel_size=args.encdec_kernel_size,
-            stride=args.encdec_stride,
-            bn_chan=args.bn_chan,
-            hid_chan=args.hid_chan,
-            skip_chan=args.skip_chan,
-            n_blocks=args.n_blocks,
-            n_repeats=args.n_repeats,
-            conv_kernel_size=args.kernel_size,
-            mask_act=args.mask_act,
-            norm_mode=args.norm_mode,
-            mask_mul_mode=args.mask_mul_mode,
-            force_n_src_1=args.force_n_src_1,
-            skip_topology_mode=args.skip_topology_mode,
-            decoder_mode=args.decoder_mode,
-            truncate_k_blocks=args.truncate_k_blocks,
-        )
+        module = _build_hailo_convtas(args)
         dummy = torch.randn(args.batch, 1, 1, t)
+        return module, dummy
+
+    if args.module == "convtas_encoder_only":
+        full = _build_hailo_convtas(args)
+        module = full.encoder
+        dummy = torch.randn(args.batch, 1, 1, t)
+        return module, dummy
+
+    if args.module == "convtas_masker_only":
+        full = _build_hailo_convtas(args)
+        module = full.masker
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.n_filters, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_bottleneck_only":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerBottleneckOnly(full.masker)
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.n_filters, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_tcn_block0_only":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerFirstTCNBlockAsTensor(full.masker)
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.bn_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_mask_head_only":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerHeadOnly(full.masker)
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        if args.disable_skip or args.skip_chan == 0:
+            head_in_chan = args.bn_chan
+        else:
+            head_in_chan = args.skip_chan
+        dummy = torch.randn(args.batch, head_in_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_source_projector_only":
+        full = _build_hailo_convtas(args)
+        if full.source_projector is None:
+            raise ValueError("convtas_source_projector_only requires n_src > 1 and force_n_src_1 disabled")
+        module = full.source_projector
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.n_filters, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_source_projector_out0":
+        full = _build_hailo_convtas(args)
+        if full.source_projector is None:
+            raise ValueError("convtas_source_projector_out0 requires source_projector")
+        module = HailoSourceProjectorSlice(full.source_projector, out_index=0, slice_width=args.n_filters)
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.n_filters, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_source_projector_out1":
+        full = _build_hailo_convtas(args)
+        if full.source_projector is None:
+            raise ValueError("convtas_source_projector_out1 requires source_projector")
+        module = HailoSourceProjectorSlice(full.source_projector, out_index=1, slice_width=args.n_filters)
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.n_filters, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_decoder_pre_only":
+        full = _build_hailo_convtas(args)
+        export_n_src = 1 if args.force_n_src_1 else args.n_src
+        in_total = args.n_filters * export_n_src
+        module = HailoDecoderPreConvOrIdentity1x1(full.decoder_pre, in_total)
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, in_total, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_decoder_pre_half0":
+        full = _build_hailo_convtas(args)
+        export_n_src = 1 if args.force_n_src_1 else args.n_src
+        in_total = args.n_filters * export_n_src
+        module = HailoDecoderPreSlice(full.decoder_pre, in_total, out_index=0, slice_width=args.n_filters)
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, in_total, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_decoder_pre_half1":
+        full = _build_hailo_convtas(args)
+        export_n_src = 1 if args.force_n_src_1 else args.n_src
+        in_total = args.n_filters * export_n_src
+        module = HailoDecoderPreSlice(full.decoder_pre, in_total, out_index=1, slice_width=args.n_filters)
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, in_total, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_decoder_only":
+        full = _build_hailo_convtas(args)
+        module = full.decoder
+        export_n_src = 1 if args.force_n_src_1 else args.n_src
+        if args.decoder_mode == "conv1x1_head":
+            in_chan = args.n_filters * export_n_src
+        else:
+            in_chan = 64 if args.decoder_mode.endswith("64") else 128
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, in_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_decoder_head_src0":
+        full = _build_hailo_convtas(args)
+        decoder_conv = full.decoder.conv if hasattr(full.decoder, "conv") else full.decoder
+        if not isinstance(decoder_conv, nn.Conv2d):
+            raise ValueError("convtas_decoder_head_src0 requires decoder_mode=conv1x1_head")
+        module = HailoDecoderHeadSingleSrc(decoder_conv, src_index=0)
+        export_n_src = 1 if args.force_n_src_1 else args.n_src
+        in_chan = args.n_filters * export_n_src
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, in_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_decoder_head_src1":
+        full = _build_hailo_convtas(args)
+        decoder_conv = full.decoder.conv if hasattr(full.decoder, "conv") else full.decoder
+        if not isinstance(decoder_conv, nn.Conv2d):
+            raise ValueError("convtas_decoder_head_src1 requires decoder_mode=conv1x1_head")
+        module = HailoDecoderHeadSingleSrc(decoder_conv, src_index=1)
+        export_n_src = 1 if args.force_n_src_1 else args.n_src
+        in_chan = args.n_filters * export_n_src
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, in_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_source_projector_block":
+        full = _build_hailo_convtas(args)
+        if full.source_projector is None:
+            raise ValueError("convtas_source_projector_block requires source_projector")
+        src_idx = args.proj_src_idx
+        if src_idx < 0 or src_idx >= args.n_src:
+            raise ValueError("proj_src_idx out of range")
+        in_start = args.in_block_idx * args.block_chan
+        out_start = (src_idx * args.n_filters) + (args.out_block_idx * args.block_chan)
+        module = HailoConv1x1PartialBlock(
+            source_conv=full.source_projector,
+            in_start=in_start,
+            in_len=args.block_chan,
+            out_start=out_start,
+            out_len=args.block_chan,
+            include_bias=(args.in_block_idx == 0),
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_decoder_pre_block":
+        full = _build_hailo_convtas(args)
+        export_n_src = 1 if args.force_n_src_1 else args.n_src
+        in_total = args.n_filters * export_n_src
+        pre = HailoDecoderPreConvOrIdentity1x1(full.decoder_pre, in_total).pre
+        if not isinstance(pre, nn.Conv2d):
+            raise ValueError("convtas_decoder_pre_block requires conv-compatible decoder_pre")
+        half_idx = args.half_idx
+        if half_idx < 0 or half_idx >= export_n_src:
+            raise ValueError("half_idx out of range")
+        in_start = args.in_block_idx * args.block_chan
+        out_start = (half_idx * args.n_filters) + (args.out_block_idx * args.block_chan)
+        module = HailoConv1x1PartialBlock(
+            source_conv=pre,
+            in_start=in_start,
+            in_len=args.block_chan,
+            out_start=out_start,
+            out_len=args.block_chan,
+            include_bias=(args.in_block_idx == 0),
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_decoder_head_block":
+        full = _build_hailo_convtas(args)
+        decoder_conv = full.decoder.conv if hasattr(full.decoder, "conv") else full.decoder
+        if not isinstance(decoder_conv, nn.Conv2d):
+            raise ValueError("convtas_decoder_head_block requires decoder_mode=conv1x1_head")
+        if args.head_src_idx < 0 or args.head_src_idx >= decoder_conv.out_channels:
+            raise ValueError("head_src_idx out of range")
+        in_start = args.in_block_idx * args.block_chan
+        module = HailoConv1x1PartialBlock(
+            source_conv=decoder_conv,
+            in_start=in_start,
+            in_len=args.block_chan,
+            out_start=args.head_src_idx,
+            out_len=1,
+            include_bias=(args.in_block_idx == 0),
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "plain_conv1x1":
+        module = nn.Conv2d(args.in_chan, args.out_chan, kernel_size=1, bias=True)
+        dummy = torch.randn(args.batch, args.in_chan, 1, t)
         return module, dummy
 
     raise ValueError(f"Unsupported module: {args.module}")
@@ -127,7 +344,38 @@ def build_module(args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(description="Export Hailo module to ONNX")
-    parser.add_argument("--module", required=True, choices=["norm", "activation", "conv1d_block", "tdconvnet", "encoder", "decoder", "hailo_convtasnet"])
+    parser.add_argument(
+        "--module",
+        required=True,
+        choices=[
+            "norm",
+            "activation",
+            "conv1d_block",
+            "tdconvnet",
+            "encoder",
+            "encoder_conv_only",
+            "decoder",
+            "hailo_convtasnet",
+            "convtas_encoder_only",
+            "convtas_masker_only",
+            "convtas_masker_bottleneck_only",
+            "convtas_masker_tcn_block0_only",
+            "convtas_masker_mask_head_only",
+            "convtas_source_projector_only",
+            "convtas_source_projector_out0",
+            "convtas_source_projector_out1",
+            "convtas_decoder_pre_only",
+            "convtas_decoder_pre_half0",
+            "convtas_decoder_pre_half1",
+            "convtas_decoder_only",
+            "convtas_decoder_head_src0",
+            "convtas_decoder_head_src1",
+            "convtas_source_projector_block",
+            "convtas_decoder_pre_block",
+            "convtas_decoder_head_block",
+            "plain_conv1x1",
+        ],
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--batch", type=int, default=1)
@@ -153,6 +401,12 @@ def main():
     parser.add_argument("--decoder_mode", default="conv1x1_head", choices=["conv1x1_head", "reduced_deconv_64", "reduced_deconv_128"])
     parser.add_argument("--encdec_kernel_size", type=int, default=16)
     parser.add_argument("--encdec_stride", type=int, default=8)
+    parser.add_argument("--block_chan", type=int, default=64)
+    parser.add_argument("--in_block_idx", type=int, default=0)
+    parser.add_argument("--out_block_idx", type=int, default=0)
+    parser.add_argument("--proj_src_idx", type=int, default=0)
+    parser.add_argument("--half_idx", type=int, default=0)
+    parser.add_argument("--head_src_idx", type=int, default=0)
     args = parser.parse_args()
 
     set_seed(args.seed)

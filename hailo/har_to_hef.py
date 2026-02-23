@@ -57,8 +57,8 @@ def _to_nhwc(calib_data: np.ndarray) -> np.ndarray:
         # NCHW -> NHWC
         if calib_data.shape[1] == 1 and calib_data.shape[2] == 1:
             return np.transpose(calib_data, (0, 2, 3, 1))
-        # Already NHWC
-        if calib_data.shape[1] == 1 and calib_data.shape[3] == 1:
+        # Already NHWC [N, 1, T, C]
+        if calib_data.shape[1] == 1:
             return calib_data
     if calib_data.ndim == 3 and calib_data.shape[1] == 1:
         # NCT -> NHWC
@@ -86,6 +86,31 @@ def _get_expected_input_sample_shape(runner: ClientRunner, input_name: str):
     if len(shape) != 4:
         return None
     return tuple(shape[1:])  # (H, W, C)
+
+
+def _resolve_input_layer_name(runner: ClientRunner, model_name: str, explicit_input_name: str | None) -> str:
+    if explicit_input_name:
+        return explicit_input_name
+    hn = runner.get_hn_dict()
+    layers = hn.get("layers", {})
+    preferred = f"{model_name}/input_layer1"
+    if preferred in layers:
+        return preferred
+    candidates = [name for name in layers.keys() if name.endswith("/input_layer1")]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        for name in candidates:
+            if name.startswith(f"{model_name}/"):
+                return name
+        return candidates[0]
+    fallback = [name for name in layers.keys() if "input_layer" in name]
+    if fallback:
+        return fallback[0]
+    raise ValueError(
+        "Unable to infer input layer name from HAR. "
+        "Pass --input_layer_name explicitly."
+    )
 
 
 def _fit_nhwc_to_expected(calib_data: np.ndarray, expected_hwc, policy: str) -> np.ndarray:
@@ -170,6 +195,7 @@ def _normalize_exception(exc: Exception):
 
 
 def _write_failure_report(path: str, exc: Exception) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     normalized = _normalize_exception(exc)
     lines = [
         f"exception_type: {normalized['exception_type']}",
@@ -191,6 +217,7 @@ def _write_failure_report(path: str, exc: Exception) -> None:
 
 
 def _write_failure_json(path: str, exc: Exception) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     normalized = _normalize_exception(exc)
     Path(path).write_text(json.dumps(normalized, indent=2, sort_keys=True) + "\n")
 
@@ -260,7 +287,8 @@ def _run_once(args: argparse.Namespace) -> None:
             )
             calib_data = np.random.uniform(-1, 1, (args.num_samples, 1, SAMPLE_RATE, 1)).astype(np.float32)
 
-        input_name = f"{args.model_name}/input_layer1"
+        input_name = _resolve_input_layer_name(runner, args.model_name, args.input_layer_name)
+        print(f"Resolved optimization input layer: {input_name}")
         expected_hwc = _get_expected_input_sample_shape(runner, input_name)
         if expected_hwc is not None:
             exp_h, exp_w, exp_c = expected_hwc
@@ -333,6 +361,11 @@ def main():
     parser.add_argument("har_path", nargs="?", default="hailo/convtas.har", help="Input HAR file path")
     parser.add_argument("hef_path", nargs="?", default="hailo/convtas.hef", help="Output HEF file path")
     parser.add_argument("--model_name", default="convtas", help="Model name (used to derive input layer name)")
+    parser.add_argument(
+        "--input_layer_name",
+        default=None,
+        help="Explicit optimization input layer name (overrides auto-detection).",
+    )
     parser.add_argument("--hw_arch", choices=["hailo8", "hailo8l", "hailo8r"], default="hailo8", help="Target hardware")
     parser.add_argument("--num_samples", type=int, default=16, help="Number of calibration samples to use")
     parser.add_argument("--batch_size", type=int, default=4, help="Calibration batch size (lower saves memory)")
