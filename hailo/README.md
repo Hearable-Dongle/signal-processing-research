@@ -1,99 +1,158 @@
-# Hailo 8 Conversion
+# Hailo ConvTasNet Runbook
 
-See [hailo_demo](../hailo_demo/README.md) to setup a dummy project play with the Hailo SDK and Onnx models.
+This directory contains the ConvTasNet-to-Hailo workflow and validation scripts.
 
-## Overview
+## Pipeline
+`PyTorch -> ONNX -> HAR -> HEF`
 
-Pytorch does not run on the Hailo 8, and we need to convert the model to Hailo's .hef format that runs on the hardware.
+For this model family, direct full-model HEF compile is allocator-sensitive. The workflow therefore compiles decomposed modules first, then validates stitched parity.
 
-Full flow is:
-Pytorch Model --> Onnx Model --> Hailo .har Model --> Hailo .hef Binary
+Trackers:
+- `hailo/RUNNING_TODO_CONVTAS_HEF.md`
+- `hailo/workarounds.md`
 
-## Environment
+## Setup
+Use Python 3.10.
 
-Two environments are needed:
-### 1. Pytorch --> Onnx
-
-```shell
+ONNX export env:
+```bash
 python3.10 -m venv hailo/to-onnx-env
 source hailo/to-onnx-env/bin/activate
-pip install -r hailo/to-onnx-conv-env-reqrequirements.txt
+pip install -r hailo/to-onnx-env-requirements.txt
 ```
 
-### 2. Onnx --> Hailo .har
-
-Create an account in [Hailo Developer Zone](https://hailo.ai/) and download the [Hailo Dataflow Compiler SDK](https://hailo.ai/developer-zone/software-downloads/?product=ai_accelerators&device=hailo_8_8l). I am pretty sure that this only works on a Linux machine - ask Matthew for access to remote machine if you are having issues with another OS.
-
-```shell
-python3.10 -m venv hailo/to-hailo-env # IMPORTANT: Hailo Data Conversion Flow only supports python3.10
+Hailo compile env:
+```bash
+python3.10 -m venv hailo/to-hailo-env
 source hailo/to-hailo-env/bin/activate
-pip install <downloaded-hailo-sdk-client-whl-file>.whl
+pip install <hailo_sdk_client_whl>
 pip install -r hailo/to-hailo-env-requirements.txt
 ```
 
+Notes:
+- `hailo_sdk_client` is sufficient for ONNX->HAR->HEF.
+- Real device execution of `.hef` needs runtime packages (`hailo_platform` / `pyhailort`) on the target machine.
 
-## Conversion flow
-After setting up the environments, run the full conversion flow with:
-```shell
-chmod +x hailo/run_conversion_flow.sh
-hailo/run_conversion_flow.sh convtas
+## Quickstart (Recommended)
+Run from repo root.
+
+1. Decoder allocator + block grid:
+```bash
+PROFILE=full ./hailo/scripts/hailo_test_allocator_mapping_fixes.sh
 ```
 
-To run just the HAR to HEF step (optimize + compile) independently:
-```shell
-hailo/to-hailo-env/bin/python -m hailo.har_to_hef hailo/convtas.har hailo/convtas.hef
+2. Masker allocator + block grid:
+```bash
+PROFILE=full ./hailo/scripts/hailo_test_masker_allocator_fixes.sh
 ```
 
-Preferred (real calibration + explicit target):
-```shell
-hailo/to-hailo-env/bin/python -m hailo.har_to_hef \
-  hailo/convtas.har hailo/convtas.hef \
-  --hw_arch hailo8 \
-  --calib_npz <path/to/calibration.npz> \
-  --log_failed_layers_path hailo/compile_failure.txt
+3. Decoder stitched parity (proxy backend):
+```bash
+BACKEND=torch_proxy ./hailo/scripts/hailo_test_hef_tiled_decoder_path.sh
 ```
 
-Full flow with environment overrides:
-```shell
-HW_ARCH=hailo8 \
-NORM_MODE=channel \
-CALIB_NPZ=<path/to/calibration.npz> \
-COMPILER_OPT_LEVEL=max \
-hailo/run_conversion_flow.sh convtas
+4. Masker stitched parity (proxy backend):
+```bash
+BACKEND=torch_proxy ./hailo/scripts/hailo_test_hef_tiled_masker_path.sh
 ```
 
-Topology isolation overrides (for compile debugging):
-```shell
-DISABLE_SKIP=true|false \
-MASK_MUL_MODE=normal|bypass \
-FORCE_N_SRC_1=true|false \
-BYPASS_CONCAT=true|false \
-SKIP_TOPOLOGY_MODE=concat|project \
-DECONV_MODE=grouped|ungrouped_blockdiag|reduced_deconv_128|reduced_deconv_64|conv1x1_head \
-TRUNCATE_K_BLOCKS=0|1|2|... \
-hailo/run_conversion_flow.sh convtas_dbg convtas_dbg.har
+5. End-to-end stitched parity:
+```bash
+./hailo/scripts/hailo_test_hef_tiled_full_chain.sh
 ```
 
-Focused targeted run sequence (baseline + skip/mask/source/K-sweep):
-```shell
-CALIB_NPZ=hailo/calibration_1000ms_16k_64.npz \
-./hailo/realtime_sep_compile_isolation_run.sh
+6. Real LibriMix forward pass (2-speaker separation, Hailo-format wrapper):
+```bash
+./hailo/scripts/hailo_run_librimix_forward_example.sh
+```
+Optional overrides:
+```bash
+MIX_WAV=/home/mkeller/data/librimix/Libri2Mix/wav8k/max/train-360/mix_clean/<file>.wav \
+MODEL_ID=mpariente/ConvTasNet_WHAM!_sepclean \
+./hailo/scripts/hailo_run_librimix_forward_example.sh
 ```
 
-Artifacts:
-- Logs: `hailo/night_runs2/<timestamp>/<run_tag>.log`
-- Failure reports: `hailo/night_runs2/<timestamp>/<run_tag>.failure.txt(.json)`
-- Summary table: `hailo/night_runs2/summary.tsv`
-
-Generate calibration NPZ from LibriMix (example: 200 ms clips at 16 kHz):
-```shell
-hailo/to-hailo-env/bin/python -m hailo.generate_calibration_npz \
-  --output hailo/calibration_200ms_16k_64.npz \
-  --num_samples 64 \
-  --clip_ms 200 \
-  --sample_rate 16000 \
-  --layout nt
+Optional runtime checks (on target with runtime installed):
+```bash
+BACKEND=hailo_runtime ./hailo/scripts/hailo_test_hef_tiled_decoder_path.sh
+BACKEND=hailo_runtime ./hailo/scripts/hailo_test_hef_tiled_masker_path.sh
 ```
 
-## TODO:
-- [ ] Need to get latency and memory usage number on the actual Hailo
+## Output Layout
+Every script writes to:
+`hailo/module_runs/<run_ts>/`
+
+Common files:
+- `*_summary.tsv`: case-level status table
+- `*.log`: ONNX export/translate logs
+- `*_hef.log`: HAR->HEF logs
+- `*_compile_failure.txt`: normalized failure excerpt
+- `*.json`: numeric parity metrics
+
+## Metrics Reference
+
+### Compile summary metrics (`*_summary.tsv`)
+Main columns:
+- `har_success`: ONNX->HAR status
+- `hef_success`: HAR->HEF status
+- `exception_type`: normalized top-level error class
+- `failure_head`: first failure signature line
+
+Typical interpretation:
+- `har_success=true` and `hef_success=false`: model translates, but fails in quantization/allocation/compile.
+- `exception_type=BackendAllocatorException` with `failure_head` containing `Agent infeasible`: allocator placement/resource infeasibility.
+
+### Tiled path summary metrics (`hef_tiled_*_summary.tsv`)
+Columns:
+- `run_tag`: test case id
+- `backend`: `torch_proxy` or `hailo_runtime` (not present in full-chain TSV)
+- `latent_w` / `wav_t`: temporal length in latent or waveform domain
+- `tile_w`: tile width used for stitched execution
+- `success`: pass/fail for that case
+- `output_json`: detailed per-stage numeric metrics
+
+### Detailed parity metrics (`*.json`)
+Shared keys:
+- `all_close`: global numeric pass flag
+- `tol`: threshold used by checker
+- `*_max_abs`: per-stage maximum absolute error vs reference
+
+Important stage keys:
+- Decoder path:
+  - `source_projector_max_abs`
+  - `decoder_pre_max_abs`
+  - `decoder_head_max_abs`
+- Masker path:
+  - `bottleneck_max_abs`
+  - `tcn0_in_max_abs`
+  - `tcn0_depth_max_abs`
+  - `tcn0_residual_max_abs`
+  - `tcn0_skip_max_abs`
+  - `mask_score_max_abs`
+  - `mask_output_max_abs`
+- Full chain:
+  - `masker_output_max_abs`
+  - `masked_rep_max_abs`
+  - `decoder_output_max_abs`
+  - `final_output_max_abs`
+
+Real forward example metrics (`librimix_hailo_forward_metrics.json`):
+- `parity_max_abs_vs_reference`: max absolute diff between reference ConvTasNet and Hailo-format wrapper output.
+- `si_snr_hailo_src1_vs_gt_s1_db`, `si_snr_hailo_src2_vs_gt_s2_db`: SI-SNR to LibriMix ground-truth sources (best source permutation).
+- `si_snr_hailo_pair_sum_db`: sum SI-SNR across both separated sources.
+
+Acceptance used in this repo:
+- nominal tolerance is `tol=1e-5`
+- passing case expects `all_close=true`
+- smaller `*_max_abs` is better; values around `1e-7` to `1e-6` are strong parity.
+
+## Known-Good References
+- `hailo/module_runs/20260223_052929/allocator_mapping_fixes_summary.tsv`
+- `hailo/module_runs/20260223_082226/masker_allocator_fixes_summary.tsv`
+- `hailo/module_runs/20260223_082756/hef_tiled_masker_path_summary.tsv`
+- `hailo/module_runs/20260223_082809/hef_tiled_full_chain_summary.tsv`
+
+## Guardrails
+- Keep Hailo-specific architecture/decomposition in `hailo_*` files/modules.
+- Do not overwrite baseline non-Hailo model definitions.
+- Keep run evidence under `hailo/module_runs/<run_ts>/`.

@@ -25,9 +25,15 @@ from asteroid.models.hailo_conv_tasnet_submodules import (
     HailoDecoderHeadSingleSrc,
     HailoDecoderPreConvOrIdentity1x1,
     HailoDecoderPreSlice,
+    HailoMaskerBottleneckBlock,
     HailoMaskerBottleneckOnly,
     HailoMaskerFirstTCNBlockAsTensor,
     HailoMaskerHeadOnly,
+    HailoMaskerHeadBlock,
+    HailoMaskerTCN0DepthBlock,
+    HailoMaskerTCN0InConvBlock,
+    HailoMaskerTCN0ResBlock,
+    HailoMaskerTCN0SkipBlock,
     HailoSourceProjectorSlice,
 )
 
@@ -177,6 +183,77 @@ def build_module(args: argparse.Namespace):
         else:
             head_in_chan = args.skip_chan
         dummy = torch.randn(args.batch, head_in_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_bottleneck_block":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerBottleneckBlock(
+            full.masker,
+            out_block_idx=args.out_block_idx,
+            in_block_idx=args.in_block_idx,
+            block_chan=args.block_chan,
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_tcn0_inconv_block":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerTCN0InConvBlock(
+            full.masker,
+            out_block_idx=args.out_block_idx,
+            in_block_idx=args.in_block_idx,
+            block_chan=args.block_chan,
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_tcn0_depth_block":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerTCN0DepthBlock(
+            full.masker,
+            depth_block_idx=args.depth_block_idx,
+            block_chan=args.block_chan,
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_tcn0_res_block":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerTCN0ResBlock(
+            full.masker,
+            out_block_idx=args.out_block_idx,
+            in_block_idx=args.in_block_idx,
+            block_chan=args.block_chan,
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_tcn0_skip_block":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerTCN0SkipBlock(
+            full.masker,
+            out_block_idx=args.out_block_idx,
+            in_block_idx=args.in_block_idx,
+            block_chan=args.block_chan,
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
+        return module, dummy
+
+    if args.module == "convtas_masker_head_block":
+        full = _build_hailo_convtas(args)
+        module = HailoMaskerHeadBlock(
+            full.masker,
+            out_block_idx=args.out_block_idx,
+            in_block_idx=args.in_block_idx,
+            block_chan=args.block_chan,
+        )
+        latent_t = max(1, t // max(1, args.encdec_stride))
+        dummy = torch.randn(args.batch, args.block_chan, 1, latent_t)
         return module, dummy
 
     if args.module == "convtas_source_projector_only":
@@ -361,6 +438,12 @@ def main():
             "convtas_masker_bottleneck_only",
             "convtas_masker_tcn_block0_only",
             "convtas_masker_mask_head_only",
+            "convtas_masker_bottleneck_block",
+            "convtas_masker_tcn0_inconv_block",
+            "convtas_masker_tcn0_depth_block",
+            "convtas_masker_tcn0_res_block",
+            "convtas_masker_tcn0_skip_block",
+            "convtas_masker_head_block",
             "convtas_source_projector_only",
             "convtas_source_projector_out0",
             "convtas_source_projector_out1",
@@ -407,6 +490,7 @@ def main():
     parser.add_argument("--proj_src_idx", type=int, default=0)
     parser.add_argument("--half_idx", type=int, default=0)
     parser.add_argument("--head_src_idx", type=int, default=0)
+    parser.add_argument("--depth_block_idx", type=int, default=0)
     args = parser.parse_args()
 
     set_seed(args.seed)

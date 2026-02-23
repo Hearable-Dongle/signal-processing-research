@@ -191,6 +191,49 @@ Important constraint:
 - This environment has compile SDK (`hailo_sdk_client`) but not runtime package (`hailo_platform` / `pyhailort`), so direct HEF execution against device cannot be validated here.
 - Runtime backend path is wired and guarded; run on target machine with runtime installed.
 
+## Non-Decoder (Masker) Implementation + Validation (20260223_082226 -> 20260223_082809)
+Implemented remaining non-decoder path block modules and validation stack.
+
+Code:
+- `hailo-asteroid/asteroid/models/hailo_conv_tasnet_submodules.py`
+  - Added masker block wrappers:
+    - `HailoMaskerBottleneckBlock`
+    - `HailoMaskerTCN0InConvBlock`
+    - `HailoMaskerTCN0DepthBlock`
+    - `HailoMaskerTCN0ResBlock`
+    - `HailoMaskerTCN0SkipBlock`
+    - `HailoMaskerHeadBlock`
+  - Added `HailoDepthwisePartialBlock`
+- `hailo/export_hailo_module_to_onnx.py`
+  - Added module targets:
+    - `convtas_masker_bottleneck_block`
+    - `convtas_masker_tcn0_inconv_block`
+    - `convtas_masker_tcn0_depth_block`
+    - `convtas_masker_tcn0_res_block`
+    - `convtas_masker_tcn0_skip_block`
+    - `convtas_masker_head_block`
+  - Added `--depth_block_idx`
+- `hailo/scripts/hailo_test_masker_allocator_fixes.sh`
+- `hailo/masker_tiled_path.py`
+- `hailo/scripts/hailo_test_hef_tiled_masker_path.sh`
+- `hailo/hef_tiled_full_chain.py`
+- `hailo/scripts/hailo_test_hef_tiled_full_chain.sh`
+
+Runs:
+1. Masker allocator smoke:
+   - Summary: `hailo/module_runs/20260223_082226/masker_allocator_fixes_summary.tsv`
+   - Result: 10/10 selected temporal+block cases pass HEF.
+2. Tiled masker parity (`torch_proxy`):
+   - Summary: `hailo/module_runs/20260223_082756/hef_tiled_masker_path_summary.tsv`
+   - Result: all listed cases pass.
+3. Full-chain tiled parity (`torch_proxy`):
+   - Summary: `hailo/module_runs/20260223_082809/hef_tiled_full_chain_summary.tsv`
+   - Result: all listed cases pass.
+
+Bug fixed during implementation:
+- Initial masker block exports failed because block wrappers applied full-channel norm on 64-channel block inputs.
+- Fix: export linear block contributions only for bottleneck/inconv/depth; apply nonlinearity+norm after reconstruction.
+
 ## What Helped
 - Submodule decomposition improved observability and isolated failure domains.
 - Multi-channel calibration support fix in `har_to_hef.py` removed false-negative shape parsing failures.

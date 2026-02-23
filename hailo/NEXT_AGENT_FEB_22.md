@@ -106,18 +106,19 @@ Rule:
 - Then scale one axis at a time back toward target model.
 
 ## Known Tooling Pitfall
-- `har_to_hef.py` currently derives optimize input key as:
-  - `input_name = f"{model_name}/input_layer1"`
-- If `--model_name` does not match HAR internal network name, optimize can fail with missing input-layer key.
-- Either:
-  - pass matching `--model_name`, or
-  - update script to auto-detect the input layer from HN instead of hardcoding name pattern.
+- `har_to_hef.py` now includes input-layer auto-detection fallback.
+- If auto-detection picks the wrong input in a multi-input graph, pass `--input_layer_name` explicitly.
 
 ## Minimal Runbook
 
 ### HAR stages
 ```bash
 ./hailo/scripts/hailo_test_all.sh
+```
+
+### HAR + HEF sweep (new stage7 helper)
+```bash
+./hailo/scripts/hailo_test_stage7_hef_sweep.sh
 ```
 
 ### Compile one HAR to HEF
@@ -138,6 +139,16 @@ hailo/to-hailo-env/bin/python -m hailo.har_to_hef \
   --calib_npz hailo/calibration_1000ms_16k_64.npz \
   --quick_opt
 ```
+
+## Implemented In This Iteration
+- Added `hailo/scripts/hailo_test_stage7_hef_sweep.sh`:
+  - Builds HAR + attempts HEF on a deterministic config ladder.
+  - Writes run-scoped outputs under `hailo/module_runs/<run_ts>/`.
+  - Writes per-case failure artifacts (`*_compile_failure.txt`) and `hef_summary.tsv`.
+- Updated `hailo/har_to_hef.py`:
+  - Added input-layer auto-detection fallback (avoids strict dependence on `--model_name/input_layer1`).
+  - Added optional `--input_layer_name` override for explicit control.
+  - Ensures failure-log parent directories are created automatically.
 
 ## Reporting Format (for future updates)
 For every run, report in 3 lines:

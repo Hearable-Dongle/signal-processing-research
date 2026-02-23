@@ -1,6 +1,6 @@
 # Running TODO: ConvTasNet -> HEF
 
-Last updated: 2026-02-23 (run_ts=20260223_061240_runtime)
+Last updated: 2026-02-23 (run_ts=20260223_082809)
 Owner: current agent/user session
 
 ## Current Goal
@@ -175,6 +175,21 @@ Checklist:
   - Evidence: `hailo/hef_tiled_decoder_path.py`
   - Evidence: `hailo/scripts/hailo_test_hef_tiled_decoder_path.sh`
   - Evidence: `hailo/module_runs/20260223_060610/hef_tiled_decoder_path_summary.tsv`
+- [x] Non-decoder masker block decomposition implemented (`bneck`, `tcn0_in`, `tcn0_depth`, `tcn0_res`, `tcn0_skip`, `head`)
+  - Evidence: `hailo-asteroid/asteroid/models/hailo_conv_tasnet_submodules.py`
+  - Evidence: `hailo/export_hailo_module_to_onnx.py`
+  - Evidence: `hailo/scripts/hailo_test_masker_allocator_fixes.sh`
+- [x] Masker allocator smoke run: temporal + block cases compile to HEF
+  - Evidence: `hailo/module_runs/20260223_082226/masker_allocator_fixes_summary.tsv`
+  - Result: 10/10 selected cases (`hef_success=true`)
+- [x] HEF-tiled masker path parity runner implemented and validated (`torch_proxy`)
+  - Evidence: `hailo/masker_tiled_path.py`
+  - Evidence: `hailo/scripts/hailo_test_hef_tiled_masker_path.sh`
+  - Evidence: `hailo/module_runs/20260223_082756/hef_tiled_masker_path_summary.tsv`
+- [x] Full-chain tiled parity runner (masker + decoder path) implemented and validated (`torch_proxy`)
+  - Evidence: `hailo/hef_tiled_full_chain.py`
+  - Evidence: `hailo/scripts/hailo_test_hef_tiled_full_chain.sh`
+  - Evidence: `hailo/module_runs/20260223_082809/hef_tiled_full_chain_summary.tsv`
 - [ ] Runtime backend validation on target machine (`hailo_platform/pyhailort` available)
   - Note: current environment lacks runtime package, so HEF-on-device execution remains pending
   - Evidence: `hailo/module_runs/20260223_061240_runtime/hef_tiled_decoder_path_summary.tsv`
