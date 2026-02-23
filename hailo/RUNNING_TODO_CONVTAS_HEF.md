@@ -195,3 +195,30 @@ Checklist:
   - Evidence: `hailo/module_runs/20260223_061240_runtime/hef_tiled_decoder_path_summary.tsv`
   - Evidence: `hailo/module_runs/20260223_061240_runtime/hef_tile_lat2000_w256.log`
   - Evidence: `hailo/module_runs/20260223_061240_runtime/hef_tile_lat1024_w256.log`
+
+## Hybrid Runtime Validation (RPi + Hailo-8)
+Goal: run heavy conv blocks on Hailo in stitched hybrid mode and capture end-to-end latency + listenable outputs.
+
+Checklist:
+- [x] Libri3Mix sanity assets copier added
+  - Script: `hailo/scripts/hailo_prepare_librimix3_sanity_assets.sh`
+  - Local evidence: `hailo/sanity_librimix3/sanity_manifest.json`
+- [x] Hybrid end-to-end validation script added (runtime + reference + latency + WAV outputs)
+  - Script: `hailo/hybrid_hailo_librimix_validation.py`
+  - Wrapper: `hailo/scripts/hailo_validate_hybrid_librimix.sh`
+- [x] RPi execution handoff guide added
+  - Doc: `hailo/FOR_RPI_AGENT.md`
+- [ ] Decoder tiled path runtime parity validated on hardware (`BACKEND=hailo_runtime`)
+  - Evidence: `hailo/module_runs/<run_ts>/hef_tiled_decoder_path_summary.tsv`
+- [ ] Masker tiled path runtime parity validated on hardware (`BACKEND=hailo_runtime`)
+  - Evidence: `hailo/module_runs/<run_ts>/hef_tiled_masker_path_summary.tsv`
+- [ ] Full stitched chain runtime parity validated on hardware (`BACKEND=hailo_runtime`)
+  - Evidence: `hailo/module_runs/<run_ts>/hef_tiled_full_chain_summary.tsv`
+- [ ] End-to-end hybrid run completed on hardware with latency metrics
+  - Evidence: `hailo/module_runs/<run_ts>_hybrid_librimix/hybrid_validation_metrics.json`
+- [ ] Listening sanity completed with output WAV inspection
+  - Evidence: `hailo/module_runs/<run_ts>_hybrid_librimix/hybrid_sep_src1.wav`
+  - Evidence: `hailo/module_runs/<run_ts>_hybrid_librimix/hybrid_sep_src2.wav`
+  - Evidence: `hailo/module_runs/<run_ts>_hybrid_librimix/ref_sep_src1.wav`
+  - Evidence: `hailo/module_runs/<run_ts>_hybrid_librimix/ref_sep_src2.wav`
+  - Evidence: `hailo/module_runs/<run_ts>_hybrid_librimix/ref_sep_src3.wav`

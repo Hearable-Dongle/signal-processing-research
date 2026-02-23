@@ -13,11 +13,18 @@ if str(HAILO_ASTEROID_ROOT) not in sys.path:
     sys.path.insert(0, str(HAILO_ASTEROID_ROOT))
 
 from asteroid.models.hailo_conv_tasnet import HailoConvTasNet
-from hailo.masker_tiled_path import TorchProxyMaskerExecutor, reconstruct_masker_tiled
-from hailo.tiled_decoder_path import (
-    reconstruct_decoder_head_tiled,
-    reconstruct_decoder_pre_tiled,
-    reconstruct_source_projector_tiled,
+from hailo.hef_tiled_decoder_path import (
+    HailoRuntimeExecutor,
+    TorchProxyExecutor,
+    build_manifest,
+    reconstruct_decoder_from_projected_with_executor,
+    reconstruct_with_executor,
+)
+from hailo.masker_tiled_path import (
+    HailoRuntimeMaskerExecutor,
+    TorchProxyMaskerExecutor,
+    parse_manifest as parse_masker_manifest,
+    reconstruct_masker_tiled,
 )
 
 
@@ -64,38 +71,38 @@ def run_once(args):
         out_ref = dec_ref.squeeze(2)
 
     with torch.no_grad():
-        ex = TorchProxyMaskerExecutor(model, block_chan=args.block_chan)
-        mask_parts = reconstruct_masker_tiled(tf_ref, ex, tile_w=args.tile_w)
+        if args.backend == "torch_proxy":
+            masker_ex = TorchProxyMaskerExecutor(model, block_chan=args.block_chan)
+            dec_ex = TorchProxyExecutor(model, block_chan=args.block_chan)
+        else:
+            dec_manifest = build_manifest(Path(args.decoder_summary_tsv))
+            masker_manifest = parse_masker_manifest(Path(args.masker_summary_tsv))
+            dec_ex = HailoRuntimeExecutor(dec_manifest)
+            masker_ex = HailoRuntimeMaskerExecutor(model, manifest=masker_manifest, block_chan=args.block_chan)
+
+        mask_parts = reconstruct_masker_tiled(tf_ref, masker_ex, tile_w=args.tile_w)
         mask_tiled = mask_parts["est_mask"]
-        tf_exp_tiled = reconstruct_source_projector_tiled(
+        tf_exp_tiled, _, _ = reconstruct_with_executor(
             tf_ref,
-            model.source_projector,
+            dec_ex,
             n_src=args.n_src,
             n_filters=args.n_filters,
             block=args.block_chan,
             tile_w=args.tile_w,
         )
         masked_tiled = mask_tiled * tf_exp_tiled
-        pre_tiled = reconstruct_decoder_pre_tiled(
+        pre_tiled, dec_tiled = reconstruct_decoder_from_projected_with_executor(
             masked_tiled,
-            model.decoder_pre if isinstance(model.decoder_pre, torch.nn.Conv2d) else torch.nn.Identity(),
+            dec_ex,
             n_src=args.n_src,
             n_filters=args.n_filters,
-            block=args.block_chan,
-            tile_w=args.tile_w,
-        ) if isinstance(model.decoder_pre, torch.nn.Conv2d) else masked_tiled
-
-        dec_conv = model.decoder.conv if hasattr(model.decoder, "conv") else model.decoder
-        dec_tiled = reconstruct_decoder_head_tiled(
-            pre_tiled,
-            dec_conv,
-            n_src=args.n_src,
             block=args.block_chan,
             tile_w=args.tile_w,
         )
         out_tiled = dec_tiled.squeeze(2)
 
     metrics = {
+        "backend": args.backend,
         "wav_t": args.wav_t,
         "latent_w": int(tf_ref.shape[-1]),
         "tile_w": args.tile_w,
@@ -117,6 +124,9 @@ def run_once(args):
 def main():
     parser = argparse.ArgumentParser(description="Full-chain tiled/blockwise parity check (torch proxy backend).")
     parser.add_argument("--output_json", required=True)
+    parser.add_argument("--backend", choices=["torch_proxy", "hailo_runtime"], default="torch_proxy")
+    parser.add_argument("--decoder_summary_tsv", default="hailo/module_runs/20260223_052929/allocator_mapping_fixes_summary.tsv")
+    parser.add_argument("--masker_summary_tsv", default="hailo/module_runs/20260223_082226/masker_allocator_fixes_summary.tsv")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--n_src", type=int, default=2)

@@ -18,6 +18,7 @@ if str(HAILO_ASTEROID_ROOT) not in sys.path:
 
 from asteroid.models.hailo_conv_tasnet import HailoConvTasNet
 from asteroid.models.hailo_conv_tasnet_submodules import HailoDecoderPreConvOrIdentity1x1
+from hailo.hailo_runtime_runner import HailoHEFRunner
 
 
 @dataclass
@@ -176,26 +177,47 @@ class TorchProxyExecutor(BlockExecutor):
 class HailoRuntimeExecutor(BlockExecutor):
     def __init__(self, manifest: BlockManifest):
         self.manifest = manifest
-        try:
-            import hailo_platform  # noqa: F401
-        except Exception as e:
-            raise RuntimeError(
-                "Hailo runtime is unavailable in this environment. Install runtime (pyhailort/hailo_platform) "
-                "on target machine to execute HEF-backed tiled path."
-            ) from e
-        raise RuntimeError(
-            "Hailo runtime adapter scaffold is created, but runtime binding is intentionally not finalized in this "
-            "env because runtime package/device is missing."
-        )
+        self._source_runners: Dict[Tuple[int, int, int], HailoHEFRunner] = {}
+        self._decpre_runners: Dict[Tuple[int, int, int], HailoHEFRunner] = {}
+        self._dechead_runners: Dict[Tuple[int, int], HailoHEFRunner] = {}
+
+    @staticmethod
+    def _infer(runner: HailoHEFRunner, x_block: torch.Tensor) -> torch.Tensor:
+        y = runner.infer_nchw(x_block)
+        return torch.from_numpy(y)
+
+    def _get_source(self, src: int, ob: int, ib: int) -> HailoHEFRunner:
+        key = (src, ob, ib)
+        if key not in self.manifest.source_blocks:
+            raise RuntimeError(f"Missing source HEF in manifest for key={key}")
+        if key not in self._source_runners:
+            self._source_runners[key] = HailoHEFRunner(self.manifest.source_blocks[key])
+        return self._source_runners[key]
+
+    def _get_decpre(self, half: int, ob: int, ib: int) -> HailoHEFRunner:
+        key = (half, ob, ib)
+        if key not in self.manifest.decpre_blocks:
+            raise RuntimeError(f"Missing decoder_pre HEF in manifest for key={key}")
+        if key not in self._decpre_runners:
+            self._decpre_runners[key] = HailoHEFRunner(self.manifest.decpre_blocks[key])
+        return self._decpre_runners[key]
+
+    def _get_dechead(self, src: int, ib: int) -> HailoHEFRunner:
+        key = (src, ib)
+        if key not in self.manifest.dechead_blocks:
+            raise RuntimeError(f"Missing decoder_head HEF in manifest for key={key}")
+        if key not in self._dechead_runners:
+            self._dechead_runners[key] = HailoHEFRunner(self.manifest.dechead_blocks[key])
+        return self._dechead_runners[key]
 
     def run_source(self, src: int, ob: int, ib: int, x_block: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+        return self._infer(self._get_source(src, ob, ib), x_block)
 
     def run_decpre(self, half: int, ob: int, ib: int, x_block: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+        return self._infer(self._get_decpre(half, ob, ib), x_block)
 
     def run_dechead(self, src: int, ib: int, x_block: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+        return self._infer(self._get_dechead(src, ib), x_block)
 
 
 def reconstruct_with_executor(
@@ -256,6 +278,51 @@ def reconstruct_with_executor(
         head_tiles.append(head_t)
 
     return torch.cat(proj_tiles, dim=3), torch.cat(pre_tiles, dim=3), torch.cat(head_tiles, dim=3)
+
+
+def reconstruct_decoder_from_projected_with_executor(
+    proj_x: torch.Tensor,
+    executor: BlockExecutor,
+    n_src: int,
+    n_filters: int,
+    block: int,
+    tile_w: int,
+):
+    """Run only decoder_pre + decoder_head from already source-projected representation."""
+    n, _, h, w = proj_x.shape
+    assert h == 1
+
+    pre_tiles = []
+    head_tiles = []
+    for s, e in tile_indices(w, tile_w):
+        pt = proj_x[:, :, :, s:e]
+
+        pre_half_chunks = []
+        decpre_in_blocks = pt.shape[1] // block
+        for half in range(n_src):
+            out_chunks = []
+            for ob in range(n_filters // block):
+                acc = None
+                for ib in range(decpre_in_blocks):
+                    y = executor.run_decpre(half, ob, ib, pt)
+                    acc = y if acc is None else (acc + y)
+                out_chunks.append(acc)
+            pre_half_chunks.append(torch.cat(out_chunks, dim=1))
+        pre_t = torch.cat(pre_half_chunks, dim=1)
+        pre_tiles.append(pre_t)
+
+        head_chunks = []
+        dechead_in_blocks = pre_t.shape[1] // block
+        for src in range(n_src):
+            acc = None
+            for ib in range(dechead_in_blocks):
+                y = executor.run_dechead(src, ib, pre_t)
+                acc = y if acc is None else (acc + y)
+            head_chunks.append(acc)
+        head_t = torch.cat(head_chunks, dim=1)
+        head_tiles.append(head_t)
+
+    return torch.cat(pre_tiles, dim=3), torch.cat(head_tiles, dim=3)
 
 
 def max_abs(a: torch.Tensor, b: torch.Tensor) -> float:
