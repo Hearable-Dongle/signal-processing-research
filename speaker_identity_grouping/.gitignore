@@ -1,0 +1,13 @@
+# Local virtualenv
+*-env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Generated artifacts
+output/
+
+# Local logs / temp
+*.log
+.DS_Store
