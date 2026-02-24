@@ -1,0 +1,13 @@
+# Virtual environments
+*-env/
+.venv/
+venv/
+
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Validation/generated artifacts
+output/
+*.log
