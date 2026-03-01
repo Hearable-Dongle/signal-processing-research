@@ -48,6 +48,38 @@ Run from repo root on the machine that can compile HAR -> HEF.
 
 These scripts **produce** new artifacts (ONNX, HAR, HEF). They are not just runtime checks.
 
+### One-command producer (recommended)
+This script performs the full conversion-machine flow:
+- builds a Hailo-compatible state dict from HF pretrained model,
+- produces decoder + masker HEFs (parallel by default),
+- validates required runtime tags,
+- writes aggregate summary TSV,
+- packages all required HEFs + summaries into one tarball.
+
+```bash
+BASE_TAG=end-to-end-hybrid-run \
+MODEL_ID=JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k \
+./hailo/scripts/hailo_build_true_hybrid_artifacts.sh
+```
+
+Defaults:
+- `RUN_PARALLEL=1` (decoder/masker production in parallel)
+- `DEC_PROFILE=full`
+- `MASK_PROFILE=quick`
+- output tarball: `/tmp/<BASE_TAG>_hailo_true_hybrid_artifacts.tgz`
+- aggregate summary: `hailo/module_runs/<BASE_TAG>_summary.tsv`
+
+Useful overrides:
+```bash
+BASE_TAG=end-to-end-hybrid-run \
+MODEL_ID=JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k \
+STATE_DICT_PATH=/tmp/end-to-end-hybrid-run_hailo_state_dict.pt \
+DEC_RUN_TS=end-to-end-hybrid-run-decoder \
+MASK_RUN_TS=end-to-end-hybrid-run-masker \
+RUN_PARALLEL=1 \
+./hailo/scripts/hailo_build_true_hybrid_artifacts.sh
+```
+
 ### A) Build decoder-path HEFs (full profile)
 ```bash
 PROFILE=full HAILO_RUN_TS=<DECODER_RUN_TS> ./hailo/scripts/hailo_test_allocator_mapping_fixes.sh
@@ -127,6 +159,8 @@ echo "hailo/module_runs/${MASK_TS}/masker_allocator_fixes_summary.tsv" >> /tmp/h
 
 tar -czf /tmp/hailo_true_hybrid_artifacts.tgz -T /tmp/hailo_hef_files.txt
 ```
+
+If you used the one-command producer above, this tarball is already created for you and this section can be skipped.
 
 Copy bundle to RPi and extract at repo root:
 
