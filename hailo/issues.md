@@ -1,24 +1,48 @@
 # Issues and Suggestions
 
-## 1. Unsupported Dimensions (262144)
-**Symptom:** The Hailo compiler fails with `Unsupported dimensions: ... [-1, 1, 1999, 262144]`.
-**Diagnosis:** This was caused by the `PReLU` layer. The `PReLU` operation, when exported to ONNX (likely with opset issues or 1D weights), caused the Hailo compiler to misinterpret the channel dimensions or layout, exploding the 512 channels to 262144 ($512^2$).
-**Resolution:** Replaced standard `nn.PReLU` with a custom `PReLU4D` implementation using supported elementwise operations (`Max`, `Min`, `Mul`, `Add`) with explicit 4D broadcasting (`[1, C, 1, 1]`). This ensures the graph remains fully compatible with Hailo's 4D expectation.
+## Current blocker (active)
+1. `NegativeSlopeExponentNonFixable` during `runner.optimize`
+- Symptom: fails on `convtas/ne_activation_avgpool6` with `Desired shift is 10.0, but op has only 8 data bits`.
+- Evidence: `hailo/compile_failure_longrun_20260216_030111.txt`, `hailo/compile_failure_longrun_20260216_030111.txt.json`.
+- Likely root cause: normalization-heavy subgraph creates activation ranges/slopes that are hard to quantize with current calibration statistics.
 
-## 2. GlobLN Implementation
-**Symptom:** Potential for ambiguity using `Conv2d` for elementwise scaling.
-**Resolution:** Updated `GlobLN` monkey patch to use explicit `Mul` and `Add` for `gamma` and `beta` application, avoiding reliance on `Conv2d` groups which can be fragile during translation.
+2. Debug-loop override layer name instability
+- Symptom: after first failure, appended override layer (`convtas/ne_activation_avgpool6`) is not resolvable in subsequent iterations (`Layer ... not found in model`).
+- Impact: loop can spend full optimization cycles without actionable progress.
 
-## 3. Calibration Data & Input Shapes
-**Symptom:** `ValueError: Couldn't detect CalibrationDataType` and `BadInputsShape`.
-**Diagnosis:** 
-1. `runner.optimize` requires `calib_data` to be a `numpy` array (or dict of arrays), not a list of arrays, when passed in a dictionary.
-2. The input shape expectation for `NHWC` layout requires removing the batch dimension from the data sample if the runner treats the first dimension of the provided data as the sample count.
-**Resolution:** 
-- Converted `calib_data` list to a single stacked `numpy` array.
-- Transposed data from `NCHW` (`[1, 1, 1, 16000]`) to `NHWC` (`[1, 1, 16000, 1]`).
-- Squeezed the batch dimension to match the network's expected input shape `(1, 16000, 1)`.
-- Used explicit input name `convtas/input_layer1`.
+## Historical blockers (mostly resolved)
+1. Large reshape-insertion failures in compiler logs
+- Symptom: long `Reshape is needed for layers ...` lists in SDK logs.
+- Interpretation: graph/layout compatibility issues from earlier export variants.
+- Status: not the latest direct blocker in current artifacts.
 
-## 4. Status
-The pipeline now successfully reaches the Optimization and Calibration stage. The `Unsupported dimensions` error is resolved.
+2. Earlier unsupported-dimension path (`262144`)
+- Interpretation: prior export/layout issue and/or unsupported op lowering behavior.
+- Status: stale compared with current `NegativeSlopeExponentNonFixable` failure.
+
+## Contributing factors
+1. Calibration length mismatch against model input length
+- Current datasets include 200 ms clips (`W=3200`) while model path commonly expects `W=16000`.
+- Padding/repeat/crop can materially change calibration distribution and quantization outcomes.
+
+2. Layer-scoped overrides are not always stable across optimization passes
+- Parsed failing layer names may not belong to current HN scope used by model script validation.
+
+## Suggestions
+1. Keep export in 4D horizontal form and simplify activation/norm ops earlier
+- Replace `PReLU -> ReLU` at export time.
+- Replace `GlobLN -> channel-wise LN` at export time.
+- Keep capacity unchanged (same blocks/repeats/channels), only swap problematic ops.
+
+2. Validate override targets against HN scope before append
+- Append `negative_exponent` override only if parsed layer exists in `runner.get_hn_dict()["layers"]`.
+- Log unresolved layer names explicitly and avoid writing unusable overrides.
+
+3. Improve calibration observability
+- Log explicit warning when `W` mismatch is handled by `pad|repeat|crop`.
+- Prefer calibration clips matching target input length when possible (e.g., 1000 ms for 16 kHz input length 16000).
+
+## Expected success signals
+1. First optimization failure signature changes away from `NegativeSlopeExponentNonFixable:convtas/ne_activation_avgpool6` after export substitutions.
+2. `compile_failure.txt(.json)` captures clear per-iteration signatures when debug loop is enabled.
+3. Final target: HEF generated without manual trial-and-error looping.

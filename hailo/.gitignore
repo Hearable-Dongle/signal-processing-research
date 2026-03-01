@@ -1,0 +1,24 @@
+# Run outputs
+module_runs/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Hailo compile artifacts/logs (generated)
+*.log
+*.har
+*.hef
+*.hn
+*_hef.log
+*_compile_failure.txt
+*_compile_failure.txt.json
+
+# Local SDK logs that may appear in this folder
+hailo_sdk.client.log
+hailo_sdk.core.log
+hailo_sdk.core.*.log
+acceleras.log
+
+# Local LibriMix sanity assets copied for hardware validation
+sanity_librimix3/
