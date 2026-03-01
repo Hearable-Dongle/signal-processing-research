@@ -33,35 +33,144 @@ Notes:
 - `hailo_sdk_client` is sufficient for ONNX->HAR->HEF.
 - Real device execution of `.hef` needs runtime packages (`hailo_platform` / `pyhailort`) on the target machine.
 
-## Quickstart (Recommended)
-Run from repo root.
-
-1. Decoder allocator + block grid:
+## Asteroid Submodule
+Hailo ConvTasNet uses the Hailo-modified `asteroid/` submodule. Initialize/update it before running:
 ```bash
-PROFILE=full ./hailo/scripts/hailo_test_allocator_mapping_fixes.sh
+git submodule update --init --recursive asteroid
 ```
 
-2. Masker allocator + block grid:
+## Runtime Payloads (On-Device)
+Payloads are sent to Hailo via `hailo/hailo_runtime_runner.py`, which wraps `hailo_platform` vstreams.
+The parity scripts below use `BACKEND=hailo_runtime` to run blocks on the device and send NCHW inputs.
+
+## Quickstart: Conversion Machine (x86)
+Run from repo root on the machine that can compile HAR -> HEF.
+
+These scripts **produce** new artifacts (ONNX, HAR, HEF). They are not just runtime checks.
+
+### A) Build decoder-path HEFs (full profile)
 ```bash
-PROFILE=full ./hailo/scripts/hailo_test_masker_allocator_fixes.sh
+PROFILE=full HAILO_RUN_TS=<DECODER_RUN_TS> ./hailo/scripts/hailo_test_allocator_mapping_fixes.sh
+```
+What this builds:
+- Decoder-side block HEFs used after encoder/masker:
+  - `source_projector` blocks (`allocfix_full_source_*`)
+  - `decoder_pre` blocks (`allocfix_block_decpre_*`)
+  - `decoder_head` blocks (`allocfix_block_dechead_*`)
+- With `PROFILE=full`, this script generates the full source-projector block grid needed by runtime stitching.
+
+### B) Build masker-path HEFs
+```bash
+PROFILE=quick HAILO_RUN_TS=<MASKER_RUN_TS> ./hailo/scripts/hailo_test_masker_allocator_fixes.sh
+```
+What this builds:
+- Masker-side block HEFs (front half of the hybrid path):
+  - bottleneck (`allocfix_masker_bneck_*`)
+  - first TCN block pieces (`allocfix_masker_tcn0_in_*`, `allocfix_masker_tcn0_depth_*`, `allocfix_masker_tcn0_res_*`, `allocfix_masker_tcn0_skip_*`)
+  - masker head (`allocfix_masker_head_*`)
+- `PROFILE=quick` builds a minimal runtime set (single block-index path) and is usually sufficient for current stitched runtime.
+- Use `PROFILE=full` for masker only if you intentionally want the larger block-index sweep for broader compile coverage/debug.
+
+Why there are two scripts:
+- Decoder-path and masker-path are different subgraphs with different decomposition strategies and manifests.
+- Runtime full-chain parity needs both manifests:
+  - decoder summary: `allocator_mapping_fixes_summary.tsv`
+  - masker summary: `masker_allocator_fixes_summary.tsv`
+
+Outputs:
+- `hailo/module_runs/<DECODER_RUN_TS>/allocator_mapping_fixes_summary.tsv`
+- `hailo/module_runs/<MASKER_RUN_TS>/masker_allocator_fixes_summary.tsv`
+- `.hef` files referenced by `hef_success=true` rows in those summaries.
+
+Note:
+- True hybrid parity in this repo is manifest-driven and requires multiple block HEFs, not a single monolithic HEF.
+
+### Reproducible from your PyTorch weights
+Step 1: build a Hailo-compatible state dict from an HF pretrained Asteroid model (or override `--model_name`):
+
+```bash
+hailo/to-onnx-env/bin/python -m hailo.build_hailo_state_dict_from_pretrained \
+  --model_name JorisCos/ConvTasNet_Libri3Mix_sepclean_8k \
+  --output /tmp/hailo_from_pretrained_state_dict.pt
 ```
 
-3. Decoder stitched parity (proxy backend):
+Step 2: produce decoder/masker HEFs using that state dict:
+
 ```bash
-BACKEND=torch_proxy ./hailo/scripts/hailo_test_hef_tiled_decoder_path.sh
+MODEL_STATE_DICT=/tmp/hailo_from_pretrained_state_dict.pt \
+PROFILE=full HAILO_RUN_TS=<DECODER_RUN_TS> \
+./hailo/scripts/hailo_test_allocator_mapping_fixes.sh
+
+MODEL_STATE_DICT=/tmp/hailo_from_pretrained_state_dict.pt \
+PROFILE=quick HAILO_RUN_TS=<MASKER_RUN_TS> \
+./hailo/scripts/hailo_test_masker_allocator_fixes.sh
 ```
 
-4. Masker stitched parity (proxy backend):
+Details:
+- `MODEL_STATE_DICT` is forwarded to ONNX export (`--state_dict_path`) and used when modules are exported before HAR/HEF compilation.
+- Loader supports common checkpoint wrappers (`state_dict`, `model_state_dict`, `model`, `net`).
+- Key prefixes like `module.` and `model.` are normalized automatically.
+- The helper script transfers encoder + masker weights from pretrained Asteroid ConvTasNet into `HailoConvTasNet` and initializes `conv1x1_head` decoder deterministically.
+
+## Copy Artifacts to RPi
+Create a deterministic export bundle on the conversion machine:
+
 ```bash
-BACKEND=torch_proxy ./hailo/scripts/hailo_test_hef_tiled_masker_path.sh
+DEC_TS=<DECODER_RUN_TS>
+MASK_TS=<MASKER_RUN_TS>
+
+awk -F'\t' 'NR>1 && $9=="true" {print $8}' "hailo/module_runs/${DEC_TS}/allocator_mapping_fixes_summary.tsv" > /tmp/hailo_hef_files.txt
+awk -F'\t' 'NR>1 && $9=="true" {print $8}' "hailo/module_runs/${MASK_TS}/masker_allocator_fixes_summary.tsv" >> /tmp/hailo_hef_files.txt
+
+echo "hailo/module_runs/${DEC_TS}/allocator_mapping_fixes_summary.tsv" >> /tmp/hailo_hef_files.txt
+echo "hailo/module_runs/${MASK_TS}/masker_allocator_fixes_summary.tsv" >> /tmp/hailo_hef_files.txt
+
+tar -czf /tmp/hailo_true_hybrid_artifacts.tgz -T /tmp/hailo_hef_files.txt
 ```
 
-5. End-to-end stitched parity:
+Copy bundle to RPi and extract at repo root:
+
 ```bash
-./hailo/scripts/hailo_test_hef_tiled_full_chain.sh
+scp /tmp/hailo_true_hybrid_artifacts.tgz <rpi_user>@<rpi_host>:/tmp/
+ssh <rpi_user>@<rpi_host> "cd /home/<user>/signal-processing-research && tar -xzf /tmp/hailo_true_hybrid_artifacts.tgz"
 ```
 
-6. Real LibriMix forward pass (2-speaker separation, Hailo-format wrapper):
+## Quickstart: RPi Runtime + Parity
+Run from repo root on RPi with Hailo runtime installed.
+
+Set explicit summaries:
+```bash
+export DECODER_SUMMARY_TSV="hailo/module_runs/<DECODER_RUN_TS>/allocator_mapping_fixes_summary.tsv"
+export MASKER_SUMMARY_TSV="hailo/module_runs/<MASKER_RUN_TS>/masker_allocator_fixes_summary.tsv"
+```
+
+1. Decoder parity on hardware:
+```bash
+BACKEND=hailo_runtime SUMMARY_TSV="$DECODER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_decoder_path.sh
+```
+
+2. Masker parity on hardware:
+```bash
+BACKEND=hailo_runtime SUMMARY_TSV="$MASKER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_masker_path.sh
+```
+
+3. Full stitched-chain parity on hardware:
+```bash
+BACKEND=hailo_runtime DECODER_SUMMARY_TSV="$DECODER_SUMMARY_TSV" MASKER_SUMMARY_TSV="$MASKER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_full_chain.sh
+```
+
+4. End-to-end hybrid validation (real sample, latency + WAV outputs):
+```bash
+BACKEND=hailo_runtime \
+DECODER_SUMMARY_TSV="$DECODER_SUMMARY_TSV" \
+MASKER_SUMMARY_TSV="$MASKER_SUMMARY_TSV" \
+MODEL_ID=JorisCos/ConvTasNet_Libri3Mix_sepclean_8k \
+MIX_WAV=hailo/sanity_librimix3/sanity_mix.wav \
+N_SRC=2 SAMPLE_RATE=8000 MAX_SECONDS=4.0 \
+./hailo/scripts/hailo_validate_hybrid_librimix.sh
+```
+
+Optional wrapper-only forward example:
 ```bash
 ./hailo/scripts/hailo_run_librimix_forward_example.sh
 ```
@@ -70,12 +179,6 @@ Optional overrides:
 MIX_WAV=/home/mkeller/data/librimix/Libri2Mix/wav8k/max/train-360/mix_clean/<file>.wav \
 MODEL_ID=mpariente/ConvTasNet_WHAM!_sepclean \
 ./hailo/scripts/hailo_run_librimix_forward_example.sh
-```
-
-Optional runtime checks (on target with runtime installed):
-```bash
-BACKEND=hailo_runtime ./hailo/scripts/hailo_test_hef_tiled_decoder_path.sh
-BACKEND=hailo_runtime ./hailo/scripts/hailo_test_hef_tiled_masker_path.sh
 ```
 
 ## Output Layout
@@ -151,6 +254,10 @@ Acceptance used in this repo:
 - `hailo/module_runs/20260223_082226/masker_allocator_fixes_summary.tsv`
 - `hailo/module_runs/20260223_082756/hef_tiled_masker_path_summary.tsv`
 - `hailo/module_runs/20260223_082809/hef_tiled_full_chain_summary.tsv`
+
+Important:
+- `hailo/module_runs/prefix_smoke_20260223_205551/prefixA_active1_b2_r1.hef` is useful for prefix runtime experiments, but it is not sufficient for the true hybrid parity path in this runbook.
+- True hybrid parity uses manifest-driven block HEFs from allocator-fix summaries.
 
 ## Guardrails
 - Keep Hailo-specific architecture/decomposition in `hailo_*` files/modules.

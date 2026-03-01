@@ -12,7 +12,7 @@ import torch.nn as nn
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HAILO_ASTEROID_ROOT = REPO_ROOT / "hailo-asteroid"
+HAILO_ASTEROID_ROOT = REPO_ROOT / "asteroid"
 if str(HAILO_ASTEROID_ROOT) not in sys.path:
     sys.path.insert(0, str(HAILO_ASTEROID_ROOT))
 
@@ -47,8 +47,44 @@ class ActivationWrapper(nn.Module):
         return self.act(x)
 
 
+def _maybe_extract_state_dict(blob):
+    if isinstance(blob, dict):
+        for key in ["state_dict", "model_state_dict", "model", "net"]:
+            if key in blob and isinstance(blob[key], dict):
+                return blob[key]
+    return blob
+
+
+def _normalize_state_dict_keys(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    normalized = {}
+    for k, v in state_dict.items():
+        nk = k
+        if nk.startswith("module."):
+            nk = nk[len("module.") :]
+        if nk.startswith("model."):
+            nk = nk[len("model.") :]
+        normalized[nk] = v
+    return normalized
+
+
+def _load_hailo_convtas_weights(model: HailoConvTasNet, state_dict_path: str, strict: bool) -> None:
+    ckpt = torch.load(state_dict_path, map_location="cpu")
+    state = _maybe_extract_state_dict(ckpt)
+    if not isinstance(state, dict):
+        raise ValueError(f"Unsupported state dict payload in {state_dict_path}")
+    state = _normalize_state_dict_keys(state)
+    missing, unexpected = model.load_state_dict(state, strict=strict)
+    if strict:
+        print(f"[WEIGHTS] loaded strictly from {state_dict_path}")
+        return
+    print(
+        "[WEIGHTS] loaded non-strictly from "
+        f"{state_dict_path} (missing={len(missing)}, unexpected={len(unexpected)})"
+    )
+
+
 def _build_hailo_convtas(args: argparse.Namespace) -> HailoConvTasNet:
-    return HailoConvTasNet(
+    model = HailoConvTasNet(
         n_src=args.n_src,
         n_filters=args.n_filters,
         kernel_size=args.encdec_kernel_size,
@@ -67,6 +103,9 @@ def _build_hailo_convtas(args: argparse.Namespace) -> HailoConvTasNet:
         decoder_mode=args.decoder_mode,
         truncate_k_blocks=args.truncate_k_blocks,
     )
+    if args.state_dict_path:
+        _load_hailo_convtas_weights(model, args.state_dict_path, strict=bool(args.state_dict_strict))
+    return model
 
 
 def set_seed(seed: int) -> None:
@@ -491,6 +530,8 @@ def main():
     parser.add_argument("--half_idx", type=int, default=0)
     parser.add_argument("--head_src_idx", type=int, default=0)
     parser.add_argument("--depth_block_idx", type=int, default=0)
+    parser.add_argument("--state_dict_path", default="")
+    parser.add_argument("--state_dict_strict", type=int, choices=[0, 1], default=0)
     args = parser.parse_args()
 
     set_seed(args.seed)

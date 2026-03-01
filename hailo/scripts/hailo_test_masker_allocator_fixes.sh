@@ -15,6 +15,7 @@ CLEANUP_INTERMEDIATES="${CLEANUP_INTERMEDIATES:-1}"
 CLEANUP_REMOVE_HAR_ON_PASS="${CLEANUP_REMOVE_HAR_ON_PASS:-0}"
 CASE_FILTER="${CASE_FILTER:-}"
 PROFILE="${PROFILE:-quick}" # quick|full
+MODEL_STATE_DICT="${MODEL_STATE_DICT:-}"
 
 SUMMARY="${RUN_DIR}/masker_allocator_fixes_summary.tsv"
 if [[ ! -f "$SUMMARY" ]]; then
@@ -144,6 +145,9 @@ run_case() {
 }
 
 COMMON_ARGS=(--n_src 2 --n_filters 256 --bn_chan 128 --hid_chan 256 --skip_chan 128 --n_blocks 1 --n_repeats 1 --truncate_k_blocks 1 --mask_mul_mode normal --skip_topology_mode project --decoder_mode conv1x1_head --time_len 16000)
+if [[ -n "$MODEL_STATE_DICT" ]]; then
+  COMMON_ARGS+=(--state_dict_path "$MODEL_STATE_DICT" --state_dict_strict 0)
+fi
 
 # 1) temporal sweeps for non-block masker paths
 for L in 2000 1024 512 256 128; do

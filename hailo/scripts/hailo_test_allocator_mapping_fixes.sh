@@ -15,6 +15,7 @@ CLEANUP_INTERMEDIATES="${CLEANUP_INTERMEDIATES:-1}"
 CLEANUP_REMOVE_HAR_ON_PASS="${CLEANUP_REMOVE_HAR_ON_PASS:-0}"
 CASE_FILTER="${CASE_FILTER:-}"
 PROFILE="${PROFILE:-quick}" # quick|full
+MODEL_STATE_DICT="${MODEL_STATE_DICT:-}"
 
 SUMMARY="${RUN_DIR}/allocator_mapping_fixes_summary.tsv"
 if [[ ! -f "$SUMMARY" ]]; then
@@ -144,6 +145,9 @@ run_case() {
 }
 
 COMMON_ARGS=(--n_src 2 --n_filters 256 --bn_chan 128 --hid_chan 256 --skip_chan 128 --n_blocks 1 --n_repeats 1 --truncate_k_blocks 1 --mask_mul_mode bypass --skip_topology_mode project --decoder_mode conv1x1_head --time_len 16000)
+if [[ -n "$MODEL_STATE_DICT" ]]; then
+  COMMON_ARGS+=(--state_dict_path "$MODEL_STATE_DICT" --state_dict_strict 0)
+fi
 
 # 0) compiler sanity baseline
 run_case "stage0_sanity" "plain_conv1x1" "allocfix_plain_conv1x1_64_w256" 256 64 --in_chan 64 --out_chan 64 --time_len 256
