@@ -12,12 +12,12 @@ import torch
 import torch.nn.functional as F
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HAILO_ASTEROID_ROOT = REPO_ROOT / "hailo-asteroid"
-if str(HAILO_ASTEROID_ROOT) not in sys.path:
-    sys.path.insert(0, str(HAILO_ASTEROID_ROOT))
+for asteroid_root in (REPO_ROOT / "hailo-asteroid", REPO_ROOT / "asteroid"):
+    if (asteroid_root / "asteroid").is_dir() and str(asteroid_root) not in sys.path:
+        sys.path.insert(0, str(asteroid_root))
 
 from asteroid.models.hailo_conv_tasnet import HailoConvTasNet
-from hailo.hailo_runtime_runner import HailoHEFRunner
+from hailo.hailo_runtime_runner import HailoHEFRunner, HailoRuntimeUnavailable
 
 
 @dataclass
@@ -215,10 +215,17 @@ class TorchProxyMaskerExecutor:
 
 
 class HailoRuntimeMaskerExecutor:
-    def __init__(self, model: HailoConvTasNet, manifest: MaskerManifest, block_chan: int = 64):
+    def __init__(
+        self,
+        model: HailoConvTasNet,
+        manifest: MaskerManifest,
+        block_chan: int = 64,
+        strict_runtime_safe: bool = False,
+    ):
         self.model = model
         self.masker = model.masker
         self.block = block_chan
+        self.strict_runtime_safe = strict_runtime_safe
         self.bn_chan = self.masker.bn_chan
         self.hid_chan = self.masker.hid_chan
         self.skip_chan = self.masker.skip_chan
@@ -246,54 +253,130 @@ class HailoRuntimeMaskerExecutor:
         return cache[key]
 
     def bneck(self, x: torch.Tensor, ob: int, ib: int) -> torch.Tensor:
+        x_part = x[:, ib * self.block : (ib + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            with HailoHEFRunner(self.manifest.bottleneck_blocks[(ob, ib)]) as runner:
+                return self._infer(runner, x_part)
         runner = self._get_runner(
             self._runners_bneck,
             self.manifest.bottleneck_blocks,
             (ob, ib),
         )
-        return self._infer(runner, x)
+        return self._infer(runner, x_part)
 
     def tcn0_in(self, x: torch.Tensor, ob: int, ib: int) -> torch.Tensor:
+        x_part = x[:, ib * self.block : (ib + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            with HailoHEFRunner(self.manifest.tcn0_in_blocks[(ob, ib)]) as runner:
+                return self._infer(runner, x_part)
         runner = self._get_runner(
             self._runners_tcn_in,
             self.manifest.tcn0_in_blocks,
             (ob, ib),
         )
-        return self._infer(runner, x)
+        return self._infer(runner, x_part)
 
     def tcn0_depth(self, x: torch.Tensor, db: int, tile_w: int) -> torch.Tensor:
         # depthwise HEFs are already tile-safe; tile_w is accepted for interface compatibility.
         _ = tile_w
+        x_part = x[:, db * self.block : (db + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            with HailoHEFRunner(self.manifest.tcn0_depth_blocks[db]) as runner:
+                return self._infer(runner, x_part)
         runner = self._get_runner(
             self._runners_tcn_depth,
             self.manifest.tcn0_depth_blocks,
             db,
         )
-        return self._infer(runner, x)
+        return self._infer(runner, x_part)
 
     def tcn0_res(self, x: torch.Tensor, ob: int, ib: int) -> torch.Tensor:
+        x_part = x[:, ib * self.block : (ib + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            with HailoHEFRunner(self.manifest.tcn0_res_blocks[(ob, ib)]) as runner:
+                return self._infer(runner, x_part)
         runner = self._get_runner(
             self._runners_tcn_res,
             self.manifest.tcn0_res_blocks,
             (ob, ib),
         )
-        return self._infer(runner, x)
+        return self._infer(runner, x_part)
 
     def tcn0_skip(self, x: torch.Tensor, ob: int, ib: int) -> torch.Tensor:
+        x_part = x[:, ib * self.block : (ib + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            with HailoHEFRunner(self.manifest.tcn0_skip_blocks[(ob, ib)]) as runner:
+                return self._infer(runner, x_part)
         runner = self._get_runner(
             self._runners_tcn_skip,
             self.manifest.tcn0_skip_blocks,
             (ob, ib),
         )
-        return self._infer(runner, x)
+        return self._infer(runner, x_part)
 
     def head(self, x: torch.Tensor, ob: int, ib: int) -> torch.Tensor:
+        x_part = x[:, ib * self.block : (ib + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            with HailoHEFRunner(self.manifest.head_blocks[(ob, ib)]) as runner:
+                return self._infer(runner, x_part)
         runner = self._get_runner(
             self._runners_head,
             self.manifest.head_blocks,
             (ob, ib),
         )
-        return self._infer(runner, x)
+        return self._infer(runner, x_part)
+
+
+def _missing(required, actual):
+    return sorted(required - actual)
+
+
+def validate_masker_manifest_coverage(
+    manifest: MaskerManifest,
+    n_filters: int,
+    bn_chan: int,
+    hid_chan: int,
+    skip_chan: int,
+    n_src: int,
+    out_chan: int,
+    block_chan: int,
+) -> None:
+    n_filter_blocks = n_filters // block_chan
+    bn_blocks = bn_chan // block_chan
+    hid_blocks = hid_chan // block_chan
+    skip_blocks = skip_chan // block_chan
+    head_blocks = (n_src * out_chan) // block_chan
+
+    req_bneck = {(ob, ib) for ob in range(bn_blocks) for ib in range(n_filter_blocks)}
+    req_tcn_in = {(ob, ib) for ob in range(hid_blocks) for ib in range(bn_blocks)}
+    req_depth = {db for db in range(hid_blocks)}
+    req_res = {(ob, ib) for ob in range(bn_blocks) for ib in range(hid_blocks)}
+    req_skip = {(ob, ib) for ob in range(skip_blocks) for ib in range(hid_blocks)}
+    req_head = {(ob, ib) for ob in range(head_blocks) for ib in range(skip_blocks)}
+
+    miss_bneck = _missing(req_bneck, set(manifest.bottleneck_blocks.keys()))
+    miss_tcn_in = _missing(req_tcn_in, set(manifest.tcn0_in_blocks.keys()))
+    miss_depth = _missing(req_depth, set(manifest.tcn0_depth_blocks.keys()))
+    miss_res = _missing(req_res, set(manifest.tcn0_res_blocks.keys()))
+    miss_skip = _missing(req_skip, set(manifest.tcn0_skip_blocks.keys()))
+    miss_head = _missing(req_head, set(manifest.head_blocks.keys()))
+
+    parts = []
+    if miss_bneck:
+        parts.append(f"bneck missing {len(miss_bneck)} keys, first={miss_bneck[:5]}")
+    if miss_tcn_in:
+        parts.append(f"tcn0_in missing {len(miss_tcn_in)} keys, first={miss_tcn_in[:5]}")
+    if miss_depth:
+        parts.append(f"tcn0_depth missing {len(miss_depth)} keys, first={miss_depth[:5]}")
+    if miss_res:
+        parts.append(f"tcn0_res missing {len(miss_res)} keys, first={miss_res[:5]}")
+    if miss_skip:
+        parts.append(f"tcn0_skip missing {len(miss_skip)} keys, first={miss_skip[:5]}")
+    if miss_head:
+        parts.append(f"head missing {len(miss_head)} keys, first={miss_head[:5]}")
+
+    if parts:
+        raise RuntimeError("Masker manifest is incomplete for requested model config: " + "; ".join(parts))
 
 
 def reconstruct_masker_tiled(
@@ -420,6 +503,18 @@ def run_once(args):
         est_mask_ref = m.output_act(score_ref)
 
     manifest = parse_manifest(Path(args.summary_tsv))
+    strict_runtime_safe = args.strict_runtime_safe or args.backend == "hailo_runtime"
+    if args.backend == "hailo_runtime":
+        validate_masker_manifest_coverage(
+            manifest,
+            n_filters=args.n_filters,
+            bn_chan=args.bn_chan,
+            hid_chan=args.hid_chan,
+            skip_chan=args.skip_chan,
+            n_src=args.n_src,
+            out_chan=model.masker.out_chan,
+            block_chan=args.block_chan,
+        )
     manifest_counts = {
         "bottleneck_blocks": len(manifest.bottleneck_blocks),
         "tcn0_in_blocks": len(manifest.tcn0_in_blocks),
@@ -429,14 +524,34 @@ def run_once(args):
         "head_blocks": len(manifest.head_blocks),
     }
 
+    effective_backend = args.backend
+    fallback_reason = None
     if args.backend == "torch_proxy":
         ex = TorchProxyMaskerExecutor(model, block_chan=args.block_chan)
     else:
-        ex = HailoRuntimeMaskerExecutor(model, manifest=manifest, block_chan=args.block_chan)
-    out = reconstruct_masker_tiled(x, ex, tile_w=args.tile_w)
+        ex = HailoRuntimeMaskerExecutor(
+            model,
+            manifest=manifest,
+            block_chan=args.block_chan,
+            strict_runtime_safe=strict_runtime_safe,
+        )
+    try:
+        out = reconstruct_masker_tiled(x, ex, tile_w=args.tile_w)
+    except HailoRuntimeUnavailable as e:
+        if args.backend != "hailo_runtime":
+            raise
+        effective_backend = "torch_proxy_fallback"
+        fallback_reason = str(e)
+        out = reconstruct_masker_tiled(
+            x,
+            TorchProxyMaskerExecutor(model, block_chan=args.block_chan),
+            tile_w=args.tile_w,
+        )
 
     metrics = {
         "backend": args.backend,
+        "effective_backend": effective_backend,
+        "strict_runtime_safe": strict_runtime_safe,
         "latent_w": args.latent_w,
         "tile_w": args.tile_w,
         "manifest_counts": manifest_counts,
@@ -449,6 +564,8 @@ def run_once(args):
         "mask_output_max_abs": max_abs(est_mask_ref, out["est_mask"]),
         "tol": args.tol,
     }
+    if fallback_reason is not None:
+        metrics["backend_fallback_reason"] = fallback_reason
     metrics["all_close"] = (
         metrics["bottleneck_max_abs"] <= args.tol
         and metrics["tcn0_in_max_abs"] <= args.tol
@@ -479,6 +596,7 @@ def main():
     parser.add_argument("--tile_w", type=int, default=256)
     parser.add_argument("--block_chan", type=int, default=64)
     parser.add_argument("--tol", type=float, default=1e-5)
+    parser.add_argument("--strict_runtime_safe", action="store_true")
     args = parser.parse_args()
 
     metrics = run_once(args)

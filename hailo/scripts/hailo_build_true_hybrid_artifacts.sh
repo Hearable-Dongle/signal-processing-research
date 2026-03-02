@@ -110,8 +110,8 @@ mask_hef_count="$(awk -F'\t' 'NR>1 && $10=="true" {n++} END{print n+0}' "$MASK_S
 
 echo "[4/5] Packaging artifacts: $OUTPUT_TARBALL"
 tmp_list="/tmp/${BASE_TAG}_hef_files.txt"
-awk -F'\t' 'NR>1 && $9=="true" {print $8}' "$DEC_SUMMARY" > "$tmp_list"
-awk -F'\t' 'NR>1 && $9=="true" {print $8}' "$MASK_SUMMARY" >> "$tmp_list"
+awk -F'\t' 'NR>1 && $10=="true" {print $8}' "$DEC_SUMMARY" > "$tmp_list"
+awk -F'\t' 'NR>1 && $10=="true" {print $8}' "$MASK_SUMMARY" >> "$tmp_list"
 echo "$DEC_SUMMARY" >> "$tmp_list"
 echo "$MASK_SUMMARY" >> "$tmp_list"
 echo "$AGG_SUMMARY" >> "$tmp_list"

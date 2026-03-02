@@ -12,13 +12,13 @@ import torch
 import torch.nn.functional as F
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HAILO_ASTEROID_ROOT = REPO_ROOT / "hailo-asteroid"
-if str(HAILO_ASTEROID_ROOT) not in sys.path:
-    sys.path.insert(0, str(HAILO_ASTEROID_ROOT))
+for asteroid_root in (REPO_ROOT / "hailo-asteroid", REPO_ROOT / "asteroid"):
+    if (asteroid_root / "asteroid").is_dir() and str(asteroid_root) not in sys.path:
+        sys.path.insert(0, str(asteroid_root))
 
 from asteroid.models.hailo_conv_tasnet import HailoConvTasNet
 from asteroid.models.hailo_conv_tasnet_submodules import HailoDecoderPreConvOrIdentity1x1
-from hailo.hailo_runtime_runner import HailoHEFRunner
+from hailo.hailo_runtime_runner import HailoHEFRunner, HailoRuntimeUnavailable
 
 
 @dataclass
@@ -65,9 +65,9 @@ def _parse_tag(tag: str):
     # allocfix_block_dechead_s{src}_i{ib}_w256
     if tag.startswith("allocfix_full_source_"):
         p = tag.split("_")
-        src = int(p[4][1:])
-        ob = int(p[5][1:])
-        ib = int(p[6][1:])
+        src = int(p[3][1:])
+        ob = int(p[4][1:])
+        ib = int(p[5][1:])
         return ("source", src, ob, ib)
     if tag.startswith("allocfix_block_decpre_"):
         p = tag.split("_")
@@ -175,8 +175,10 @@ class TorchProxyExecutor(BlockExecutor):
 
 
 class HailoRuntimeExecutor(BlockExecutor):
-    def __init__(self, manifest: BlockManifest):
+    def __init__(self, manifest: BlockManifest, block_chan: int = 64, strict_runtime_safe: bool = False):
         self.manifest = manifest
+        self.block = block_chan
+        self.strict_runtime_safe = strict_runtime_safe
         self._source_runners: Dict[Tuple[int, int, int], HailoHEFRunner] = {}
         self._decpre_runners: Dict[Tuple[int, int, int], HailoHEFRunner] = {}
         self._dechead_runners: Dict[Tuple[int, int], HailoHEFRunner] = {}
@@ -211,13 +213,55 @@ class HailoRuntimeExecutor(BlockExecutor):
         return self._dechead_runners[key]
 
     def run_source(self, src: int, ob: int, ib: int, x_block: torch.Tensor) -> torch.Tensor:
-        return self._infer(self._get_source(src, ob, ib), x_block)
+        x_part = x_block[:, ib * self.block : (ib + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            hef_path = self.manifest.source_blocks[(src, ob, ib)]
+            with HailoHEFRunner(hef_path) as runner:
+                return self._infer(runner, x_part)
+        return self._infer(self._get_source(src, ob, ib), x_part)
 
     def run_decpre(self, half: int, ob: int, ib: int, x_block: torch.Tensor) -> torch.Tensor:
-        return self._infer(self._get_decpre(half, ob, ib), x_block)
+        x_part = x_block[:, ib * self.block : (ib + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            hef_path = self.manifest.decpre_blocks[(half, ob, ib)]
+            with HailoHEFRunner(hef_path) as runner:
+                return self._infer(runner, x_part)
+        return self._infer(self._get_decpre(half, ob, ib), x_part)
 
     def run_dechead(self, src: int, ib: int, x_block: torch.Tensor) -> torch.Tensor:
-        return self._infer(self._get_dechead(src, ib), x_block)
+        x_part = x_block[:, ib * self.block : (ib + 1) * self.block, :, :]
+        if self.strict_runtime_safe:
+            hef_path = self.manifest.dechead_blocks[(src, ib)]
+            with HailoHEFRunner(hef_path) as runner:
+                return self._infer(runner, x_part)
+        return self._infer(self._get_dechead(src, ib), x_part)
+
+
+def _check_missing(required, actual):
+    missing = sorted(required - actual)
+    return missing
+
+
+def validate_manifest_coverage(manifest: BlockManifest, n_src: int, n_filters: int, block_chan: int) -> None:
+    in_blocks = n_filters // block_chan
+    decpre_in_blocks = (n_src * n_filters) // block_chan
+
+    req_source = {(s, ob, ib) for s in range(n_src) for ob in range(in_blocks) for ib in range(in_blocks)}
+    req_decpre = {(h, ob, ib) for h in range(n_src) for ob in range(in_blocks) for ib in range(decpre_in_blocks)}
+    req_dechead = {(s, ib) for s in range(n_src) for ib in range(decpre_in_blocks)}
+
+    miss_source = _check_missing(req_source, set(manifest.source_blocks.keys()))
+    miss_decpre = _check_missing(req_decpre, set(manifest.decpre_blocks.keys()))
+    miss_dechead = _check_missing(req_dechead, set(manifest.dechead_blocks.keys()))
+    if miss_source or miss_decpre or miss_dechead:
+        parts = []
+        if miss_source:
+            parts.append(f"source missing {len(miss_source)} keys, first={miss_source[:5]}")
+        if miss_decpre:
+            parts.append(f"decpre missing {len(miss_decpre)} keys, first={miss_decpre[:5]}")
+        if miss_dechead:
+            parts.append(f"dechead missing {len(miss_dechead)} keys, first={miss_dechead[:5]}")
+        raise RuntimeError("Manifest is incomplete for requested model config: " + "; ".join(parts))
 
 
 def reconstruct_with_executor(
@@ -347,6 +391,7 @@ def main():
     parser.add_argument("--tile_w", type=int, default=256)
     parser.add_argument("--block_chan", type=int, default=64)
     parser.add_argument("--tol", type=float, default=1e-5)
+    parser.add_argument("--strict_runtime_safe", action="store_true")
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -383,37 +428,70 @@ def main():
         head_ref = dec_conv(pre_ref)
 
     manifest = build_manifest(Path(args.summary_tsv))
+    strict_runtime_safe = args.strict_runtime_safe or args.backend == "hailo_runtime"
+    if args.backend == "hailo_runtime":
+        validate_manifest_coverage(
+            manifest,
+            n_src=args.n_src,
+            n_filters=args.n_filters,
+            block_chan=args.block_chan,
+        )
     manifest_counts = {
         "source_blocks": len(manifest.source_blocks),
         "decpre_blocks": len(manifest.decpre_blocks),
         "dechead_blocks": len(manifest.dechead_blocks),
     }
 
+    effective_backend = args.backend
+    fallback_reason = None
     if args.backend == "torch_proxy":
         executor = TorchProxyExecutor(model, block_chan=args.block_chan)
     else:
-        executor = HailoRuntimeExecutor(manifest)
-
-    with torch.no_grad():
-        proj_out, pre_out, head_out = reconstruct_with_executor(
-            x,
-            executor,
-            n_src=args.n_src,
-            n_filters=args.n_filters,
-            block=args.block_chan,
-            tile_w=args.tile_w,
+        executor = HailoRuntimeExecutor(
+            manifest,
+            block_chan=args.block_chan,
+            strict_runtime_safe=strict_runtime_safe,
         )
+
+    try:
+        with torch.no_grad():
+            proj_out, pre_out, head_out = reconstruct_with_executor(
+                x,
+                executor,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
+    except HailoRuntimeUnavailable as e:
+        if args.backend != "hailo_runtime":
+            raise
+        effective_backend = "torch_proxy_fallback"
+        fallback_reason = str(e)
+        with torch.no_grad():
+            proj_out, pre_out, head_out = reconstruct_with_executor(
+                x,
+                TorchProxyExecutor(model, block_chan=args.block_chan),
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
 
     metrics = {
         "backend": args.backend,
+        "effective_backend": effective_backend,
         "latent_w": args.latent_w,
         "tile_w": args.tile_w,
         "manifest_counts": manifest_counts,
+        "strict_runtime_safe": strict_runtime_safe,
         "source_projector_max_abs": max_abs(proj_ref, proj_out),
         "decoder_pre_max_abs": max_abs(pre_ref, pre_out),
         "decoder_head_max_abs": max_abs(head_ref, head_out),
         "tol": args.tol,
     }
+    if fallback_reason is not None:
+        metrics["backend_fallback_reason"] = fallback_reason
     metrics["all_close"] = (
         metrics["source_projector_max_abs"] <= args.tol
         and metrics["decoder_pre_max_abs"] <= args.tol

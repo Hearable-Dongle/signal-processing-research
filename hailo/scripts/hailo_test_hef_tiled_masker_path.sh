@@ -8,7 +8,7 @@ RUN_TS="${HAILO_RUN_TS:-$(date +%Y%m%d_%H%M%S)}"
 RUN_DIR="hailo/module_runs/${RUN_TS}"
 mkdir -p "$RUN_DIR"
 
-PY="hailo/to-onnx-env/bin/python"
+PY="${PY:-hailo/to-onnx-env/bin/python}"
 if [[ -z "${SUMMARY_TSV:-}" ]]; then
   SUMMARY_TSV="$(ls -1t hailo/module_runs/*/masker_allocator_fixes_summary.tsv 2>/dev/null | head -n1 || true)"
 fi
