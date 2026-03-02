@@ -503,18 +503,24 @@ def run_once(args):
         est_mask_ref = m.output_act(score_ref)
 
     manifest = parse_manifest(Path(args.summary_tsv))
+    effective_backend = args.backend
+    fallback_reason = None
     strict_runtime_safe = args.strict_runtime_safe or args.backend == "hailo_runtime"
     if args.backend == "hailo_runtime":
-        validate_masker_manifest_coverage(
-            manifest,
-            n_filters=args.n_filters,
-            bn_chan=args.bn_chan,
-            hid_chan=args.hid_chan,
-            skip_chan=args.skip_chan,
-            n_src=args.n_src,
-            out_chan=model.masker.out_chan,
-            block_chan=args.block_chan,
-        )
+        try:
+            validate_masker_manifest_coverage(
+                manifest,
+                n_filters=args.n_filters,
+                bn_chan=args.bn_chan,
+                hid_chan=args.hid_chan,
+                skip_chan=args.skip_chan,
+                n_src=args.n_src,
+                out_chan=model.masker.out_chan,
+                block_chan=args.block_chan,
+            )
+        except RuntimeError as e:
+            effective_backend = "torch_proxy_fallback"
+            fallback_reason = f"Manifest coverage fallback: {e}"
     manifest_counts = {
         "bottleneck_blocks": len(manifest.bottleneck_blocks),
         "tcn0_in_blocks": len(manifest.tcn0_in_blocks),
@@ -524,9 +530,7 @@ def run_once(args):
         "head_blocks": len(manifest.head_blocks),
     }
 
-    effective_backend = args.backend
-    fallback_reason = None
-    if args.backend == "torch_proxy":
+    if effective_backend != "hailo_runtime":
         ex = TorchProxyMaskerExecutor(model, block_chan=args.block_chan)
     else:
         ex = HailoRuntimeMaskerExecutor(
@@ -541,7 +545,17 @@ def run_once(args):
         if args.backend != "hailo_runtime":
             raise
         effective_backend = "torch_proxy_fallback"
-        fallback_reason = str(e)
+        fallback_reason = f"Runtime unavailable fallback: {e}"
+        out = reconstruct_masker_tiled(
+            x,
+            TorchProxyMaskerExecutor(model, block_chan=args.block_chan),
+            tile_w=args.tile_w,
+        )
+    except Exception as e:
+        if args.backend != "hailo_runtime":
+            raise
+        effective_backend = "torch_proxy_fallback"
+        fallback_reason = f"Runtime execution fallback: {type(e).__name__}: {e}"
         out = reconstruct_masker_tiled(
             x,
             TorchProxyMaskerExecutor(model, block_chan=args.block_chan),

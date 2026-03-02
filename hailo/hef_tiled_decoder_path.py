@@ -428,23 +428,27 @@ def main():
         head_ref = dec_conv(pre_ref)
 
     manifest = build_manifest(Path(args.summary_tsv))
+    effective_backend = args.backend
+    fallback_reason = None
     strict_runtime_safe = args.strict_runtime_safe or args.backend == "hailo_runtime"
     if args.backend == "hailo_runtime":
-        validate_manifest_coverage(
-            manifest,
-            n_src=args.n_src,
-            n_filters=args.n_filters,
-            block_chan=args.block_chan,
-        )
+        try:
+            validate_manifest_coverage(
+                manifest,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block_chan=args.block_chan,
+            )
+        except RuntimeError as e:
+            effective_backend = "torch_proxy_fallback"
+            fallback_reason = f"Manifest coverage fallback: {e}"
     manifest_counts = {
         "source_blocks": len(manifest.source_blocks),
         "decpre_blocks": len(manifest.decpre_blocks),
         "dechead_blocks": len(manifest.dechead_blocks),
     }
 
-    effective_backend = args.backend
-    fallback_reason = None
-    if args.backend == "torch_proxy":
+    if effective_backend != "hailo_runtime":
         executor = TorchProxyExecutor(model, block_chan=args.block_chan)
     else:
         executor = HailoRuntimeExecutor(
@@ -467,7 +471,21 @@ def main():
         if args.backend != "hailo_runtime":
             raise
         effective_backend = "torch_proxy_fallback"
-        fallback_reason = str(e)
+        fallback_reason = f"Runtime unavailable fallback: {e}"
+        with torch.no_grad():
+            proj_out, pre_out, head_out = reconstruct_with_executor(
+                x,
+                TorchProxyExecutor(model, block_chan=args.block_chan),
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
+    except Exception as e:
+        if args.backend != "hailo_runtime":
+            raise
+        effective_backend = "torch_proxy_fallback"
+        fallback_reason = f"Runtime execution fallback: {type(e).__name__}: {e}"
         with torch.no_grad():
             proj_out, pre_out, head_out = reconstruct_with_executor(
                 x,

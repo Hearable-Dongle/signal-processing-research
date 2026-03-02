@@ -151,8 +151,8 @@ Create a deterministic export bundle on the conversion machine:
 DEC_TS=<DECODER_RUN_TS>
 MASK_TS=<MASKER_RUN_TS>
 
-awk -F'\t' 'NR>1 && $9=="true" {print $8}' "hailo/module_runs/${DEC_TS}/allocator_mapping_fixes_summary.tsv" > /tmp/hailo_hef_files.txt
-awk -F'\t' 'NR>1 && $9=="true" {print $8}' "hailo/module_runs/${MASK_TS}/masker_allocator_fixes_summary.tsv" >> /tmp/hailo_hef_files.txt
+awk -F'\t' 'NR>1 && $10=="true" {print $8}' "hailo/module_runs/${DEC_TS}/allocator_mapping_fixes_summary.tsv" > /tmp/hailo_hef_files.txt
+awk -F'\t' 'NR>1 && $10=="true" {print $8}' "hailo/module_runs/${MASK_TS}/masker_allocator_fixes_summary.tsv" >> /tmp/hailo_hef_files.txt
 
 echo "hailo/module_runs/${DEC_TS}/allocator_mapping_fixes_summary.tsv" >> /tmp/hailo_hef_files.txt
 echo "hailo/module_runs/${MASK_TS}/masker_allocator_fixes_summary.tsv" >> /tmp/hailo_hef_files.txt
@@ -176,22 +176,32 @@ Set explicit summaries:
 ```bash
 export DECODER_SUMMARY_TSV="hailo/module_runs/<DECODER_RUN_TS>/allocator_mapping_fixes_summary.tsv"
 export MASKER_SUMMARY_TSV="hailo/module_runs/<MASKER_RUN_TS>/masker_allocator_fixes_summary.tsv"
+export PY="hailo/hailo-runtime-env/bin/python"
 ```
 
 1. Decoder parity on hardware:
 ```bash
-BACKEND=hailo_runtime SUMMARY_TSV="$DECODER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_decoder_path.sh
+PY="$PY" BACKEND=hailo_runtime SUMMARY_TSV="$DECODER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_decoder_path.sh
 ```
 
 2. Masker parity on hardware:
 ```bash
-BACKEND=hailo_runtime SUMMARY_TSV="$MASKER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_masker_path.sh
+PY="$PY" BACKEND=hailo_runtime SUMMARY_TSV="$MASKER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_masker_path.sh
 ```
 
 3. Full stitched-chain parity on hardware:
 ```bash
-BACKEND=hailo_runtime DECODER_SUMMARY_TSV="$DECODER_SUMMARY_TSV" MASKER_SUMMARY_TSV="$MASKER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_full_chain.sh
+PY="$PY" BACKEND=hailo_runtime DECODER_SUMMARY_TSV="$DECODER_SUMMARY_TSV" MASKER_SUMMARY_TSV="$MASKER_SUMMARY_TSV" ./hailo/scripts/hailo_test_hef_tiled_full_chain.sh
 ```
+
+Notes:
+- The tiled test scripts support `PY=...` override; default remains `hailo/to-onnx-env/bin/python`.
+- For `BACKEND=hailo_runtime`, parity modules run in strict runtime-safe mode.
+- If runtime is unavailable, device execution fails, or manifest coverage is incomplete, they auto-fallback to torch proxy and still complete parity checks.
+- Check JSON outputs for:
+  - `effective_backend` (`hailo_runtime` vs `torch_proxy_fallback`)
+  - `backend_fallback_reason`
+  - `strict_runtime_safe`
 
 4. End-to-end hybrid validation (real sample, latency + WAV outputs):
 ```bash
