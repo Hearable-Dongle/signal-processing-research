@@ -169,6 +169,33 @@ def compute_steering_vector(
     return steering_vecs
 
 
+def compute_steering_vector_from_azimuths(
+    mic_pos: NDArray[np.float64],
+    fvec: NDArray[np.float64],
+    azimuths_deg: NDArray[np.float64],
+    sound_speed: float,
+) -> NDArray[np.complex128]:
+    """
+    Build far-field steering vectors from azimuth angles (2D indoor model).
+    """
+    mic_count = mic_pos.shape[1]
+    freq_bin_count = fvec.size
+    steering_vecs = []
+    azimuths_rad = np.deg2rad(np.asarray(azimuths_deg, dtype=float))
+
+    for az in azimuths_rad:
+        direction = np.array([np.cos(az), np.sin(az), 0.0], dtype=float)
+        proj = mic_pos.T @ direction  # (M,)
+        tau = proj / sound_speed
+
+        steering_vec = np.zeros((freq_bin_count, mic_count), dtype=complex)
+        for freq_idx, freq in enumerate(fvec):
+            steering_vec[freq_idx, :] = np.exp(-1j * 2 * np.pi * freq * tau)
+        steering_vecs.append(steering_vec)
+
+    return steering_vecs
+
+
 def apply_beamformer_stft(
     data: NDArray[np.complex128], weights: NDArray[np.complex128]
 ) -> NDArray[np.complex128]:

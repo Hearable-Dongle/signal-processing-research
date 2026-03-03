@@ -36,6 +36,13 @@
         "gamma_dB": 15,
         "iterations": 10,
         "frame_duration": 10,
-        "output_dir": "beamforming/output"
+        "steering_mode": "locations",
+        "doa_update_hop_frames": 10,
+        "output_dir": "beamforming/output",
+        "localization": {
+            "default_method": "SSZ",
+            "fallback_methods": ["GMDA"]
+        },
+        "target_weights": []
     }
 }

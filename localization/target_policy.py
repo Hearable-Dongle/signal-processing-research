@@ -4,6 +4,7 @@ import math
 from typing import Iterable
 
 from simulation.simulation_config import SimulationConfig, SimulationSource
+from simulation.target_policy import is_speech_target as _is_speech_target_shared
 
 
 def _normalize_deg(angle_deg: float) -> float:
@@ -11,9 +12,7 @@ def _normalize_deg(angle_deg: float) -> float:
 
 
 def is_speech_target(source: SimulationSource) -> bool:
-    """Benchmark/manual shared policy: speech targets are LibriSpeech sources."""
-    audio_path = source.audio_path.replace("\\", "/").lower()
-    return "librispeech/" in audio_path
+    return _is_speech_target_shared(source)
 
 
 def iter_speech_target_indices(sim_config: SimulationConfig) -> Iterable[int]:

@@ -1,0 +1,14 @@
+{
+  "scene_roots": {
+    "library": "simulation/simulations/configs/library_scene",
+    "restaurant": "simulation/simulations/configs/restaurant_scene"
+  },
+  "presets": {
+    "quick": {
+      "sample_per_bucket": 3
+    },
+    "full": {
+      "sample_per_bucket": null
+    }
+  }
+}

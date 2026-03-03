@@ -24,7 +24,7 @@ class SimulationSource:
     loc: List[float]
     audio_path: str
     gain: float = 1.0
-    classification: str = "signal"
+    classification: str = ""
 
     def get_absolute_path(self) -> Path:
         """Returns the absolute path to the audio file."""
@@ -63,7 +63,7 @@ class SimulationConfig:
                 loc=s["loc"],
                 audio_path=s["audio"],
                 gain=s.get("gain", 1.0),
-                classification=s.get("classification", "signal")
+                classification=s.get("classification", "")
             )
             for s in data["audio"]["sources"]
         ]
@@ -78,7 +78,10 @@ class SimulationConfig:
 
     def create_noise_config(self) -> "SimulationConfig":
         """Creates a new SimulationConfig containing only noise sources."""
-        noise_sources = [s for s in self.audio.sources if s.classification != "signal"]
+        # Local import avoids a module-level circular dependency.
+        from simulation.target_policy import is_speech_target
+
+        noise_sources = [s for s in self.audio.sources if not is_speech_target(s)]
         
         new_audio = SimulationAudio(
             sources=noise_sources,
@@ -121,6 +124,7 @@ class SimulationConfig:
                         "loc": s.loc,
                         "audio": s.audio_path,
                         "gain": s.gain,
+                        "classification": s.classification,
                     }
                     for s in self.audio.sources
                 ],

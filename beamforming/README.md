@@ -1,35 +1,108 @@
 # Beamforming Simulation Project
 
-This directory contains a beamforming simulation project designed to process audio signals in a simulated acoustic environment.
+This directory contains a frequency-domain beamforming simulation pipeline.
 
-## Project Outline
+## Pipeline
 
-The project implements a Frequency-Domain Beamforming pipeline:
+1. Simulate multichannel mixture audio (speech + noise) and noise-only audio.
+2. Compute STFT features and spatial covariance matrices.
+3. Build steering vectors from either:
+- oracle target locations/DOAs, or
+- localization-estimated DOAs.
+4. Solve beamformer weights:
+- MVDR (iterative steepest/newton)
+- MVDR (neural-mask)
+- LCMV / GSC / GSC iterative
+- weighted LCMV / weighted GSC variants
+5. Reconstruct waveforms and evaluate RMSE / SNR / SI-SDR.
 
-1.  **Simulation**: A virtual room is created to simulate sound propagation. This is done twice:
-    *   Once for the mixed audio (speech + noise) captured by a microphone array.
-    *   Once for pure noise (ground truth) captured by the same microphone array.
-2.  **Transformation**: Both the mixed microphone audio and the pure noise audio are converted into the frequency domain using Short-Time Fourier Transform (STFT).
-3.  **Statistics (The "Brain")**:
-    *   The Spatial Covariance Matrix ($R_{nn}$) is computed using the pure noise simulation, characterizing the spatial properties of the noise.
-    *   Steering Vectors are computed based on the known locations of the target speech sources.
-4.  **Solver (The "Muscle")**: Iterative algorithms (Steepest Descent and Newton's Method) are used to calculate complex weights for each frequency bin. These weights aim to minimize noise power while maintaining a constant gain towards the target speech source.
-5.  **Reconstruction**: The processed frequency-domain signals are converted back into a waveform using Inverse STFT.
-6.  **Evaluation**: The reconstructed audio is compared against the original dry source files to assess the beamforming performance.
+## Run
 
-## How to Run
+Install dependencies:
 
-To set up the environment and run the simulation:
+```bash
+python -m venv beamforming-env
+source beamforming-env/bin/activate
+pip install -r beamforming/requirements.txt
+```
 
-1.  **Install Dependencies**: Ensure you have Python installed. Then, create and activate a virtual environment (recommended) and install the required packages:
-    ```bash
-    python -m venv beamforming-env
-    source beamforming-env/bin/activate
-    pip install -r beamforming/requirements.txt
-    ```
+Default run:
 
-2.  **Run the Simulation**: From the parent directory (e.g., `signal-processing-research/`), execute the main script as a Python module:
-    ```bash
-    python -m beamforming.main
-    ```
-    The simulation will read its configuration from `beamforming/config/config.json` and output results (processed audio files, plots) into the `beamforming/output/` directory.
+```bash
+python -m beamforming.main
+```
+
+## Localization Steering Options
+
+```bash
+python -m beamforming.main \
+  --steering-source both \
+  --steering-time both \
+  --steering-localization-default SSZ \
+  --steering-localization-fallbacks GMDA
+```
+
+Useful flags:
+- `--simulation-scene-file <path>` run one scene config directly.
+- `--simulation-scene-dir <path> --max-scenes N` run multiple scene configs.
+- `--localization-methods ...` override and explicitly test methods.
+- `--dynamic-chunk-seconds <float>` chunk size for dynamic steering.
+- `--target-weight-mode {equal,config}` default equal weighting.
+- `--target-weights-file <json>` optional per-target weights.
+
+Outputs include:
+- `beamforming/output/<run>/steering_comparison.csv`
+- `beamforming/output/<run>/<scene>/<scenario>/doa_tracking.csv`
+- `beamforming/output/<run>/<scene>/<scenario>/scenario_metadata.json`
+- audio files in both forms:
+  - raw solver output (`*.wav`)
+  - loudness-matched to reference (`*_norm_to_ref.wav`)
+
+`steering_comparison.csv` reports both raw and normalized metrics:
+- raw: `rmse_raw`, `snr_db_raw`, `si_sdr_db_raw`
+- normalized: `rmse_norm`, `snr_db_norm`, `si_sdr_db_norm`
+
+## Benchmark Over Library/Restaurant Scenes
+
+```bash
+python -m beamforming.benchmark.run \
+  --preset quick \
+  --steering-source both \
+  --steering-time both
+```
+
+Benchmark defaults are best-only:
+- `--steering-source localized`
+- `--steering-time fixed`
+- `--steering-localization-default SSZ`
+- `--steering-localization-fallbacks GMDA`
+
+To run a full sweep explicitly:
+
+```bash
+python -m beamforming.benchmark.run \
+  --preset full \
+  --steering-source both \
+  --steering-time both
+```
+
+Benchmark outputs:
+- `beamforming/benchmark/results/<run_id>/scene_metrics.csv`
+- `beamforming/benchmark/results/<run_id>/summary_by_method.csv`
+- `beamforming/benchmark/results/<run_id>/README_summary.md`
+
+Run only one scene family:
+
+```bash
+python -m beamforming.benchmark.run --preset quick --scene-types library
+python -m beamforming.benchmark.run --preset quick --scene-types restaurant
+```
+
+Run all configs from one scene directory directly:
+
+```bash
+python -m beamforming.main \
+  --simulation-scene-dir simulation/simulations/configs/library_scene \
+  --steering-source both \
+  --steering-time both
+```

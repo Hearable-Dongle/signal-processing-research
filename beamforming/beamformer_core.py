@@ -1,68 +1,125 @@
 from dataclasses import dataclass
-from typing import Dict, Tuple, Callable
-import numpy as np
-from scipy.signal import stft
-from numpy.typing import NDArray
 from pathlib import Path
+from typing import Callable
 
+import numpy as np
 import torch
+from numpy.typing import NDArray
+from scipy.signal import stft
 
 from beamforming.algo.beamformer import (
     compute_steering_vector,
-    wng_mvdr_newton,
-    wng_mvdr_steepest,
-    lcmv_solver,
+    compute_steering_vector_from_azimuths,
     gsc_solver,
     gsc_solver_steepest,
+    lcmv_solver,
+    wng_mvdr_newton,
+    wng_mvdr_steepest,
 )
 from beamforming.nn.mask_nn import MaskEstimationNetwork
 
+
 @dataclass
 class BeamformerConfig:
-    """DSP Hyperparameters independent of simulation."""
+    """DSP hyperparameters independent of simulation."""
+
     fs: int
     frame_duration_ms: float
     sound_speed: float
     gamma_dB: float
     iterations: int
     output_dir: Path | str | None = None
-    mic_array_center: NDArray | None = None  # config.mic_loc
-    mic_geometry: NDArray | None = None      # mic_pos
+    mic_array_center: NDArray | None = None
+    mic_geometry: NDArray | None = None
+    steering_mode: str = "locations"
+    doa_update_hop_frames: int = 10
+    localization_default_method: str = "SSZ"
+    localization_fallback_methods: list[str] | None = None
 
     @classmethod
     def from_dict(cls, data: dict, fs: int) -> "BeamformerConfig":
-        """
-        Creates BeamformerConfig from a dictionary.
-        Args:
-            data: Dictionary containing beamforming parameters (e.g. from config.json)
-            fs: Sampling frequency (usually from simulation config)
-        """
-        # If passed the root config dict, extract the 'beamforming' section
         bf_data = data.get("beamforming", data)
-        
+        loc_cfg = bf_data.get("localization", {})
+        fallback = loc_cfg.get("fallback_methods", bf_data.get("localization_fallback_methods", ["SSZ", "GMDA"]))
+
         return cls(
             fs=fs,
             frame_duration_ms=bf_data.get("frame_duration", 10.0),
             sound_speed=bf_data.get("sound_speed", 343.0),
             gamma_dB=bf_data.get("gamma_dB", 15.0),
             iterations=bf_data.get("iterations", 10),
-            output_dir=bf_data.get("output_dir")
+            output_dir=bf_data.get("output_dir"),
+            steering_mode=bf_data.get("steering_mode", "locations"),
+            doa_update_hop_frames=bf_data.get("doa_update_hop_frames", 10),
+            localization_default_method=loc_cfg.get("default_method", bf_data.get("localization_default_method", "SSZ")),
+            localization_fallback_methods=list(fallback) if fallback else None,
         )
 
-def compute_spectral_features(
-    audio_multichannel: NDArray, 
-    fs: int, 
-    window_size: int, 
-    hop: int
-) -> Tuple[NDArray, NDArray]:
-    """
-    Converts time-domain audio to STFT tensor.
-    Returns:
-        stft_tensor: Shape (freq_bins, time_frames, channels)
-        fvec: Frequency vector
-    """
+
+def normalize_target_weights(target_weights: NDArray | None, n_targets: int) -> NDArray:
+    """Normalize target weights and default to equal weighting when absent/invalid."""
+    if n_targets <= 0:
+        return np.zeros(0, dtype=float)
+
+    if target_weights is None:
+        return np.ones(n_targets, dtype=float)
+
+    w = np.asarray(target_weights, dtype=float).reshape(-1)
+    if w.size == 0:
+        return np.ones(n_targets, dtype=float)
+
+    if w.size < n_targets:
+        w = np.pad(w, (0, n_targets - w.size), constant_values=1.0)
+    elif w.size > n_targets:
+        w = w[:n_targets]
+
+    w = np.maximum(w, 0.0)
+    if float(np.sum(w)) <= 1e-12:
+        return np.ones(n_targets, dtype=float)
+
+    return w / np.max(w)
+
+
+def _build_response_vector(target_weights: NDArray | None, n_constraints: int) -> NDArray:
+    weights = normalize_target_weights(target_weights, n_constraints)
+    if weights.size == 0:
+        return np.zeros((0, 1), dtype=np.complex128)
+    return weights.reshape(-1, 1).astype(np.complex128)
+
+
+def _compute_steering_vectors(
+    *,
+    fvec: NDArray,
+    mic_geometry: NDArray,
+    mic_array_center: NDArray,
+    sound_speed: float,
+    source_locations: NDArray | None = None,
+    source_azimuths_deg: NDArray | None = None,
+) -> NDArray:
+    if source_azimuths_deg is not None and len(source_azimuths_deg) > 0:
+        return compute_steering_vector_from_azimuths(
+            mic_pos=mic_geometry,
+            fvec=fvec,
+            azimuths_deg=source_azimuths_deg,
+            sound_speed=sound_speed,
+        )
+
+    if source_locations is None or len(source_locations) == 0:
+        raise ValueError("No steering targets provided: source_locations/source_azimuths_deg are empty.")
+
+    return compute_steering_vector(
+        mic_pos=mic_geometry,
+        mic_loc=mic_array_center,
+        fvec=fvec,
+        signal_loc=source_locations,
+        sound_speed=sound_speed,
+    )
+
+
+def compute_spectral_features(audio_multichannel: NDArray, fs: int, window_size: int, hop: int) -> tuple[NDArray, NDArray]:
+    """Convert time-domain multichannel signal into STFT tensor."""
     window = np.hanning(window_size)
-    
+
     stft_results = [
         stft(
             audio_multichannel[:, i],
@@ -71,164 +128,121 @@ def compute_spectral_features(
             noverlap=window_size - hop,
             window=window,
             padded=True,
-            return_onesided=True
-        ) for i in range(audio_multichannel.shape[1])
+            return_onesided=True,
+        )
+        for i in range(audio_multichannel.shape[1])
     ]
-    
-    # Extract fvec from the first channel (it's the same for all)
+
     fvec = stft_results[0][0]
-    
-    # Stack the Zxx matrices (3rd element of tuple) into a 3D Tensor
-    # Shape: (freq_bins, time_frames, channels)
-    stft_tensor = np.stack(
-        [res[2].astype(np.complex128) for res in stft_results], 
-        axis=-1
-    )
-    
+    stft_tensor = np.stack([res[2].astype(np.complex128) for res in stft_results], axis=-1)
     return stft_tensor, fvec
 
-def compute_spatial_covariance_matrix(
-    stft_tensor: NDArray,
-    mask: NDArray | None = None
-) -> NDArray:
-    """
-    Computes the Spatial Covariance Matrix (Rnn) for each frequency bin, optionally weighted by a mask.
-    
-    Args:
-        stft_tensor: Shape (n_freq, n_frames, n_mics)
-        mask: Shape (n_freq, n_frames) - Optional weighting mask [0, 1]
-    
-    Returns:
-        Rnn_stft: Shape (n_freq, n_mics, n_mics)
-    """
+
+def compute_spatial_covariance_matrix(stft_tensor: NDArray, mask: NDArray | None = None) -> NDArray:
+    """Compute frequency-wise spatial covariance matrix."""
     n_freq, n_frames, n_mics = stft_tensor.shape
-    
+
     if mask is None:
         mask = np.ones((n_freq, n_frames), dtype=stft_tensor.real.dtype)
-        
-    # Numerator: Sum_t ( M(t,f) * y(t,f) * y(t,f)^H )
-    # einsum: mask 'ft', stft 'ftm', stft_conj 'ftn' -> 'fmn'
-    numerator = np.einsum('ft,ftm,ftn->fmn', mask, stft_tensor, stft_tensor.conj())
-    
-    # Denominator: Sum_t ( M(t,f) )
-    denominator = np.sum(mask, axis=1) # Shape (n_freq,)
-    
-    # Avoid division by zero
-    denominator = np.maximum(denominator, 1e-6)
-    
-    # Broadcast denominator: (n_freq, 1, 1)
-    Rnn_stft = numerator / denominator[:, None, None]
-    
-    # Optional: Add slight diagonal loading (regularization) to prevent singularity
-    diagonal_loading = 1e-6 * np.eye(n_mics)[None, :, :]
-    Rnn_stft += diagonal_loading
-    
-    return Rnn_stft
 
-def compute_principal_eigenvector(R_ss: NDArray) -> NDArray:
-    """
-    Extracts the principal eigenvector (corresponding to the largest eigenvalue)
-    for each frequency bin to serve as the steering vector.
-    
-    Args:
-        R_ss: Weighted Speech Covariance Matrix (n_freq, n_mics, n_mics)
-        
-    Returns:
-        steering_vecs: Shape (n_freq, n_mics)
-    """
-    n_freq, n_mics, _ = R_ss.shape
+    numerator = np.einsum("ft,ftm,ftn->fmn", mask, stft_tensor, stft_tensor.conj())
+    denominator = np.sum(mask, axis=1)
+    denominator = np.maximum(denominator, 1e-6)
+
+    rnn_stft = numerator / denominator[:, None, None]
+    diagonal_loading = 1e-6 * np.eye(n_mics)[None, :, :]
+    rnn_stft += diagonal_loading
+    return rnn_stft
+
+
+def compute_principal_eigenvector(r_ss: NDArray) -> NDArray:
+    """Extract principal eigenvector for each frequency bin."""
+    n_freq, n_mics, _ = r_ss.shape
     steering_vecs = np.zeros((n_freq, n_mics), dtype=np.complex128)
-    
+
     for f in range(n_freq):
-        # eigh returns eigenvalues in ascending order
-        _, vecs = np.linalg.eigh(R_ss[f])
-        steering_vecs[f] = vecs[:, -1] # Last column is principal eigenvector
-        
+        _, vecs = np.linalg.eigh(r_ss[f])
+        steering_vecs[f] = vecs[:, -1]
+
     return steering_vecs
 
 
 def solve_weights_per_bin(
-    solver_fn: Callable, 
-    Rnn_tensor: NDArray, 
-    steering_vecs: NDArray, 
-    gamma: float, 
-    iterations: int
-) -> Tuple[NDArray, list]:
-    
+    solver_fn: Callable,
+    rnn_tensor: NDArray,
+    steering_vecs: NDArray,
+    gamma: float,
+    iterations: int,
+) -> tuple[NDArray, list]:
     freq_bin_count = steering_vecs[0].shape[0]
-    
-    def process_bin(kf):
-        a_vecs_bin = [sv[kf, :].reshape(-1, 1) for sv in steering_vecs]
-        Rnn_bin = Rnn_tensor[kf, :, :] 
 
-        bin_power = np.trace(Rnn_bin.real)
+    def process_bin(kf: int):
+        a_vecs_bin = [sv[kf, :].reshape(-1, 1) for sv in steering_vecs]
+        rnn_bin = rnn_tensor[kf, :, :]
+
+        bin_power = np.trace(rnn_bin.real)
         if solver_fn.__name__ == "wng_mvdr_newton":
-            mu_bin = 0.5  # Fixed step size for Newton
+            mu_bin = 0.5
         else:
-            mu_bin = 0.01 / (bin_power + 1e-10) # Dynamic for Steepest
-        
-        
-        w_bin, p_hist = solver_fn(Rnn_bin, a_vecs_bin, gamma, mu_bin, iterations)
+            mu_bin = 0.01 / (bin_power + 1e-10)
+
+        w_bin, p_hist = solver_fn(rnn_bin, a_vecs_bin, gamma, mu_bin, iterations)
         return w_bin[:, 0], p_hist
 
     results = [process_bin(kf) for kf in range(freq_bin_count)]
     weights_list, power_histories = zip(*results)
-    
     return np.array(weights_list, dtype=complex), list(power_histories)
+
 
 def solve_weights_per_bin_closed_form(
     solver_fn: Callable,
-    Rnn_tensor: NDArray,
+    rnn_tensor: NDArray,
     steering_vecs: NDArray,
+    response_vec: NDArray | None = None,
 ) -> NDArray:
-    
     freq_bin_count = steering_vecs[0].shape[0]
-    
-    def process_bin(kf):
-        # steering_vecs is a list of arrays (one per source).
-        # Each array is (n_freq, n_mics).
-        # We need to extract the kf-th row from each and reshape to (n_mics, 1)
-        # to get a list of [ (M,1), (M,1), ... ] which the solver expects.
+
+    def process_bin(kf: int):
         a_vecs_bin = [sv[kf, :].reshape(-1, 1) for sv in steering_vecs]
-        Rnn_bin = Rnn_tensor[kf, :, :]
-        w_bin = solver_fn(Rnn_bin, a_vecs_bin)
-        return w_bin.reshape(-1) # return as 1D array
+        rnn_bin = rnn_tensor[kf, :, :]
+        w_bin = solver_fn(rnn_bin, a_vecs_bin, response_vec=response_vec)
+        return w_bin.reshape(-1)
 
     weights_list = [process_bin(kf) for kf in range(freq_bin_count)]
     return np.array(weights_list, dtype=np.complex128)
 
-def compute_beamforming_weights_mvdr_classical(
-        fvec, 
-        stft_noise,
-        source_locations, 
-        mic_geometry,
-        mic_array_center,
-        sound_speed,
-        gamma_dB,
-        num_iterations=10,
-    ):
- 
-    Rnn_tensor_classical = compute_spatial_covariance_matrix(stft_noise)
 
-    steering_vecs_classical = compute_steering_vector(
-        mic_geometry,
-        mic_array_center,
-        fvec,
-        source_locations,
-        sound_speed,
+def compute_beamforming_weights_mvdr_classical(
+    *,
+    fvec: NDArray,
+    stft_noise: NDArray,
+    source_locations: NDArray | None,
+    mic_geometry: NDArray,
+    mic_array_center: NDArray,
+    sound_speed: float,
+    gamma_dB: float,
+    source_azimuths_deg: NDArray | None = None,
+    num_iterations: int = 10,
+) -> dict:
+    rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
+
+    steering_vecs = _compute_steering_vectors(
+        fvec=fvec,
+        mic_geometry=mic_geometry,
+        mic_array_center=mic_array_center,
+        sound_speed=sound_speed,
+        source_locations=source_locations,
+        source_azimuths_deg=source_azimuths_deg,
     )
 
     gamma = 10 ** (gamma_dB / 10)
-    
     weights_steepest, hist_steepest = solve_weights_per_bin(
-        wng_mvdr_steepest, Rnn_tensor_classical, steering_vecs_classical, gamma, num_iterations
+        wng_mvdr_steepest, rnn_tensor, steering_vecs, gamma, num_iterations
     )
-    
     weights_newton, hist_newton = solve_weights_per_bin(
-        wng_mvdr_newton, Rnn_tensor_classical, steering_vecs_classical, gamma, num_iterations
+        wng_mvdr_newton, rnn_tensor, steering_vecs, gamma, num_iterations
     )
 
-    
     return {
         "weights_steepest": weights_steepest,
         "hist_steepest": hist_steepest,
@@ -236,211 +250,254 @@ def compute_beamforming_weights_mvdr_classical(
         "hist_newton": hist_newton,
     }
 
-def compute_beamforming_weights_lcmv(
-        fvec, 
-        stft_noise,
-        source_locations, 
-        mic_geometry,
-        mic_array_center,
-        sound_speed,
-    ):
- 
-    Rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
 
-    steering_vecs = compute_steering_vector(
-        mic_geometry,
-        mic_array_center,
-        fvec,
-        source_locations,
-        sound_speed,
+def compute_beamforming_weights_lcmv(
+    *,
+    fvec: NDArray,
+    stft_noise: NDArray,
+    source_locations: NDArray | None,
+    mic_geometry: NDArray,
+    mic_array_center: NDArray,
+    sound_speed: float,
+    source_azimuths_deg: NDArray | None = None,
+    target_weights: NDArray | None = None,
+) -> NDArray:
+    rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
+
+    steering_vecs = _compute_steering_vectors(
+        fvec=fvec,
+        mic_geometry=mic_geometry,
+        mic_array_center=mic_array_center,
+        sound_speed=sound_speed,
+        source_locations=source_locations,
+        source_azimuths_deg=source_azimuths_deg,
     )
-    
+
+    response_vec = _build_response_vector(target_weights, len(steering_vecs))
     weights = solve_weights_per_bin_closed_form(
-        lcmv_solver, Rnn_tensor, steering_vecs
+        lcmv_solver,
+        rnn_tensor,
+        steering_vecs,
+        response_vec=response_vec,
     )
-    
     return weights
+
 
 def compute_beamforming_weights_gsc(
-        fvec, 
-        stft_noise,
-        source_locations, 
-        mic_geometry,
-        mic_array_center,
-        sound_speed,
-    ):
- 
-    Rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
+    *,
+    fvec: NDArray,
+    stft_noise: NDArray,
+    source_locations: NDArray | None,
+    mic_geometry: NDArray,
+    mic_array_center: NDArray,
+    sound_speed: float,
+    source_azimuths_deg: NDArray | None = None,
+    target_weights: NDArray | None = None,
+) -> NDArray:
+    rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
 
-    steering_vecs = compute_steering_vector(
-        mic_geometry,
-        mic_array_center,
-        fvec,
-        source_locations,
-        sound_speed,
+    steering_vecs = _compute_steering_vectors(
+        fvec=fvec,
+        mic_geometry=mic_geometry,
+        mic_array_center=mic_array_center,
+        sound_speed=sound_speed,
+        source_locations=source_locations,
+        source_azimuths_deg=source_azimuths_deg,
     )
-    
+
+    response_vec = _build_response_vector(target_weights, len(steering_vecs))
     weights = solve_weights_per_bin_closed_form(
-        gsc_solver, Rnn_tensor, steering_vecs
+        gsc_solver,
+        rnn_tensor,
+        steering_vecs,
+        response_vec=response_vec,
     )
-    
     return weights
 
-def compute_beamforming_weights_gsc_iterative(
-        fvec, 
-        stft_noise,
-        source_locations, 
-        mic_geometry,
-        mic_array_center,
-        sound_speed,
-        iterations=20
-    ):
- 
-    Rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
 
-    steering_vecs = compute_steering_vector(
-        mic_geometry,
-        mic_array_center,
-        fvec,
-        source_locations,
-        sound_speed,
+def compute_beamforming_weights_gsc_iterative(
+    *,
+    fvec: NDArray,
+    stft_noise: NDArray,
+    source_locations: NDArray | None,
+    mic_geometry: NDArray,
+    mic_array_center: NDArray,
+    sound_speed: float,
+    source_azimuths_deg: NDArray | None = None,
+    target_weights: NDArray | None = None,
+    iterations: int = 20,
+) -> tuple[NDArray, list]:
+    rnn_tensor = compute_spatial_covariance_matrix(stft_noise)
+
+    steering_vecs = _compute_steering_vectors(
+        fvec=fvec,
+        mic_geometry=mic_geometry,
+        mic_array_center=mic_array_center,
+        sound_speed=sound_speed,
+        source_locations=source_locations,
+        source_azimuths_deg=source_azimuths_deg,
     )
-    
+
+    response_vec = _build_response_vector(target_weights, len(steering_vecs))
     freq_bin_count = steering_vecs[0].shape[0]
-    
-    def process_bin(kf):
+
+    def process_bin(kf: int):
         a_vecs_bin = [sv[kf, :].reshape(-1, 1) for sv in steering_vecs]
-        Rnn_bin = Rnn_tensor[kf, :, :]
-        
-        # Calculate naive step size based on trace of Rnn (approx power)
-        # This is passed to gsc_solver_steepest, or we can let it auto-tune if we pass None.
-        # Let's pass None for auto-tuning inside the solver.
-        w_bin, hist = gsc_solver_steepest(Rnn_bin, a_vecs_bin, iterations=iterations, mu=None)
+        rnn_bin = rnn_tensor[kf, :, :]
+        w_bin, hist = gsc_solver_steepest(
+            rnn_bin,
+            a_vecs_bin,
+            iterations=iterations,
+            mu=None,
+            response_vec=response_vec,
+        )
         return w_bin.reshape(-1), hist
 
     results = [process_bin(kf) for kf in range(freq_bin_count)]
     weights_list, power_histories = zip(*results)
-    
     return np.array(weights_list, dtype=np.complex128), list(power_histories)
 
-    
+
 def compute_beamforming_weights_mvdr_neural(stft_tensor: NDArray) -> NDArray:
     mag_tensor = np.abs(stft_tensor).astype(np.float32)
     nn_input = torch.from_numpy(mag_tensor).unsqueeze(0)
-    
+
     n_freq, _n_frames, n_mics = stft_tensor.shape
     model = MaskEstimationNetwork(input_channels=n_mics, freq_bins=n_freq)
     model.eval()
-    
+
     with torch.no_grad():
         masks = model(nn_input)
-        
+
     masks_np = masks.squeeze(0).numpy()
     mask_speech = masks_np[0, :, :]
     mask_noise = masks_np[1, :, :]
-    
-    R_nn_neural = compute_spatial_covariance_matrix(stft_tensor, mask_noise)
-    R_ss_neural = compute_spatial_covariance_matrix(stft_tensor, mask_speech)
-    
-    steering_vecs_neural = compute_principal_eigenvector(R_ss_neural) 
 
-    def compute_wieight_for_frequency_bin(f):
-        R_inv = np.linalg.pinv(R_nn_neural[f])
+    r_nn_neural = compute_spatial_covariance_matrix(stft_tensor, mask_noise)
+    r_ss_neural = compute_spatial_covariance_matrix(stft_tensor, mask_speech)
+
+    steering_vecs_neural = compute_principal_eigenvector(r_ss_neural)
+
+    def compute_weight_for_frequency_bin(f: int):
+        r_inv = np.linalg.pinv(r_nn_neural[f])
         d = steering_vecs_neural[f].reshape(-1, 1)
-        
-        num = R_inv @ d
+
+        num = r_inv @ d
         denom = d.conj().T @ num
         w = num / (denom + 1e-10)
-        return w.reshape(-1)    
+        return w.reshape(-1)
 
-    weights_mvdr = np.array(list(map(compute_wieight_for_frequency_bin, range(n_freq))), dtype=np.complex128)
-
+    weights_mvdr = np.array(list(map(compute_weight_for_frequency_bin, range(n_freq))), dtype=np.complex128)
     return weights_mvdr
 
 
 def compute_beamforming_weights(
+    *,
     audio_input: NDArray,
-    source_locations: NDArray,
-    noise_audio: NDArray, 
-    config: BeamformerConfig
-) -> Dict[str, Tuple[NDArray, list]]:
-    """
-    Main Interface: Calculates beamforming weights using both classical and neural methods.
-    
-    Args:
-        audio_input: (samples, channels)
-        source_locations: (n_sources, 3)
-        noise_audio: Used for classical noise estimation
-        config: BeamformerConfig object
-    
-    Returns:
-        Dictionary containing weights for 'steepest', 'newton', and 'mvdr'.
-    """
-    
+    source_locations: NDArray | None,
+    noise_audio: NDArray,
+    config: BeamformerConfig,
+    source_azimuths_deg: NDArray | None = None,
+    target_weights: NDArray | None = None,
+) -> dict:
+    """Main interface: calculate classical and neural beamforming weights."""
     stft_window_size = int(config.fs * config.frame_duration_ms / 1000)
     hop = stft_window_size // 2
 
-    stft_noise, _ = compute_spectral_features(
-        noise_audio, config.fs, stft_window_size, hop
-    )
+    stft_noise, _ = compute_spectral_features(noise_audio, config.fs, stft_window_size, hop)
+    stft_tensor, fvec = compute_spectral_features(audio_input, config.fs, stft_window_size, hop)
 
-    stft_tensor, fvec = compute_spectral_features(
-        audio_input, config.fs, stft_window_size, hop
-    )
-    
-    classical_beamforming_weights = compute_beamforming_weights_mvdr_classical(
+    classical = compute_beamforming_weights_mvdr_classical(
         fvec=fvec,
         stft_noise=stft_noise,
-        source_locations=source_locations, 
+        source_locations=source_locations,
         mic_geometry=config.mic_geometry,
         mic_array_center=config.mic_array_center,
         sound_speed=config.sound_speed,
         gamma_dB=config.gamma_dB,
+        source_azimuths_deg=source_azimuths_deg,
+        num_iterations=config.iterations,
     )
-
-    weights_steepest = classical_beamforming_weights["weights_steepest"]
-    hist_steepest = classical_beamforming_weights["hist_steepest"]
-    weights_newton = classical_beamforming_weights["weights_newton"]
-    hist_newton = classical_beamforming_weights["hist_newton"]
 
     weights_mvdr = compute_beamforming_weights_mvdr_neural(stft_tensor=stft_tensor)
-    
-    weights_lcmv = compute_beamforming_weights_lcmv(
+
+    # Baseline (equal response) and weighted variants are both exported.
+    lcmv_baseline = compute_beamforming_weights_lcmv(
         fvec=fvec,
         stft_noise=stft_noise,
-        source_locations=source_locations, 
+        source_locations=source_locations,
         mic_geometry=config.mic_geometry,
         mic_array_center=config.mic_array_center,
         sound_speed=config.sound_speed,
+        source_azimuths_deg=source_azimuths_deg,
+        target_weights=np.ones(max(1, len(source_azimuths_deg) if source_azimuths_deg is not None else (len(source_locations) if source_locations is not None else 1))),
+    )
+    gsc_baseline = compute_beamforming_weights_gsc(
+        fvec=fvec,
+        stft_noise=stft_noise,
+        source_locations=source_locations,
+        mic_geometry=config.mic_geometry,
+        mic_array_center=config.mic_array_center,
+        sound_speed=config.sound_speed,
+        source_azimuths_deg=source_azimuths_deg,
+        target_weights=np.ones(max(1, len(source_azimuths_deg) if source_azimuths_deg is not None else (len(source_locations) if source_locations is not None else 1))),
+    )
+    gsc_iter_baseline, hist_gsc_iter = compute_beamforming_weights_gsc_iterative(
+        fvec=fvec,
+        stft_noise=stft_noise,
+        source_locations=source_locations,
+        mic_geometry=config.mic_geometry,
+        mic_array_center=config.mic_array_center,
+        sound_speed=config.sound_speed,
+        source_azimuths_deg=source_azimuths_deg,
+        target_weights=np.ones(max(1, len(source_azimuths_deg) if source_azimuths_deg is not None else (len(source_locations) if source_locations is not None else 1))),
+        iterations=config.iterations,
     )
 
-    weights_gsc = compute_beamforming_weights_gsc(
+    lcmv_weighted = compute_beamforming_weights_lcmv(
         fvec=fvec,
         stft_noise=stft_noise,
-        source_locations=source_locations, 
+        source_locations=source_locations,
         mic_geometry=config.mic_geometry,
         mic_array_center=config.mic_array_center,
         sound_speed=config.sound_speed,
+        source_azimuths_deg=source_azimuths_deg,
+        target_weights=target_weights,
     )
-    
-    weights_gsc_iter, hist_gsc_iter = compute_beamforming_weights_gsc_iterative(
+    gsc_weighted = compute_beamforming_weights_gsc(
         fvec=fvec,
         stft_noise=stft_noise,
-        source_locations=source_locations, 
+        source_locations=source_locations,
         mic_geometry=config.mic_geometry,
         mic_array_center=config.mic_array_center,
         sound_speed=config.sound_speed,
-        iterations=config.iterations
+        source_azimuths_deg=source_azimuths_deg,
+        target_weights=target_weights,
+    )
+    gsc_iter_weighted, hist_gsc_iter_weighted = compute_beamforming_weights_gsc_iterative(
+        fvec=fvec,
+        stft_noise=stft_noise,
+        source_locations=source_locations,
+        mic_geometry=config.mic_geometry,
+        mic_array_center=config.mic_array_center,
+        sound_speed=config.sound_speed,
+        source_azimuths_deg=source_azimuths_deg,
+        target_weights=target_weights,
+        iterations=config.iterations,
     )
 
     return {
         "stft_tensor": stft_tensor,
         "fvec": fvec,
-        "steepest": (weights_steepest, hist_steepest),
-        "newton": (weights_newton, hist_newton),
+        "steepest": (classical["weights_steepest"], classical["hist_steepest"]),
+        "newton": (classical["weights_newton"], classical["hist_newton"]),
         "mvdr": (weights_mvdr, []),
-        "lcmv": (weights_lcmv, []),
-        "gsc": (weights_gsc, []),
-        "gsc_iterative": (weights_gsc_iter, hist_gsc_iter),
-        "params": (stft_window_size, hop, np.hanning(stft_window_size))
+        "lcmv": (lcmv_baseline, []),
+        "gsc": (gsc_baseline, []),
+        "gsc_iterative": (gsc_iter_baseline, hist_gsc_iter),
+        "lcmv_weighted": (lcmv_weighted, []),
+        "gsc_weighted": (gsc_weighted, []),
+        "gsc_iterative_weighted": (gsc_iter_weighted, hist_gsc_iter_weighted),
+        "target_weights": normalize_target_weights(target_weights, max(1, len(source_azimuths_deg) if source_azimuths_deg is not None else (len(source_locations) if source_locations is not None else 1))),
+        "params": (stft_window_size, hop, np.hanning(stft_window_size)),
     }
