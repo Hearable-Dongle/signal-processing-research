@@ -19,7 +19,9 @@ MAX_SECONDS="${MAX_SECONDS:-4.0}"
 TILE_W="${TILE_W:-256}"
 BLOCK_CHAN="${BLOCK_CHAN:-64}"
 
-hailo/to-onnx-env/bin/python -m hailo.hybrid_hailo_librimix_validation \
+PY="${PY:-hailo/to-onnx-env/bin/python}"
+
+"$PY" -m hailo.hybrid_hailo_librimix_validation \
   --backend "$BACKEND" \
   --decoder_summary_tsv "$DECODER_SUMMARY_TSV" \
   --masker_summary_tsv "$MASKER_SUMMARY_TSV" \

@@ -8,9 +8,9 @@ import numpy as np
 import torch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HAILO_ASTEROID_ROOT = REPO_ROOT / "hailo-asteroid"
-if str(HAILO_ASTEROID_ROOT) not in sys.path:
-    sys.path.insert(0, str(HAILO_ASTEROID_ROOT))
+for asteroid_root in (REPO_ROOT / "hailo-asteroid", REPO_ROOT / "asteroid"):
+    if (asteroid_root / "asteroid").is_dir() and str(asteroid_root) not in sys.path:
+        sys.path.insert(0, str(asteroid_root))
 
 from asteroid.models.hailo_conv_tasnet import HailoConvTasNet
 from hailo.hef_tiled_decoder_path import (
@@ -19,13 +19,16 @@ from hailo.hef_tiled_decoder_path import (
     build_manifest,
     reconstruct_decoder_from_projected_with_executor,
     reconstruct_with_executor,
+    validate_manifest_coverage,
 )
 from hailo.masker_tiled_path import (
     HailoRuntimeMaskerExecutor,
     TorchProxyMaskerExecutor,
     parse_manifest as parse_masker_manifest,
     reconstruct_masker_tiled,
+    validate_masker_manifest_coverage,
 )
+from hailo.hailo_runtime_runner import HailoRuntimeUnavailable
 
 
 def set_seed(seed: int) -> None:
@@ -70,39 +73,133 @@ def run_once(args):
         dec_ref = model.decoder(model.decoder_pre(masked_ref))
         out_ref = dec_ref.squeeze(2)
 
-    with torch.no_grad():
-        if args.backend == "torch_proxy":
-            masker_ex = TorchProxyMaskerExecutor(model, block_chan=args.block_chan)
-            dec_ex = TorchProxyExecutor(model, block_chan=args.block_chan)
-        else:
-            dec_manifest = build_manifest(Path(args.decoder_summary_tsv))
-            masker_manifest = parse_masker_manifest(Path(args.masker_summary_tsv))
-            dec_ex = HailoRuntimeExecutor(dec_manifest)
-            masker_ex = HailoRuntimeMaskerExecutor(model, manifest=masker_manifest, block_chan=args.block_chan)
+    dec_manifest = build_manifest(Path(args.decoder_summary_tsv))
+    masker_manifest = parse_masker_manifest(Path(args.masker_summary_tsv))
+    effective_backend = args.backend
+    fallback_reason = None
+    strict_runtime_safe = args.strict_runtime_safe or args.backend == "hailo_runtime"
+    if args.backend == "hailo_runtime":
+        try:
+            validate_manifest_coverage(
+                dec_manifest,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block_chan=args.block_chan,
+            )
+            validate_masker_manifest_coverage(
+                masker_manifest,
+                n_filters=args.n_filters,
+                bn_chan=args.bn_chan,
+                hid_chan=args.hid_chan,
+                skip_chan=args.skip_chan,
+                n_src=args.n_src,
+                out_chan=model.masker.out_chan,
+                block_chan=args.block_chan,
+            )
+        except RuntimeError as e:
+            effective_backend = "torch_proxy_fallback"
+            fallback_reason = f"Manifest coverage fallback: {e}"
 
-        mask_parts = reconstruct_masker_tiled(tf_ref, masker_ex, tile_w=args.tile_w)
-        mask_tiled = mask_parts["est_mask"]
-        tf_exp_tiled, _, _ = reconstruct_with_executor(
-            tf_ref,
-            dec_ex,
-            n_src=args.n_src,
-            n_filters=args.n_filters,
-            block=args.block_chan,
-            tile_w=args.tile_w,
+    def _build_executors(backend: str):
+        if backend == "torch_proxy":
+            return (
+                TorchProxyMaskerExecutor(model, block_chan=args.block_chan),
+                TorchProxyExecutor(model, block_chan=args.block_chan),
+            )
+        return (
+            HailoRuntimeMaskerExecutor(
+                model,
+                manifest=masker_manifest,
+                block_chan=args.block_chan,
+                strict_runtime_safe=strict_runtime_safe,
+            ),
+            HailoRuntimeExecutor(
+                dec_manifest,
+                block_chan=args.block_chan,
+                strict_runtime_safe=strict_runtime_safe,
+            ),
         )
-        masked_tiled = mask_tiled * tf_exp_tiled
-        pre_tiled, dec_tiled = reconstruct_decoder_from_projected_with_executor(
-            masked_tiled,
-            dec_ex,
-            n_src=args.n_src,
-            n_filters=args.n_filters,
-            block=args.block_chan,
-            tile_w=args.tile_w,
-        )
-        out_tiled = dec_tiled.squeeze(2)
+
+    with torch.no_grad():
+        masker_ex, dec_ex = _build_executors(effective_backend)
+        try:
+            mask_parts = reconstruct_masker_tiled(tf_ref, masker_ex, tile_w=args.tile_w)
+            mask_tiled = mask_parts["est_mask"]
+            tf_exp_tiled, _, _ = reconstruct_with_executor(
+                tf_ref,
+                dec_ex,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
+            masked_tiled = mask_tiled * tf_exp_tiled
+            pre_tiled, dec_tiled = reconstruct_decoder_from_projected_with_executor(
+                masked_tiled,
+                dec_ex,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
+            out_tiled = dec_tiled.squeeze(2)
+        except HailoRuntimeUnavailable as e:
+            if args.backend != "hailo_runtime":
+                raise
+            effective_backend = "torch_proxy_fallback"
+            fallback_reason = f"Runtime unavailable fallback: {e}"
+            masker_ex, dec_ex = _build_executors("torch_proxy")
+            mask_parts = reconstruct_masker_tiled(tf_ref, masker_ex, tile_w=args.tile_w)
+            mask_tiled = mask_parts["est_mask"]
+            tf_exp_tiled, _, _ = reconstruct_with_executor(
+                tf_ref,
+                dec_ex,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
+            masked_tiled = mask_tiled * tf_exp_tiled
+            pre_tiled, dec_tiled = reconstruct_decoder_from_projected_with_executor(
+                masked_tiled,
+                dec_ex,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
+            out_tiled = dec_tiled.squeeze(2)
+        except Exception as e:
+            if args.backend != "hailo_runtime":
+                raise
+            effective_backend = "torch_proxy_fallback"
+            fallback_reason = f"Runtime execution fallback: {type(e).__name__}: {e}"
+            masker_ex, dec_ex = _build_executors("torch_proxy")
+            mask_parts = reconstruct_masker_tiled(tf_ref, masker_ex, tile_w=args.tile_w)
+            mask_tiled = mask_parts["est_mask"]
+            tf_exp_tiled, _, _ = reconstruct_with_executor(
+                tf_ref,
+                dec_ex,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
+            masked_tiled = mask_tiled * tf_exp_tiled
+            pre_tiled, dec_tiled = reconstruct_decoder_from_projected_with_executor(
+                masked_tiled,
+                dec_ex,
+                n_src=args.n_src,
+                n_filters=args.n_filters,
+                block=args.block_chan,
+                tile_w=args.tile_w,
+            )
+            out_tiled = dec_tiled.squeeze(2)
 
     metrics = {
         "backend": args.backend,
+        "effective_backend": effective_backend,
+        "strict_runtime_safe": strict_runtime_safe,
         "wav_t": args.wav_t,
         "latent_w": int(tf_ref.shape[-1]),
         "tile_w": args.tile_w,
@@ -112,6 +209,8 @@ def run_once(args):
         "final_output_max_abs": max_abs(out_ref, out_tiled),
         "tol": args.tol,
     }
+    if fallback_reason is not None:
+        metrics["backend_fallback_reason"] = fallback_reason
     metrics["all_close"] = (
         metrics["masker_output_max_abs"] <= max(args.tol, 2e-5)
         and metrics["masked_rep_max_abs"] <= max(args.tol, 2e-5)
@@ -140,6 +239,7 @@ def main():
     parser.add_argument("--tile_w", type=int, default=256)
     parser.add_argument("--block_chan", type=int, default=64)
     parser.add_argument("--tol", type=float, default=1e-5)
+    parser.add_argument("--strict_runtime_safe", action="store_true")
     args = parser.parse_args()
 
     metrics = run_once(args)
