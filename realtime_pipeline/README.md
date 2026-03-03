@@ -83,6 +83,24 @@ Outputs:
 - `summary.json`
 - `enhanced_fast_path.wav`
 
+### Runtime focus/boost control
+
+`RealtimeSpeakerPipeline` now supports atomic runtime control updates:
+
+```python
+pipe.set_focus_control(
+  focused_speaker_ids=[2],      # or None
+  focused_direction_deg=None,   # or angle in degrees
+  user_boost_db=8.0,            # clamped to [0, config.max_user_boost_db]
+)
+```
+
+Behavior:
+- if `focused_speaker_ids` is set, those speakers receive focus gain and others are attenuated
+- else if only `focused_direction_deg` is set, nearest tracked speaker is focused
+- if neither is set, all speaker gains default to `1.0`
+- fast path applies soft clipping by default and optional RMS normalization (`PipelineConfig.output_target_rms`)
+
 ### 5) Run simulation E2E with real backend resolution
 
 ```bash
@@ -112,6 +130,8 @@ python -m realtime_pipeline.simulation_runner \
 - `validation_report.json` should show:
   - `overall_ok: true`
   - `mock_e2e.ok: true`
+- with focus boost enabled, `SpeakerGainDirection.gain_weight` for the focused speaker should increase measurably
+- clipping should remain bounded by fast-path soft clipper (no hard overflow spikes)
 
 ## Current Limitations
 

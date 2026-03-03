@@ -46,6 +46,7 @@ class SlowPathWorker(threading.Thread):
             config=DirectionAssignmentConfig(
                 sample_rate=config.sample_rate_hz,
                 chunk_ms=config.slow_chunk_ms,
+                max_user_boost_db=config.max_user_boost_db,
             ),
         )
 
@@ -54,6 +55,10 @@ class SlowPathWorker(threading.Thread):
 
         with Timer() as t:
             mono_mix = np.mean(raw_chunk_mc, axis=1).astype(np.float32, copy=False)
+            focus = self._state.get_focus_control_snapshot()
+            self._direction.set_focus_speakers(None if focus.focused_speaker_ids is None else list(focus.focused_speaker_ids))
+            self._direction.set_focus_direction(focus.focused_direction_deg)
+            self._direction.set_focus_boost_db(focus.user_boost_db)
 
             srp = self._state.get_srp_snapshot()
             expected_speakers = len(srp.peaks_deg) if srp.peaks_deg else None
@@ -82,15 +87,28 @@ class SlowPathWorker(threading.Thread):
                 srp_peak_scores=None if srp.peak_scores is None else list(srp.peak_scores),
             )
             direction_out = self._direction.update(payload)
+            speaker_activity: dict[int, float] = {}
+            for stream_idx, speaker_id in identity_out.stream_to_speaker.items():
+                if speaker_id is None:
+                    continue
+                if stream_idx < 0 or stream_idx >= len(separated):
+                    continue
+                stream = np.asarray(separated[stream_idx], dtype=float).reshape(-1)
+                rms = float(np.sqrt(np.mean(stream**2) + 1e-12))
+                speaker_activity[int(speaker_id)] = max(speaker_activity.get(int(speaker_id), 0.0), rms)
 
             gain_by_id = {sid: float(w) for sid, w in zip(direction_out.target_speaker_ids, direction_out.target_weights)}
             speaker_map: dict[int, SpeakerGainDirection] = {}
             for sid, doa in direction_out.speaker_directions_deg.items():
+                activity_rms = speaker_activity.get(int(sid), 0.0)
+                activity_conf = float(np.clip((activity_rms - 0.005) / 0.03, 0.0, 1.0))
                 speaker_map[int(sid)] = SpeakerGainDirection(
                     speaker_id=int(sid),
                     direction_degrees=float(doa),
                     gain_weight=float(gain_by_id.get(int(sid), 1.0)),
                     confidence=float(direction_out.speaker_confidence.get(int(sid), 0.0)),
+                    active=bool(activity_conf >= 0.5),
+                    activity_confidence=activity_conf,
                     updated_at_ms=ts_ms,
                 )
 

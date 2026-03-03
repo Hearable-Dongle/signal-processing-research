@@ -8,7 +8,7 @@ from typing import Callable
 
 import numpy as np
 
-from .contracts import PipelineConfig
+from .contracts import FocusControlSnapshot, PipelineConfig
 from .fast_path import FastPathWorker
 from .separation_backends import SeparationBackend, build_default_backend
 from .shared_state import SharedPipelineState
@@ -78,6 +78,26 @@ class RealtimeSpeakerPipeline:
     def start(self) -> None:
         self._fast.start()
         self._slow.start()
+
+    def set_focus_control(
+        self,
+        *,
+        focused_speaker_ids: list[int] | None = None,
+        focused_direction_deg: float | None = None,
+        user_boost_db: float = 0.0,
+    ) -> None:
+        ids: tuple[int, ...] | None = None
+        if focused_speaker_ids:
+            ids = tuple(sorted({int(v) for v in focused_speaker_ids}))
+        direction = None if focused_direction_deg is None else float(focused_direction_deg % 360.0)
+        boost = float(np.clip(float(user_boost_db), 0.0, float(self.config.max_user_boost_db)))
+        self._state.publish_focus_control(
+            FocusControlSnapshot(
+                focused_speaker_ids=ids,
+                focused_direction_deg=direction,
+                user_boost_db=boost,
+            )
+        )
 
     def stop(self) -> None:
         self._stop.set()

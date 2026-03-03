@@ -56,6 +56,30 @@ def delay_and_sum_frame(
     return (aligned / max(1, frame.shape[1])).astype(np.float32, copy=False)
 
 
+def _soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
+    d = max(float(drive), 1e-6)
+    y = np.tanh(d * np.asarray(x, dtype=np.float64))
+    return y.astype(np.float32, copy=False)
+
+
+def _apply_output_safety(out: np.ndarray, cfg: PipelineConfig, rms_gain_ema: float) -> tuple[np.ndarray, float]:
+    y = np.asarray(out, dtype=np.float32)
+    next_rms_gain = float(rms_gain_ema)
+    if cfg.output_target_rms is not None:
+        cur_rms = float(np.sqrt(np.mean(np.asarray(y, dtype=np.float64) ** 2) + 1e-12))
+        target_rms = max(float(cfg.output_target_rms), 1e-6)
+        desired_gain = target_rms / max(cur_rms, 1e-6)
+        max_gain = float(10.0 ** (float(cfg.output_rms_max_gain_db) / 20.0))
+        desired_gain = float(np.clip(desired_gain, 1.0 / max_gain, max_gain))
+        alpha = float(np.clip(cfg.output_rms_ema_alpha, 0.0, 1.0))
+        next_rms_gain = (1.0 - alpha) * next_rms_gain + alpha * desired_gain
+        y = y * float(next_rms_gain)
+
+    if cfg.output_soft_clip_enabled:
+        y = _soft_clip(y, drive=cfg.output_soft_clip_drive)
+    return y, next_rms_gain
+
+
 class FastPathWorker(threading.Thread):
     def __init__(
         self,
@@ -86,6 +110,7 @@ class FastPathWorker(threading.Thread):
             max_sources=config.srp_max_sources,
         )
         self._frame_idx = 0
+        self._rms_gain_ema = 1.0
 
     def _enqueue_slow(self, frame: np.ndarray) -> None:
         try:
@@ -143,6 +168,8 @@ class FastPathWorker(threading.Thread):
                             out += float(item.gain_weight) * bf
                     else:
                         out = np.mean(x, axis=1).astype(np.float32, copy=False)
+
+                    out, self._rms_gain_ema = _apply_output_safety(out, self._cfg, self._rms_gain_ema)
 
                     self._sink(out)
                     self._enqueue_slow(x)

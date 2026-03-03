@@ -35,12 +35,17 @@ class DirectionAssignmentEngine:
         self._states: dict[int, SpeakerDirectionState] = {}
         self._focus_speaker_ids: set[int] | None = None
         self._focus_direction_deg: float | None = None
+        self._focus_boost_db: float = 0.0
 
     def set_focus_speakers(self, speaker_ids: list[int] | None) -> None:
         self._focus_speaker_ids = set(speaker_ids) if speaker_ids else None
 
     def set_focus_direction(self, doa_deg: float | None) -> None:
         self._focus_direction_deg = None if doa_deg is None else float(doa_deg % 360.0)
+
+    def set_focus_boost_db(self, boost_db: float | None) -> None:
+        boost = float(boost_db or 0.0)
+        self._focus_boost_db = float(np.clip(boost, 0.0, self.cfg.max_user_boost_db))
 
     def reset(self) -> None:
         self._states.clear()
@@ -152,6 +157,7 @@ class DirectionAssignmentEngine:
             candidate_ids=active_candidates,
             focus_speaker_ids=self._focus_speaker_ids,
             focus_direction_deg=self._focus_direction_deg,
+            user_boost_db=self._focus_boost_db,
             cfg=self.cfg,
         )
 

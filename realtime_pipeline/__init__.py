@@ -1,4 +1,4 @@
-from .contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
+from .contracts import FocusControlSnapshot, PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
 from .orchestrator import RealtimeSpeakerPipeline
 from .sanity_checks import run_sanity_checks
 from .separation_backends import (
@@ -13,6 +13,7 @@ from .simulation_runner import run_simulation_pipeline
 
 __all__ = [
     "PipelineConfig",
+    "FocusControlSnapshot",
     "SRPPeakSnapshot",
     "SpeakerGainDirection",
     "RealtimeSpeakerPipeline",

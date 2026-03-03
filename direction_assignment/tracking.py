@@ -70,9 +70,14 @@ def update_speaker_states(
     srp_peak_scores: list[float] | None,
 ) -> tuple[dict[int, SpeakerDirectionState], dict]:
     snap_debug: dict[int, dict] = {}
+    skipped_low_confidence: list[int] = []
 
     # Update from current observations.
     for sid, (raw_doa, conf) in aggregated_obs.items():
+        if conf < cfg.min_confidence_for_update:
+            skipped_low_confidence.append(int(sid))
+            continue
+
         snapped_doa, snapped = snap_to_srp_peak(
             doa_deg=raw_doa,
             peaks_deg=srp_peaks_deg,
@@ -91,6 +96,9 @@ def update_speaker_states(
         else:
             st = states[sid]
             diff = circular_diff_deg(snapped_doa, st.direction_deg)
+            max_jump = cfg.max_angular_jump_deg_per_chunk
+            if max_jump is not None:
+                diff = float(np.clip(diff, -abs(max_jump), abs(max_jump)))
             st.direction_deg = normalize_angle_deg(st.direction_deg + cfg.doa_ema_alpha * diff)
             st.confidence = float(np.clip((1.0 - cfg.doa_ema_alpha) * st.confidence + cfg.doa_ema_alpha * conf, 0.0, 1.0))
             st.last_update_ms = timestamp_ms
@@ -119,6 +127,7 @@ def update_speaker_states(
 
     debug = {
         "snap": snap_debug,
+        "skipped_low_confidence_speakers": skipped_low_confidence,
         "forgotten_speakers": forget_ids,
         "stale_speakers": stale_ids,
     }

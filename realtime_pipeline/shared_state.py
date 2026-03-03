@@ -6,7 +6,7 @@ from time import perf_counter
 from types import MappingProxyType
 from typing import Mapping
 
-from .contracts import SRPPeakSnapshot, SpeakerGainDirection
+from .contracts import FocusControlSnapshot, SRPPeakSnapshot, SpeakerGainDirection
 
 
 @dataclass(slots=True)
@@ -26,6 +26,7 @@ class SharedPipelineState:
         self._lock = threading.Lock()
         self._speaker_map_ref: Mapping[int, SpeakerGainDirection] = MappingProxyType({})
         self._srp_ref: SRPPeakSnapshot = SRPPeakSnapshot(timestamp_ms=0.0, peaks_deg=(), peak_scores=None)
+        self._focus_control_ref: FocusControlSnapshot = FocusControlSnapshot()
         self._stats = PipelineRuntimeStats()
 
     def get_speaker_map_snapshot(self) -> Mapping[int, SpeakerGainDirection]:
@@ -43,6 +44,13 @@ class SharedPipelineState:
     def publish_srp_snapshot(self, snapshot: SRPPeakSnapshot) -> None:
         with self._lock:
             self._srp_ref = snapshot
+
+    def get_focus_control_snapshot(self) -> FocusControlSnapshot:
+        return self._focus_control_ref
+
+    def publish_focus_control(self, snapshot: FocusControlSnapshot) -> None:
+        with self._lock:
+            self._focus_control_ref = snapshot
 
     def incr_fast_frame(self, elapsed_ms: float) -> None:
         with self._lock:

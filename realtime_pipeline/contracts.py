@@ -9,6 +9,8 @@ class SpeakerGainDirection:
     direction_degrees: float
     gain_weight: float
     confidence: float
+    active: bool
+    activity_confidence: float
     updated_at_ms: float
 
 
@@ -17,6 +19,13 @@ class SRPPeakSnapshot:
     timestamp_ms: float
     peaks_deg: tuple[float, ...]
     peak_scores: tuple[float, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FocusControlSnapshot:
+    focused_speaker_ids: tuple[int, ...] | None = None
+    focused_direction_deg: float | None = None
+    user_boost_db: float = 0.0
 
 
 @dataclass(slots=True)
@@ -40,3 +49,10 @@ class PipelineConfig:
     # Asteroid backend defaults
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
     convtasnet_device: str = "cpu"
+    max_user_boost_db: float = 12.0
+    # Fast-path safety
+    output_soft_clip_enabled: bool = True
+    output_soft_clip_drive: float = 1.2
+    output_target_rms: float | None = None
+    output_rms_ema_alpha: float = 0.2
+    output_rms_max_gain_db: float = 6.0
