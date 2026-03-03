@@ -205,12 +205,12 @@ Notes:
 
 4. End-to-end hybrid validation (real sample, latency + WAV outputs):
 ```bash
+HAILO_RUN_TS=sample_sep \
+PY="hailo/hailo-runtime-env/bin/python" \
 BACKEND=hailo_runtime \
 DECODER_SUMMARY_TSV="$DECODER_SUMMARY_TSV" \
 MASKER_SUMMARY_TSV="$MASKER_SUMMARY_TSV" \
-MODEL_ID=JorisCos/ConvTasNet_Libri3Mix_sepclean_8k \
-MIX_WAV=hailo/sanity_librimix3/sanity_mix.wav \
-N_SRC=2 SAMPLE_RATE=8000 MAX_SECONDS=4.0 \
+MIX_WAV="hailo/sanity_librimix3/sanity_mix.wav" \
 ./hailo/scripts/hailo_validate_hybrid_librimix.sh
 ```
 
