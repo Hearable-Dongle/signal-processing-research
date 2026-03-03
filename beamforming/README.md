@@ -90,6 +90,8 @@ Benchmark outputs:
 - `beamforming/benchmark/results/<run_id>/scene_metrics.csv`
 - `beamforming/benchmark/results/<run_id>/summary_by_method.csv`
 - `beamforming/benchmark/results/<run_id>/README_summary.md`
+- `beamforming/benchmark/results/<run_id>/top_methods.csv`
+- `beamforming/benchmark/results/<run_id>/PR_REPORT.md`
 
 Run only one scene family:
 
@@ -106,3 +108,25 @@ python -m beamforming.main \
   --steering-source both \
   --steering-time both
 ```
+
+## Beamforming-Only Efficacy Runbook (Causal)
+
+Official subsystem efficacy run (quick representative set, 6-mic circular array, oracle + localized, dynamic-only):
+
+```bash
+python -m beamforming.benchmark.run \
+  --preset quick \
+  --steering-source both \
+  --steering-time dynamic \
+  --causal-only \
+  --force-mic-count 6 \
+  --topk-methods 3 \
+  --noise-sweep-db 5 10 20 30
+```
+
+This run emits:
+- aggregate metrics with intelligibility columns (SII/STOI): `scene_metrics.csv`, `summary_by_method.csv`
+- top-ranked methods: `top_methods.csv`
+- sanity artifacts (3 library + 3 restaurant by performance strata): waveform/spectrogram plots under `sanity/`
+- noise-sweep quantitative results and trends: `sanity/noise_sweep_metrics.csv` and `sanity/*/*/noise_sweep_trends.png`
+- PR-ready summary: `PR_REPORT.md`
