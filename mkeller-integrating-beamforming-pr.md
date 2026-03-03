@@ -21,8 +21,8 @@ This is intentionally broad for research velocity and simulation-first iteration
 - `PYTHONPATH=. beamforming/beamforming-sim-env/bin/python -m pytest -q tests/test_realtime_pipeline_integration_mock.py`
 
 ## Notes
-- PR includes research artifacts/models/logs/audio outputs and is not minimized.
-- Follow-up cleanup PR can split code vs artifacts and trim large binaries if needed.
+- Scope is limited to localization, beamforming, realtime/speaker-pipeline integration, and verification.
+- Hailo-related files, denoise changes, and random audio/log artifacts are intentionally excluded.
 
 ## Next TODOs
 - Add deterministic simulation regression suite with pinned scenes + thresholds.
