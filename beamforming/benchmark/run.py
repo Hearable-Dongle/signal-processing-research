@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from tqdm.auto import tqdm
 
 from beamforming.benchmark.metrics import compute_metric_bundle, load_audio_mono
 from beamforming.benchmark.sanity_report import (
@@ -131,7 +132,23 @@ def _run_scene_job(args: argparse.Namespace, scene_path: Path, out_dir: Path) ->
     if args.target_weights_file is not None:
         cmd += ["--target-weights-file", str(args.target_weights_file)]
 
-    subprocess.run(cmd, check=True)
+    if args.verbose_scene_logs:
+        subprocess.run(cmd, check=True)
+        return
+
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        tail = "\n".join(
+            [
+                "beamforming.main failed",
+                f"scene={scene_path}",
+                "--- stdout (tail) ---",
+                proc.stdout[-2000:],
+                "--- stderr (tail) ---",
+                proc.stderr[-2000:],
+            ]
+        )
+        raise RuntimeError(tail)
 
 
 def _load_rows(path: Path) -> list[dict[str, str]]:
@@ -573,7 +590,7 @@ def _run_noise_sweep_for_scene(
     sweep_root = out_dir / "sanity" / scene_type / scene_id / "noise_sweep"
     tmp_cfg_dir = sweep_root / "configs"
 
-    for snr in snr_levels:
+    for snr in tqdm(snr_levels, desc=f"Noise sweep {scene_id}", unit="snr", leave=False):
         snr_tag = f"snr_{int(snr)}dB"
         cfg_path = _apply_noise_target(
             base_scene_path=scene_path,
@@ -825,6 +842,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--sanity-scenes-per-type", type=int, default=3)
     parser.add_argument("--noise-sweep-db", nargs="+", type=float, default=[5.0, 10.0, 20.0, 30.0])
     parser.add_argument("--skip-sanity", action="store_true")
+    parser.add_argument("--verbose-scene-logs", action="store_true")
 
     return parser.parse_args()
 
@@ -876,22 +894,21 @@ def main() -> None:
         )
         return scene_id, rows, scene_type, scene_path
 
-    if args.workers <= 1:
-        for idx, (scene_type, _k, scene_path) in enumerate(selected, start=1):
-            scene_id, rows, stype, spath = _run_and_load(scene_path, scene_type)
-            print(f"[{idx}/{total}] completed {scene_id}")
-            scene_meta[scene_id] = (stype, spath)
-            all_rows.extend(rows)
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
-            futures = [pool.submit(_run_and_load, scene_path, scene_type) for scene_type, _k, scene_path in selected]
-            completed = 0
-            for fut in concurrent.futures.as_completed(futures):
-                scene_id, rows, stype, spath = fut.result()
-                completed += 1
-                print(f"[{completed}/{total}] completed {scene_id}")
+    with tqdm(total=total, desc="Scenes", unit="scene") as pbar:
+        if args.workers <= 1:
+            for scene_type, _k, scene_path in selected:
+                scene_id, rows, stype, spath = _run_and_load(scene_path, scene_type)
                 scene_meta[scene_id] = (stype, spath)
                 all_rows.extend(rows)
+                pbar.update(1)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+                futures = [pool.submit(_run_and_load, scene_path, scene_type) for scene_type, _k, scene_path in selected]
+                for fut in concurrent.futures.as_completed(futures):
+                    scene_id, rows, stype, spath = fut.result()
+                    scene_meta[scene_id] = (stype, spath)
+                    all_rows.extend(rows)
+                    pbar.update(1)
 
     with_delta = _add_deltas(all_rows)
     agg = _aggregate(with_delta)
@@ -909,7 +926,7 @@ def main() -> None:
         top_beamformers = [r["beamformer"] for r in top_methods]
         sanity_picks = _stratified_scene_pick(with_delta, selected, top_beamformers[0], args.sanity_scenes_per_type)
 
-        for scene_type, scene_path, scene_id in sanity_picks:
+        for scene_type, scene_path, scene_id in tqdm(sanity_picks, desc="Sanity scenes", unit="scene"):
             scene_out = runs_dir / scene_id
             sanity_artifacts.extend(
                 _render_sanity_artifacts(
