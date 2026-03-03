@@ -195,6 +195,10 @@ def _beamformer_wav_name(label: str) -> str:
     return label.lower().replace(" ", "_").replace("(", "").replace(")", "") + ".wav"
 
 
+def _slugify_beamformer(label: str) -> str:
+    return label.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
+
+
 def _augment_rows_with_intelligibility(
     rows: list[dict[str, str]],
     scene_out: Path,
@@ -484,9 +488,17 @@ def _apply_noise_target(
         speech_mean = np.mean(speech_mic, axis=1)
         noise_mean = np.mean(noise_mic, axis=1)
 
-        ps = float(np.mean(speech_mean**2) + 1e-12)
-        pn = float(np.mean(noise_mean**2) + 1e-12)
+        # Use active speech regions to avoid over-attenuating noise when speech has long silence.
+        speech_abs = np.abs(speech_mean)
+        thr = float(np.percentile(speech_abs, 70))
+        active = speech_abs >= max(thr, 1e-6)
+        if not np.any(active):
+            active = np.ones_like(speech_abs, dtype=bool)
+
+        ps = float(np.mean(speech_mean[active] ** 2) + 1e-12)
+        pn = float(np.mean(noise_mean[active] ** 2) + 1e-12)
         alpha = math.sqrt(ps / (pn * (10.0 ** (target_snr_db / 10.0))))
+        alpha = float(max(alpha, 1e-4))
 
         for i, src in enumerate(base_data["audio"]["sources"]):
             if i not in target_idxs:
@@ -554,7 +566,7 @@ def _run_noise_sweep_for_scene(
     scene_path: Path,
     scene_type: str,
     scene_id: str,
-    top_beamformer: str,
+    top_beamformers: list[str],
     snr_levels: list[float],
 ) -> list[dict]:
     rows_out: list[dict] = []
@@ -588,8 +600,9 @@ def _run_noise_sweep_for_scene(
         )
         rows = _add_deltas(rows)
 
+        beamformer_set = set(top_beamformers)
         for r in rows:
-            if r.get("beamformer") != top_beamformer:
+            if r.get("beamformer") not in beamformer_set:
                 continue
             if r.get("time_mode") != "dynamic":
                 continue
@@ -599,7 +612,7 @@ def _run_noise_sweep_for_scene(
                     "scene": scene_id,
                     "snr_db_target": snr,
                     "steering_source": r.get("steering_source", ""),
-                    "beamformer": top_beamformer,
+                    "beamformer": r.get("beamformer", ""),
                     "delta_sii": _safe_float(r.get("delta_sii")),
                     "delta_stoi": _safe_float(r.get("delta_stoi")),
                     "delta_si_sdr_db": _safe_float(
@@ -633,49 +646,56 @@ def _render_sanity_artifacts(
     scene_id: str,
     scene_path: Path,
     scene_run_out: Path,
-    top_beamformer: str,
+    top_beamformers: list[str],
     force_mic_count: int | None,
     force_mic_radius: float | None,
-) -> dict:
+) -> list[dict]:
     scenario = "dynamic_oracle"
     audio_dir = scene_run_out / scene_id / scenario / "audio"
-    proc_path = audio_dir / _beamformer_wav_name(top_beamformer)
-    if not proc_path.exists():
+    if not audio_dir.exists():
         # fallback to any dynamic_oracle_* path where method names changed
         candidates = sorted((scene_run_out / scene_id).glob("dynamic_oracle*/audio"))
         if candidates:
-            proc_path = candidates[0] / _beamformer_wav_name(top_beamformer)
+            audio_dir = candidates[0]
 
     ref, fs = _load_scene_reference(scene_path, force_mic_count, force_mic_radius)
-    proc, sr = load_audio_mono(str(proc_path))
-    sr_use = sr if sr > 0 else fs
 
     scene_art_dir = out_dir / "sanity" / scene_type / scene_id
-    wave_png = scene_art_dir / "waveform_comparison.png"
-    spec_png = scene_art_dir / "spectrogram_comparison.png"
+    out: list[dict] = []
+    for beamformer in top_beamformers:
+        proc_path = audio_dir / _beamformer_wav_name(beamformer)
+        if not proc_path.exists():
+            continue
+        proc, sr = load_audio_mono(str(proc_path))
+        sr_use = sr if sr > 0 else fs
+        slug = _slugify_beamformer(beamformer)
+        wave_png = scene_art_dir / f"waveform_comparison_{slug}.png"
+        spec_png = scene_art_dir / f"spectrogram_comparison_{slug}.png"
 
-    plot_waveform_comparison(
-        reference=ref,
-        processed=proc,
-        sample_rate=sr_use,
-        title=f"{scene_type}/{scene_id} - {top_beamformer}",
-        out_path=wave_png,
-    )
-    plot_spectrogram_comparison(
-        reference=ref,
-        processed=proc,
-        sample_rate=sr_use,
-        title=f"{scene_type}/{scene_id} - {top_beamformer}",
-        out_path=spec_png,
-    )
-
-    return {
-        "scene_type": scene_type,
-        "scene": scene_id,
-        "beamformer": top_beamformer,
-        "waveform_plot": str(wave_png),
-        "spectrogram_plot": str(spec_png),
-    }
+        plot_waveform_comparison(
+            reference=ref,
+            processed=proc,
+            sample_rate=sr_use,
+            title=f"{scene_type}/{scene_id} - {beamformer}",
+            out_path=wave_png,
+        )
+        plot_spectrogram_comparison(
+            reference=ref,
+            processed=proc,
+            sample_rate=sr_use,
+            title=f"{scene_type}/{scene_id} - {beamformer}",
+            out_path=spec_png,
+        )
+        out.append(
+            {
+                "scene_type": scene_type,
+                "scene": scene_id,
+                "beamformer": beamformer,
+                "waveform_plot": str(wave_png),
+                "spectrogram_plot": str(spec_png),
+            }
+        )
+    return out
 
 
 def _write_pr_report(
@@ -687,6 +707,7 @@ def _write_pr_report(
     sanity_artifacts: list[dict],
     noise_rows: list[dict],
 ) -> None:
+    top_method_names = {r["beamformer"] for r in top_methods}
     lines: list[str] = []
     stft_window_ms = 10.0
     try:
@@ -715,7 +736,7 @@ def _write_pr_report(
     lines.append("- Runtime latency/RTF measurement is not yet instrumented in this benchmark runner.")
     lines.append("")
 
-    lines.append("## Top-3 Beamformers (Ranked by Delta SII)")
+    lines.append(f"## Top-{len(top_methods)} Beamformers (Ranked by Delta SII)")
     lines.append("")
     lines.append("| rank | beamformer | delta_sii_mean | delta_si_sdr_db_raw_mean | delta_stoi_mean |")
     lines.append("|---:|---|---:|---:|---:|")
@@ -735,6 +756,8 @@ def _write_pr_report(
             continue
         if row.get("beamformer") == "Raw Audio (Mean)":
             continue
+        if row.get("beamformer") not in top_method_names:
+            continue
         lines.append(
             f"| {row['beamformer']} | {row['steering_source']} | {row['n_rows']} | "
             f"{_format_float(_safe_float(row.get('snr_db_raw_mean')))} | {_format_float(_safe_float(row.get('si_sdr_db_raw_mean')))} | "
@@ -753,11 +776,14 @@ def _write_pr_report(
     if noise_rows:
         lines.append("## Noise Sweep (5/10/20/30 dB Input SNR)")
         lines.append("")
-        lines.append("| scene_type | scene | snr_db_target | steering_source | delta_sii | delta_stoi | delta_si_sdr_db | delta_snr_db |")
-        lines.append("|---|---|---:|---|---:|---:|---:|---:|")
-        for r in sorted(noise_rows, key=lambda x: (x["scene_type"], x["scene"], x["snr_db_target"], x["steering_source"])):
+        lines.append("| scene_type | scene | beamformer | snr_db_target | steering_source | delta_sii | delta_stoi | delta_si_sdr_db | delta_snr_db |")
+        lines.append("|---|---|---|---:|---|---:|---:|---:|---:|")
+        for r in sorted(
+            noise_rows,
+            key=lambda x: (x["scene_type"], x["scene"], x["beamformer"], x["snr_db_target"], x["steering_source"]),
+        ):
             lines.append(
-                f"| {r['scene_type']} | {r['scene']} | {int(r['snr_db_target'])} | {r['steering_source']} | "
+                f"| {r['scene_type']} | {r['scene']} | {r['beamformer']} | {int(r['snr_db_target'])} | {r['steering_source']} | "
                 f"{_format_float(_safe_float(r.get('delta_sii')))} | {_format_float(_safe_float(r.get('delta_stoi')))} | "
                 f"{_format_float(_safe_float(r.get('delta_si_sdr_db')))} | {_format_float(_safe_float(r.get('delta_snr_db')))} |"
             )
@@ -880,19 +906,19 @@ def main() -> None:
     noise_rows: list[dict] = []
 
     if not args.skip_sanity and top_methods:
-        top_beamformer = top_methods[0]["beamformer"]
-        sanity_picks = _stratified_scene_pick(with_delta, selected, top_beamformer, args.sanity_scenes_per_type)
+        top_beamformers = [r["beamformer"] for r in top_methods]
+        sanity_picks = _stratified_scene_pick(with_delta, selected, top_beamformers[0], args.sanity_scenes_per_type)
 
         for scene_type, scene_path, scene_id in sanity_picks:
             scene_out = runs_dir / scene_id
-            sanity_artifacts.append(
+            sanity_artifacts.extend(
                 _render_sanity_artifacts(
                     out_dir=out_dir,
                     scene_type=scene_type,
                     scene_id=scene_id,
                     scene_path=scene_path,
                     scene_run_out=scene_out,
-                    top_beamformer=top_beamformer,
+                    top_beamformers=top_beamformers,
                     force_mic_count=args.force_mic_count,
                     force_mic_radius=args.force_mic_radius,
                 )
@@ -904,16 +930,20 @@ def main() -> None:
                     scene_path=scene_path,
                     scene_type=scene_type,
                     scene_id=scene_id,
-                    top_beamformer=top_beamformer,
+                    top_beamformers=top_beamformers,
                     snr_levels=list(args.noise_sweep_db),
                 )
             )
 
         if noise_rows:
             _write_csv(out_dir / "sanity" / "noise_sweep_metrics.csv", noise_rows)
-            for scene in {(r["scene_type"], r["scene"]) for r in noise_rows}:
-                stype, sid = scene
-                scene_rows = [r for r in noise_rows if r["scene_type"] == stype and r["scene"] == sid and r["steering_source"] == "oracle"]
+            scene_keys = {(r["scene_type"], r["scene"], r["beamformer"]) for r in noise_rows}
+            for stype, sid, beamformer in scene_keys:
+                scene_rows = [
+                    r
+                    for r in noise_rows
+                    if r["scene_type"] == stype and r["scene"] == sid and r["beamformer"] == beamformer and r["steering_source"] == "oracle"
+                ]
                 scene_rows = sorted(scene_rows, key=lambda x: x["snr_db_target"])
                 if not scene_rows:
                     continue
@@ -922,8 +952,8 @@ def main() -> None:
                     delta_sii=[_safe_float(r.get("delta_sii")) for r in scene_rows],
                     delta_si_sdr=[_safe_float(r.get("delta_si_sdr_db")) for r in scene_rows],
                     delta_stoi=[_safe_float(r.get("delta_stoi")) for r in scene_rows],
-                    title=f"{stype}/{sid} - Noise Sweep (Oracle)",
-                    out_path=out_dir / "sanity" / stype / sid / "noise_sweep_trends.png",
+                    title=f"{stype}/{sid} - {beamformer} Noise Sweep (Oracle)",
+                    out_path=out_dir / "sanity" / stype / sid / f"noise_sweep_trends_{_slugify_beamformer(beamformer)}.png",
                 )
 
     _write_pr_report(

@@ -39,11 +39,21 @@ def load_audio_mono(path: str) -> tuple[np.ndarray, int]:
 
 def _safe_stoi(ref: np.ndarray, deg: np.ndarray, sr: int) -> float:
     if stoi_fn is None:
-        return float("nan")
+        raise RuntimeError(
+            "STOI metric requested but `pystoi` is not installed. "
+            "Install dependencies from beamforming/requirements.txt."
+        )
+    if len(ref) < 256 or len(deg) < 256:
+        return 0.0
+    if float(np.mean(ref**2)) <= 1e-12 or float(np.mean(deg**2)) <= 1e-12:
+        return 0.0
     try:
         return float(stoi_fn(ref, deg, sr, extended=False))
     except Exception:
-        return float("nan")
+        try:
+            return float(stoi_fn(ref, deg, sr, extended=True))
+        except Exception:
+            return 0.0
 
 
 def compute_metric_bundle(
