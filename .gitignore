@@ -5,6 +5,17 @@ tiger-env/
 .vscode/
 *-env/
 outputs/
-
+.install_logs/
+verification/output/
+beamforming/benchmark/results*/
+beamforming/benchmark/__pycache__/
+beamforming/output/integration_plan_impl_smoke/
+beamforming/output/localization_integration_smoke/
+beamforming/output/localization_integration_smoke_both/
+beamforming/output/localization_integration_smoke_dynamic/
+beamforming/output/localization_integration_smoke_localized/
+beamforming/output/loudness_fix_smoke/
+beamforming/output/loudness_fix_smoke_localized/
+beamforming/output/loudness_fix_smoke_oracle/
 
 
