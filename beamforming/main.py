@@ -778,6 +778,9 @@ def main():
     parser.add_argument("--simulation-scene-file", type=Path, default=None)
     parser.add_argument("--simulation-scene-dir", type=Path, default=None)
     parser.add_argument("--max-scenes", type=int, default=None)
+    parser.add_argument("--force-mic-count", type=int, default=None)
+    parser.add_argument("--force-mic-radius", type=float, default=None)
+    parser.add_argument("--causal-only", action="store_true")
     args = parser.parse_args()
 
     with args.config.open("r", encoding="utf-8") as f:
@@ -785,6 +788,8 @@ def main():
 
     if args.simulation_scene_file is not None and args.simulation_scene_dir is not None:
         raise ValueError("Use either --simulation-scene-file or --simulation-scene-dir, not both.")
+    if args.causal_only and args.steering_time != "dynamic":
+        raise ValueError("--causal-only requires --steering-time dynamic.")
 
     log = logging.getLogger("Beamforming")
     if not log.handlers:
@@ -811,6 +816,10 @@ def main():
 
     global_rows: list[dict] = []
     for scene_name, sim_cfg, scene_path in scenes:
+        if args.force_mic_count is not None:
+            sim_cfg.microphone_array.mic_count = int(args.force_mic_count)
+        if args.force_mic_radius is not None:
+            sim_cfg.microphone_array.mic_radius = float(args.force_mic_radius)
         rows = _run_scene(
             scene_name=scene_name,
             scene_path=scene_path,
