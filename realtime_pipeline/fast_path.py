@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from time import perf_counter
 from typing import Callable
 
 import numpy as np
@@ -56,6 +57,30 @@ def delay_and_sum_frame(
     return (aligned / max(1, frame.shape[1])).astype(np.float32, copy=False)
 
 
+def _soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
+    d = max(float(drive), 1e-6)
+    y = np.tanh(d * np.asarray(x, dtype=np.float64))
+    return y.astype(np.float32, copy=False)
+
+
+def _apply_output_safety(out: np.ndarray, cfg: PipelineConfig, rms_gain_ema: float) -> tuple[np.ndarray, float]:
+    y = np.asarray(out, dtype=np.float32)
+    next_rms_gain = float(rms_gain_ema)
+    if cfg.output_target_rms is not None:
+        cur_rms = float(np.sqrt(np.mean(np.asarray(y, dtype=np.float64) ** 2) + 1e-12))
+        target_rms = max(float(cfg.output_target_rms), 1e-6)
+        desired_gain = target_rms / max(cur_rms, 1e-6)
+        max_gain = float(10.0 ** (float(cfg.output_rms_max_gain_db) / 20.0))
+        desired_gain = float(np.clip(desired_gain, 1.0 / max_gain, max_gain))
+        alpha = float(np.clip(cfg.output_rms_ema_alpha, 0.0, 1.0))
+        next_rms_gain = (1.0 - alpha) * next_rms_gain + alpha * desired_gain
+        y = y * float(next_rms_gain)
+
+    if cfg.output_soft_clip_enabled:
+        y = _soft_clip(y, drive=cfg.output_soft_clip_drive)
+    return y, next_rms_gain
+
+
 class FastPathWorker(threading.Thread):
     def __init__(
         self,
@@ -86,6 +111,7 @@ class FastPathWorker(threading.Thread):
             max_sources=config.srp_max_sources,
         )
         self._frame_idx = 0
+        self._rms_gain_ema = 1.0
 
     def _enqueue_slow(self, frame: np.ndarray) -> None:
         try:
@@ -110,6 +136,12 @@ class FastPathWorker(threading.Thread):
                     break
 
                 with Timer() as t:
+                    srp_ms = 0.0
+                    beamform_ms = 0.0
+                    safety_ms = 0.0
+                    sink_ms = 0.0
+                    enqueue_ms = 0.0
+
                     x = np.asarray(frame, dtype=np.float32)
                     if x.ndim != 2:
                         raise ValueError("fast-path frame source must yield shape (samples, n_mics)")
@@ -120,6 +152,7 @@ class FastPathWorker(threading.Thread):
                             x = np.pad(x, ((0, frame_samples - x.shape[0]), (0, 0)))
 
                     now_ms = 1000.0 * (self._frame_idx * frame_samples) / self._cfg.sample_rate_hz
+                    t0 = perf_counter()
                     peaks, scores = self._tracker.update(x)
                     self._state.publish_srp_snapshot(
                         SRPPeakSnapshot(
@@ -128,8 +161,10 @@ class FastPathWorker(threading.Thread):
                             peak_scores=None if scores is None else tuple(float(v) for v in scores),
                         )
                     )
+                    srp_ms += (perf_counter() - t0) * 1000.0
 
                     speaker_map = self._state.get_speaker_map_snapshot()
+                    t0 = perf_counter()
                     if speaker_map:
                         out = np.zeros(x.shape[0], dtype=np.float32)
                         for item in speaker_map.values():
@@ -143,11 +178,27 @@ class FastPathWorker(threading.Thread):
                             out += float(item.gain_weight) * bf
                     else:
                         out = np.mean(x, axis=1).astype(np.float32, copy=False)
+                    beamform_ms += (perf_counter() - t0) * 1000.0
 
+                    t0 = perf_counter()
+                    out, self._rms_gain_ema = _apply_output_safety(out, self._cfg, self._rms_gain_ema)
+                    safety_ms += (perf_counter() - t0) * 1000.0
+
+                    t0 = perf_counter()
                     self._sink(out)
+                    sink_ms += (perf_counter() - t0) * 1000.0
+                    t0 = perf_counter()
                     self._enqueue_slow(x)
+                    enqueue_ms += (perf_counter() - t0) * 1000.0
 
                 self._state.incr_fast_frame(t.elapsed_ms)
+                self._state.incr_fast_stage_times(
+                    srp_ms=srp_ms,
+                    beamform_ms=beamform_ms,
+                    safety_ms=safety_ms,
+                    sink_ms=sink_ms,
+                    enqueue_ms=enqueue_ms,
+                )
                 self._frame_idx += 1
         finally:
             try:

@@ -29,10 +29,14 @@ class DirectionAssignmentConfig:
     srp_snap_tolerance_deg: float = 15.0
     doa_ema_alpha: float = 0.3
     min_stream_rms: float = 0.01
+    min_confidence_for_update: float = 0.15
+    max_angular_jump_deg_per_chunk: float | None = 30.0
 
     # Speaker lifecycle
     speaker_stale_timeout_ms: float = 2000.0
     speaker_forget_timeout_ms: float = 8000.0
 
     # Weight policy
-    non_focus_weight: float = 0.2
+    focus_gain_db: float = 0.0
+    non_focus_attenuation_db: float = -14.0
+    max_user_boost_db: float = 12.0

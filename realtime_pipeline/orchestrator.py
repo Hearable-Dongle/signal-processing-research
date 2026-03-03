@@ -8,7 +8,7 @@ from typing import Callable
 
 import numpy as np
 
-from .contracts import PipelineConfig
+from .contracts import FocusControlSnapshot, PipelineConfig
 from .fast_path import FastPathWorker
 from .separation_backends import SeparationBackend, build_default_backend
 from .shared_state import SharedPipelineState
@@ -26,6 +26,17 @@ class PipelineStatsSnapshot:
     speaker_map_updates: int
     fast_avg_ms: float
     slow_avg_ms: float
+    fast_rtf: float
+    slow_rtf: float
+    fast_srp_avg_ms: float
+    fast_beamform_avg_ms: float
+    fast_safety_avg_ms: float
+    fast_sink_avg_ms: float
+    fast_enqueue_avg_ms: float
+    slow_separation_avg_ms: float
+    slow_identity_avg_ms: float
+    slow_direction_avg_ms: float
+    slow_publish_avg_ms: float
 
 
 class RealtimeSpeakerPipeline:
@@ -79,6 +90,26 @@ class RealtimeSpeakerPipeline:
         self._fast.start()
         self._slow.start()
 
+    def set_focus_control(
+        self,
+        *,
+        focused_speaker_ids: list[int] | None = None,
+        focused_direction_deg: float | None = None,
+        user_boost_db: float = 0.0,
+    ) -> None:
+        ids: tuple[int, ...] | None = None
+        if focused_speaker_ids:
+            ids = tuple(sorted({int(v) for v in focused_speaker_ids}))
+        direction = None if focused_direction_deg is None else float(focused_direction_deg % 360.0)
+        boost = float(np.clip(float(user_boost_db), 0.0, float(self.config.max_user_boost_db)))
+        self._state.publish_focus_control(
+            FocusControlSnapshot(
+                focused_speaker_ids=ids,
+                focused_direction_deg=direction,
+                user_boost_db=boost,
+            )
+        )
+
     def stop(self) -> None:
         self._stop.set()
 
@@ -94,6 +125,15 @@ class RealtimeSpeakerPipeline:
         st = self._state.get_stats()
         fast_avg = st.fast_total_ms / st.fast_frames if st.fast_frames else 0.0
         slow_avg = st.slow_total_ms / st.slow_chunks if st.slow_chunks else 0.0
+        fast_srp_avg = st.fast_srp_total_ms / st.fast_frames if st.fast_frames else 0.0
+        fast_beamform_avg = st.fast_beamform_total_ms / st.fast_frames if st.fast_frames else 0.0
+        fast_safety_avg = st.fast_safety_total_ms / st.fast_frames if st.fast_frames else 0.0
+        fast_sink_avg = st.fast_sink_total_ms / st.fast_frames if st.fast_frames else 0.0
+        fast_enqueue_avg = st.fast_enqueue_total_ms / st.fast_frames if st.fast_frames else 0.0
+        slow_sep_avg = st.slow_separation_total_ms / st.slow_chunks if st.slow_chunks else 0.0
+        slow_ident_avg = st.slow_identity_total_ms / st.slow_chunks if st.slow_chunks else 0.0
+        slow_dir_avg = st.slow_direction_total_ms / st.slow_chunks if st.slow_chunks else 0.0
+        slow_pub_avg = st.slow_publish_total_ms / st.slow_chunks if st.slow_chunks else 0.0
         return PipelineStatsSnapshot(
             fast_frames=st.fast_frames,
             slow_chunks=st.slow_chunks,
@@ -101,4 +141,15 @@ class RealtimeSpeakerPipeline:
             speaker_map_updates=st.speaker_map_updates,
             fast_avg_ms=float(fast_avg),
             slow_avg_ms=float(slow_avg),
+            fast_rtf=float(fast_avg / max(self.config.fast_frame_ms, 1e-6)),
+            slow_rtf=float(slow_avg / max(self.config.slow_chunk_ms, 1e-6)),
+            fast_srp_avg_ms=float(fast_srp_avg),
+            fast_beamform_avg_ms=float(fast_beamform_avg),
+            fast_safety_avg_ms=float(fast_safety_avg),
+            fast_sink_avg_ms=float(fast_sink_avg),
+            fast_enqueue_avg_ms=float(fast_enqueue_avg),
+            slow_separation_avg_ms=float(slow_sep_avg),
+            slow_identity_avg_ms=float(slow_ident_avg),
+            slow_direction_avg_ms=float(slow_dir_avg),
+            slow_publish_avg_ms=float(slow_pub_avg),
         )

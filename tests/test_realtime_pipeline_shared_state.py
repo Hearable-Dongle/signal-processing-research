@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from realtime_pipeline.contracts import SRPPeakSnapshot, SpeakerGainDirection
+from realtime_pipeline.contracts import FocusControlSnapshot, SRPPeakSnapshot, SpeakerGainDirection
 from realtime_pipeline.shared_state import SharedPipelineState
 
 
@@ -12,8 +12,8 @@ def test_shared_state_snapshot_publish_and_read() -> None:
     st.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=100.0, peaks_deg=(10.0, 80.0), peak_scores=(0.9, 0.7)))
     st.publish_speaker_map(
         {
-            1: SpeakerGainDirection(1, 45.0, 1.0, 0.8, 100.0),
-            2: SpeakerGainDirection(2, 120.0, 0.2, 0.5, 100.0),
+            1: SpeakerGainDirection(1, 45.0, 1.0, 0.8, True, 0.9, 100.0),
+            2: SpeakerGainDirection(2, 120.0, 0.2, 0.5, False, 0.2, 100.0),
         }
     )
 
@@ -36,7 +36,7 @@ def test_shared_state_concurrent_read_write_does_not_break() -> None:
             try:
                 st.publish_speaker_map(
                     {
-                        i % 3: SpeakerGainDirection(i % 3, float(i % 360), 1.0, 1.0, float(i)),
+                        i % 3: SpeakerGainDirection(i % 3, float(i % 360), 1.0, 1.0, True, 1.0, float(i)),
                     }
                 )
                 st.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=float(i), peaks_deg=(float(i % 360),), peak_scores=(1.0,)))
@@ -63,3 +63,12 @@ def test_shared_state_concurrent_read_write_does_not_break() -> None:
     wt.join(timeout=3.0)
 
     assert not errors
+
+
+def test_shared_state_focus_control_snapshot_publish_and_read() -> None:
+    st = SharedPipelineState()
+    st.publish_focus_control(FocusControlSnapshot(focused_speaker_ids=(1, 3), focused_direction_deg=90.0, user_boost_db=6.0))
+    snap = st.get_focus_control_snapshot()
+    assert snap.focused_speaker_ids == (1, 3)
+    assert snap.focused_direction_deg == 90.0
+    assert snap.user_boost_db == 6.0

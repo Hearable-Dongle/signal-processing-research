@@ -6,7 +6,7 @@ from time import perf_counter
 from types import MappingProxyType
 from typing import Mapping
 
-from .contracts import SRPPeakSnapshot, SpeakerGainDirection
+from .contracts import FocusControlSnapshot, SRPPeakSnapshot, SpeakerGainDirection
 
 
 @dataclass(slots=True)
@@ -17,6 +17,17 @@ class PipelineRuntimeStats:
     speaker_map_updates: int = 0
     fast_total_ms: float = 0.0
     slow_total_ms: float = 0.0
+    # Fast-path stage timings
+    fast_srp_total_ms: float = 0.0
+    fast_beamform_total_ms: float = 0.0
+    fast_safety_total_ms: float = 0.0
+    fast_sink_total_ms: float = 0.0
+    fast_enqueue_total_ms: float = 0.0
+    # Slow-path stage timings
+    slow_separation_total_ms: float = 0.0
+    slow_identity_total_ms: float = 0.0
+    slow_direction_total_ms: float = 0.0
+    slow_publish_total_ms: float = 0.0
 
 
 class SharedPipelineState:
@@ -26,6 +37,7 @@ class SharedPipelineState:
         self._lock = threading.Lock()
         self._speaker_map_ref: Mapping[int, SpeakerGainDirection] = MappingProxyType({})
         self._srp_ref: SRPPeakSnapshot = SRPPeakSnapshot(timestamp_ms=0.0, peaks_deg=(), peak_scores=None)
+        self._focus_control_ref: FocusControlSnapshot = FocusControlSnapshot()
         self._stats = PipelineRuntimeStats()
 
     def get_speaker_map_snapshot(self) -> Mapping[int, SpeakerGainDirection]:
@@ -44,6 +56,13 @@ class SharedPipelineState:
         with self._lock:
             self._srp_ref = snapshot
 
+    def get_focus_control_snapshot(self) -> FocusControlSnapshot:
+        return self._focus_control_ref
+
+    def publish_focus_control(self, snapshot: FocusControlSnapshot) -> None:
+        with self._lock:
+            self._focus_control_ref = snapshot
+
     def incr_fast_frame(self, elapsed_ms: float) -> None:
         with self._lock:
             self._stats.fast_frames += 1
@@ -53,6 +72,36 @@ class SharedPipelineState:
         with self._lock:
             self._stats.slow_chunks += 1
             self._stats.slow_total_ms += float(elapsed_ms)
+
+    def incr_fast_stage_times(
+        self,
+        *,
+        srp_ms: float,
+        beamform_ms: float,
+        safety_ms: float,
+        sink_ms: float,
+        enqueue_ms: float,
+    ) -> None:
+        with self._lock:
+            self._stats.fast_srp_total_ms += float(srp_ms)
+            self._stats.fast_beamform_total_ms += float(beamform_ms)
+            self._stats.fast_safety_total_ms += float(safety_ms)
+            self._stats.fast_sink_total_ms += float(sink_ms)
+            self._stats.fast_enqueue_total_ms += float(enqueue_ms)
+
+    def incr_slow_stage_times(
+        self,
+        *,
+        separation_ms: float,
+        identity_ms: float,
+        direction_ms: float,
+        publish_ms: float,
+    ) -> None:
+        with self._lock:
+            self._stats.slow_separation_total_ms += float(separation_ms)
+            self._stats.slow_identity_total_ms += float(identity_ms)
+            self._stats.slow_direction_total_ms += float(direction_ms)
+            self._stats.slow_publish_total_ms += float(publish_ms)
 
     def incr_dropped_fast_to_slow(self, count: int = 1) -> None:
         with self._lock:
@@ -67,6 +116,15 @@ class SharedPipelineState:
                 speaker_map_updates=self._stats.speaker_map_updates,
                 fast_total_ms=self._stats.fast_total_ms,
                 slow_total_ms=self._stats.slow_total_ms,
+                fast_srp_total_ms=self._stats.fast_srp_total_ms,
+                fast_beamform_total_ms=self._stats.fast_beamform_total_ms,
+                fast_safety_total_ms=self._stats.fast_safety_total_ms,
+                fast_sink_total_ms=self._stats.fast_sink_total_ms,
+                fast_enqueue_total_ms=self._stats.fast_enqueue_total_ms,
+                slow_separation_total_ms=self._stats.slow_separation_total_ms,
+                slow_identity_total_ms=self._stats.slow_identity_total_ms,
+                slow_direction_total_ms=self._stats.slow_direction_total_ms,
+                slow_publish_total_ms=self._stats.slow_publish_total_ms,
             )
 
 
