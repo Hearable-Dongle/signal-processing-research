@@ -26,6 +26,8 @@ from simulation.simulation_config import SimulationAudio, SimulationConfig
 from simulation.simulator import run_simulation
 from simulation.target_policy import iter_target_source_indices
 
+BAR_FORMAT = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {percentage:6.2f}%"
+
 
 def _load_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
@@ -590,7 +592,13 @@ def _run_noise_sweep_for_scene(
     sweep_root = out_dir / "sanity" / scene_type / scene_id / "noise_sweep"
     tmp_cfg_dir = sweep_root / "configs"
 
-    for snr in tqdm(snr_levels, desc=f"Noise sweep {scene_id}", unit="snr", leave=False):
+    for snr in tqdm(
+        snr_levels,
+        desc=f"Noise sweep {scene_id}",
+        unit="snr",
+        leave=False,
+        bar_format=BAR_FORMAT,
+    ):
         snr_tag = f"snr_{int(snr)}dB"
         cfg_path = _apply_noise_target(
             base_scene_path=scene_path,
@@ -894,7 +902,7 @@ def main() -> None:
         )
         return scene_id, rows, scene_type, scene_path
 
-    with tqdm(total=total, desc="Scenes", unit="scene") as pbar:
+    with tqdm(total=total, desc="Scenes", unit="scene", bar_format=BAR_FORMAT) as pbar:
         if args.workers <= 1:
             for scene_type, _k, scene_path in selected:
                 scene_id, rows, stype, spath = _run_and_load(scene_path, scene_type)
@@ -926,7 +934,12 @@ def main() -> None:
         top_beamformers = [r["beamformer"] for r in top_methods]
         sanity_picks = _stratified_scene_pick(with_delta, selected, top_beamformers[0], args.sanity_scenes_per_type)
 
-        for scene_type, scene_path, scene_id in tqdm(sanity_picks, desc="Sanity scenes", unit="scene"):
+        for scene_type, scene_path, scene_id in tqdm(
+            sanity_picks,
+            desc="Sanity scenes",
+            unit="scene",
+            bar_format=BAR_FORMAT,
+        ):
             scene_out = runs_dir / scene_id
             sanity_artifacts.extend(
                 _render_sanity_artifacts(
