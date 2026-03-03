@@ -83,6 +83,11 @@ Outputs:
 - `summary.json`
 - `enhanced_fast_path.wav`
 
+`summary.json` includes realtime latency decomposition:
+- `fast_rtf`, `slow_rtf`
+- `fast_stage_avg_ms`: SRP, beamforming, output safety, sink, slow-queue enqueue
+- `slow_stage_avg_ms`: separation, identity grouping, direction assignment, speaker-map publish
+
 ### Runtime focus/boost control
 
 `RealtimeSpeakerPipeline` now supports atomic runtime control updates:
@@ -120,6 +125,31 @@ python -m realtime_pipeline.simulation_runner \
   --out-dir realtime_pipeline/output/validation_cli \
   --validate-only
 ```
+
+### 7) Focus amplification sanity check (causal realtime)
+
+Runs a small stratified subset of benchmark scene roots (`library` + `restaurant` by default), bootstraps focus by location, then locks to tracked speaker IDs during runtime.
+
+```bash
+python -m realtime_pipeline.focus_sanity_check \
+  --beamforming-config beamforming/benchmark/configs/default.json \
+  --scene-types library restaurant \
+  --scenes-per-type 3 \
+  --scene-repeats 3 \
+  --focus-ratio 2.0 \
+  --out-dir realtime_pipeline/output/focus_sanity
+```
+
+Outputs:
+- `summary.json`
+- `per_scene_metrics.json`
+- per-scene `selection_trace.csv`
+- per-scene `enhanced_fast_path.wav`
+
+Catchup/adaptation metrics in per-scene summaries:
+- `startup_lock_ms`: time to first lock from direction bootstrap
+- `reacquire_catchup_ms_median`: median re-lock latency after timeout-based reacquire
+- `nearest_change_catchup_ms_median`: latency to align lock with stable nearest-speaker changes
 
 ## Expected Sanity Signals
 

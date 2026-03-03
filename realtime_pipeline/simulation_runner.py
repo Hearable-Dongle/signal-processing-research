@@ -84,6 +84,21 @@ def run_simulation_pipeline(
         "dropped_fast_to_slow_frames": stats.dropped_fast_to_slow_frames,
         "fast_avg_ms": stats.fast_avg_ms,
         "slow_avg_ms": stats.slow_avg_ms,
+        "fast_rtf": stats.fast_rtf,
+        "slow_rtf": stats.slow_rtf,
+        "fast_stage_avg_ms": {
+            "srp": stats.fast_srp_avg_ms,
+            "beamform": stats.fast_beamform_avg_ms,
+            "safety": stats.fast_safety_avg_ms,
+            "sink": stats.fast_sink_avg_ms,
+            "enqueue": stats.fast_enqueue_avg_ms,
+        },
+        "slow_stage_avg_ms": {
+            "separation": stats.slow_separation_avg_ms,
+            "identity": stats.slow_identity_avg_ms,
+            "direction_assignment": stats.slow_direction_avg_ms,
+            "publish": stats.slow_publish_avg_ms,
+        },
         "use_mock_separation": bool(use_mock_separation),
     }
 

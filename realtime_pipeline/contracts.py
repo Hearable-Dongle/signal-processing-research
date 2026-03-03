@@ -49,6 +49,8 @@ class PipelineConfig:
     # Asteroid backend defaults
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
     convtasnet_device: str = "cpu"
+    direction_focus_gain_db: float = 0.0
+    direction_non_focus_attenuation_db: float = -14.0
     max_user_boost_db: float = 12.0
     # Fast-path safety
     output_soft_clip_enabled: bool = True

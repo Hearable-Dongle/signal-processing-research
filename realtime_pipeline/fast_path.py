@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from time import perf_counter
 from typing import Callable
 
 import numpy as np
@@ -135,6 +136,12 @@ class FastPathWorker(threading.Thread):
                     break
 
                 with Timer() as t:
+                    srp_ms = 0.0
+                    beamform_ms = 0.0
+                    safety_ms = 0.0
+                    sink_ms = 0.0
+                    enqueue_ms = 0.0
+
                     x = np.asarray(frame, dtype=np.float32)
                     if x.ndim != 2:
                         raise ValueError("fast-path frame source must yield shape (samples, n_mics)")
@@ -145,6 +152,7 @@ class FastPathWorker(threading.Thread):
                             x = np.pad(x, ((0, frame_samples - x.shape[0]), (0, 0)))
 
                     now_ms = 1000.0 * (self._frame_idx * frame_samples) / self._cfg.sample_rate_hz
+                    t0 = perf_counter()
                     peaks, scores = self._tracker.update(x)
                     self._state.publish_srp_snapshot(
                         SRPPeakSnapshot(
@@ -153,8 +161,10 @@ class FastPathWorker(threading.Thread):
                             peak_scores=None if scores is None else tuple(float(v) for v in scores),
                         )
                     )
+                    srp_ms += (perf_counter() - t0) * 1000.0
 
                     speaker_map = self._state.get_speaker_map_snapshot()
+                    t0 = perf_counter()
                     if speaker_map:
                         out = np.zeros(x.shape[0], dtype=np.float32)
                         for item in speaker_map.values():
@@ -168,13 +178,27 @@ class FastPathWorker(threading.Thread):
                             out += float(item.gain_weight) * bf
                     else:
                         out = np.mean(x, axis=1).astype(np.float32, copy=False)
+                    beamform_ms += (perf_counter() - t0) * 1000.0
 
+                    t0 = perf_counter()
                     out, self._rms_gain_ema = _apply_output_safety(out, self._cfg, self._rms_gain_ema)
+                    safety_ms += (perf_counter() - t0) * 1000.0
 
+                    t0 = perf_counter()
                     self._sink(out)
+                    sink_ms += (perf_counter() - t0) * 1000.0
+                    t0 = perf_counter()
                     self._enqueue_slow(x)
+                    enqueue_ms += (perf_counter() - t0) * 1000.0
 
                 self._state.incr_fast_frame(t.elapsed_ms)
+                self._state.incr_fast_stage_times(
+                    srp_ms=srp_ms,
+                    beamform_ms=beamform_ms,
+                    safety_ms=safety_ms,
+                    sink_ms=sink_ms,
+                    enqueue_ms=enqueue_ms,
+                )
                 self._frame_idx += 1
         finally:
             try:

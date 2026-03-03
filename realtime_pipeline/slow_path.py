@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from time import perf_counter
 
 import numpy as np
 
@@ -46,6 +47,8 @@ class SlowPathWorker(threading.Thread):
             config=DirectionAssignmentConfig(
                 sample_rate=config.sample_rate_hz,
                 chunk_ms=config.slow_chunk_ms,
+                focus_gain_db=config.direction_focus_gain_db,
+                non_focus_attenuation_db=config.direction_non_focus_attenuation_db,
                 max_user_boost_db=config.max_user_boost_db,
             ),
         )
@@ -54,6 +57,11 @@ class SlowPathWorker(threading.Thread):
         ts_ms = 1000.0 * (self._chunk_id * self._chunk_samples) / self._cfg.sample_rate_hz
 
         with Timer() as t:
+            separation_ms = 0.0
+            identity_ms = 0.0
+            direction_ms = 0.0
+            publish_ms = 0.0
+
             mono_mix = np.mean(raw_chunk_mc, axis=1).astype(np.float32, copy=False)
             focus = self._state.get_focus_control_snapshot()
             self._direction.set_focus_speakers(None if focus.focused_speaker_ids is None else list(focus.focused_speaker_ids))
@@ -65,8 +73,11 @@ class SlowPathWorker(threading.Thread):
             if expected_speakers is not None:
                 expected_speakers = min(max(1, expected_speakers), self._cfg.max_speakers_hint)
 
+            t0 = perf_counter()
             separated = self._sep.separate(mono_mix, expected_speakers=expected_speakers)
+            separation_ms += (perf_counter() - t0) * 1000.0
 
+            t0 = perf_counter()
             identity_out = self._identity.update(
                 IdentityChunkInput(
                     chunk_id=self._chunk_id,
@@ -75,6 +86,7 @@ class SlowPathWorker(threading.Thread):
                     streams=separated,
                 )
             )
+            identity_ms += (perf_counter() - t0) * 1000.0
 
             payload, _ = build_direction_assignment_input(
                 chunk_id=self._chunk_id,
@@ -86,7 +98,10 @@ class SlowPathWorker(threading.Thread):
                 srp_doa_peaks_deg=list(srp.peaks_deg),
                 srp_peak_scores=None if srp.peak_scores is None else list(srp.peak_scores),
             )
+            t0 = perf_counter()
             direction_out = self._direction.update(payload)
+            direction_ms += (perf_counter() - t0) * 1000.0
+            t0 = perf_counter()
             speaker_activity: dict[int, float] = {}
             for stream_idx, speaker_id in identity_out.stream_to_speaker.items():
                 if speaker_id is None:
@@ -113,8 +128,15 @@ class SlowPathWorker(threading.Thread):
                 )
 
             self._state.publish_speaker_map(speaker_map)
+            publish_ms += (perf_counter() - t0) * 1000.0
 
         self._state.incr_slow_chunk(t.elapsed_ms)
+        self._state.incr_slow_stage_times(
+            separation_ms=separation_ms,
+            identity_ms=identity_ms,
+            direction_ms=direction_ms,
+            publish_ms=publish_ms,
+        )
         self._chunk_id += 1
 
     def run(self) -> None:
