@@ -47,7 +47,7 @@ export default function App() {
     const resp = await fetch("http://localhost:8000/api/session/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scene_config_path: scenePath, separation_mode: "auto" }),
+      body: JSON.stringify({ scene_config_path: scenePath, separation_mode: "mock" }),
     });
     if (!resp.ok) {
       setStatus(`error (${resp.status})`);
