@@ -5,9 +5,11 @@ type Props = {
   defaultScenePath: string;
   onStart: (scenePath: string) => void;
   onStop: () => void;
+  onDownloadWav: () => void;
+  canDownloadWav: boolean;
 };
 
-export function SceneLauncher({ status, defaultScenePath, onStart, onStop }: Props) {
+export function SceneLauncher({ status, defaultScenePath, onStart, onStop, onDownloadWav, canDownloadWav }: Props) {
   const [scenePath, setScenePath] = useState(defaultScenePath);
 
   return (
@@ -26,6 +28,9 @@ export function SceneLauncher({ status, defaultScenePath, onStart, onStop }: Pro
         </button>
         <button onClick={onStop} disabled={status !== "running" && status !== "starting"}>
           Stop
+        </button>
+        <button onClick={onDownloadWav} disabled={!canDownloadWav}>
+          Download WAV
         </button>
       </div>
       <p className="status">Status: {status}</p>
