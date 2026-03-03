@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 
 import { DemoWsClient } from "./api/ws";
-import { RealtimeAudioPlayer, type PlaybackStats } from "./audio/player";
+import { RealtimeAudioPlayer } from "./audio/player";
 import { createWavBlobFromFloat32Chunks } from "./audio/wav";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { SceneLauncher } from "./components/SceneLauncher";
@@ -12,13 +12,6 @@ import { SCHEMA_VERSION, type MetricsMessage, type ServerMessage, type Speaker }
 const DEFAULT_SCENE = "simulation/simulations/configs/library_scene/library_k1_scene00.json";
 const AUDIO_HEADER_BYTES = 16;
 const AUDIO_SAMPLE_RATE = 16000;
-const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
-  buffered_ms: 0,
-  drift_ms: 0,
-  underrun_count: 0,
-  reanchor_count: 0,
-  parse_error_count: 0,
-};
 
 export default function App() {
   const [status, setStatus] = useState("idle");
@@ -27,7 +20,6 @@ export default function App() {
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<number | null>(null);
   const [gainBySpeaker, setGainBySpeaker] = useState<Record<number, number>>({});
   const [metrics, setMetrics] = useState<MetricsMessage | null>(null);
-  const [playbackStats, setPlaybackStats] = useState<PlaybackStats>(DEFAULT_PLAYBACK_STATS);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
@@ -55,7 +47,6 @@ export default function App() {
             }
           }
           audioRef.current.pushPacket(chunk);
-          setPlaybackStats(audioRef.current.getStats());
         },
         onClose: () => setStatus((s) => (s === "running" ? "disconnected" : s)),
       }),
@@ -65,7 +56,6 @@ export default function App() {
   async function startSession(scenePath: string): Promise<void> {
     setStatus("starting");
     capturedAudioRef.current = [];
-    setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     const resp = await fetch("http://localhost:8000/api/session/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -88,7 +78,6 @@ export default function App() {
     }
     ws.close();
     audioRef.current.stop();
-    setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setStatus("stopped");
     setSelectedSpeakerId(null);
   }
@@ -139,7 +128,7 @@ export default function App() {
           canDownloadWav={capturedAudioRef.current.length > 0}
         />
         <SpeakerStage speakers={speakers} selectedSpeakerId={selectedSpeakerId} onSpeakerTap={selectSpeaker} />
-        <MetricsPanel metrics={metrics} playback={playbackStats} />
+        <MetricsPanel metrics={metrics} />
       </div>
       {selectedSpeakerId !== null && (
         <SpeakerControlPopover
