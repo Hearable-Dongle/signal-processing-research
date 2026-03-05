@@ -13,6 +13,7 @@ def test_models_roundtrip_and_schema_version() -> None:
     req = SessionStartRequest(scene_config_path="x.json")
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
+    assert req.processing_mode == "specific_speaker_enhancement"
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,

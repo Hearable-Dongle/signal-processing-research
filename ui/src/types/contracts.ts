@@ -1,5 +1,10 @@
 export const SCHEMA_VERSION = "v1" as const;
 
+export type ProcessingMode =
+  | "specific_speaker_enhancement"
+  | "localize_and_beamform"
+  | "beamform_from_ground_truth";
+
 export type Speaker = {
   speaker_id: number;
   direction_degrees: number;

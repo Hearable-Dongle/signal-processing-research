@@ -103,6 +103,13 @@ button:disabled {
   opacity: 0.35;
 }
 
+.speaker-dot-passive {
+  width: 20px;
+  height: 20px;
+  border-width: 1px;
+  pointer-events: none;
+}
+
 .ground-truth-block {
   margin-top: 0.8rem;
   padding-top: 0.6rem;

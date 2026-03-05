@@ -13,6 +13,11 @@ class SessionStartRequest(BaseModel):
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4
     separation_mode: Literal["auto", "mock"] = "auto"
+    processing_mode: Literal[
+        "specific_speaker_enhancement",
+        "localize_and_beamform",
+        "beamform_from_ground_truth",
+    ] = "specific_speaker_enhancement"
 
 
 class SessionStartResponse(BaseModel):

@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import type { ProcessingMode } from "../types/contracts";
+
 type Props = {
   status: string;
   defaultScenePath: string;
@@ -14,6 +16,8 @@ type Props = {
   isPlaybackActive: boolean;
   latencyMs: number;
   onLatencyMsChange: (latencyMs: number) => void;
+  processingMode: ProcessingMode;
+  onProcessingModeChange: (mode: ProcessingMode) => void;
 };
 
 export function SceneLauncher({
@@ -30,6 +34,8 @@ export function SceneLauncher({
   isPlaybackActive,
   latencyMs,
   onLatencyMsChange,
+  processingMode,
+  onProcessingModeChange,
 }: Props) {
   const [scenePath, setScenePath] = useState(defaultScenePath);
 
@@ -67,6 +73,19 @@ export function SceneLauncher({
         value={latencyMs}
         onChange={(e) => applyLatency(Number(e.target.value))}
       />
+
+      <label htmlFor="processing-mode">Beamforming mode</label>
+      <select
+        id="processing-mode"
+        aria-label="Beamforming mode"
+        value={processingMode}
+        disabled={status === "running" || status === "starting"}
+        onChange={(e) => onProcessingModeChange(e.target.value as ProcessingMode)}
+      >
+        <option value="specific_speaker_enhancement">Specific speaker enhancement</option>
+        <option value="localize_and_beamform">Localize and beamform</option>
+        <option value="beamform_from_ground_truth">Beamform from ground truth</option>
+      </select>
 
       <div className="actions">
         <button onClick={() => onStart(scenePath)} disabled={status === "running" || status === "starting"}>

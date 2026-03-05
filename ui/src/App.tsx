@@ -12,6 +12,7 @@ import {
   SCHEMA_VERSION,
   type GroundTruthSpeaker,
   type MetricsMessage,
+  type ProcessingMode,
   type ServerMessage,
   type Speaker,
 } from "./types/contracts";
@@ -21,6 +22,7 @@ const AUDIO_HEADER_BYTES = 16;
 const AUDIO_SAMPLE_RATE = 16000;
 const DEFAULT_LATENCY_MS = 220;
 const WAVEFORM_BINS = 800;
+const DEFAULT_PROCESSING_MODE: ProcessingMode = "specific_speaker_enhancement";
 
 const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
   play_state: "buffering",
@@ -61,6 +63,7 @@ export default function App() {
   const [waveformBins, setWaveformBins] = useState<number[]>([]);
   const [playheadMs, setPlayheadMs] = useState(0);
   const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
+  const [processingMode, setProcessingMode] = useState<ProcessingMode>(DEFAULT_PROCESSING_MODE);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
@@ -140,7 +143,11 @@ export default function App() {
     const resp = await fetch("http://localhost:8000/api/session/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scene_config_path: scenePath, separation_mode: "mock" }),
+      body: JSON.stringify({
+        scene_config_path: scenePath,
+        separation_mode: "mock",
+        processing_mode: processingMode,
+      }),
     });
     if (!resp.ok) {
       setStatus(`error (${resp.status})`);
@@ -182,11 +189,17 @@ export default function App() {
   }
 
   function selectSpeaker(speakerId: number): void {
+    if (processingMode !== "specific_speaker_enhancement") {
+      return;
+    }
     setSelectedSpeakerId(speakerId);
     ws.send({ schema_version: SCHEMA_VERSION, type: "select_speaker", speaker_id: speakerId });
   }
 
   function adjustSpeakerGain(speakerId: number, step: 1 | -1): void {
+    if (processingMode !== "specific_speaker_enhancement") {
+      return;
+    }
     setGainBySpeaker((prev) => {
       const current = prev[speakerId] ?? 0;
       const next = Math.max(-12, Math.min(12, current + step));
@@ -212,6 +225,13 @@ export default function App() {
     a.download = `realtime-output-${suffix}.wav`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function onProcessingModeChange(nextMode: ProcessingMode): void {
+    setProcessingMode(nextMode);
+    if (nextMode !== "specific_speaker_enhancement") {
+      setSelectedSpeakerId(null);
+    }
   }
 
   async function toggleOutputPlayback(): Promise<void> {
@@ -259,11 +279,14 @@ export default function App() {
           isPlaybackActive={isOutputPlaybackActive}
           latencyMs={latencyMs}
           onLatencyMsChange={onLatencyMsChange}
+          processingMode={processingMode}
+          onProcessingModeChange={onProcessingModeChange}
         />
         <SpeakerStage
           speakers={speakers}
           groundTruth={groundTruth}
-          selectedSpeakerId={selectedSpeakerId}
+          processingMode={processingMode}
+          selectedSpeakerId={processingMode === "specific_speaker_enhancement" ? selectedSpeakerId : null}
           onSpeakerTap={selectSpeaker}
         />
         <MetricsPanel metrics={metrics} playback={playbackStats} />
@@ -271,7 +294,7 @@ export default function App() {
 
       <WaveformTimeline bins={waveformBins} totalDurationMs={totalDurationMs} playheadMs={playheadMs} />
 
-      {selectedSpeakerId !== null && (
+      {processingMode === "specific_speaker_enhancement" && selectedSpeakerId !== null && (
         <SpeakerControlPopover
           speakerId={selectedSpeakerId}
           deltaDb={gainBySpeaker[selectedSpeakerId] ?? 0}
