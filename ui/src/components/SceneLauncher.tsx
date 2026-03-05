@@ -11,9 +11,6 @@ type Props = {
   canKillRun: boolean;
   onDownloadWav: () => void;
   canDownloadWav: boolean;
-  onTogglePlayback: () => void;
-  canPlayOutput: boolean;
-  isPlaybackActive: boolean;
   latencyMs: number;
   onLatencyMsChange: (latencyMs: number) => void;
   processingMode: ProcessingMode;
@@ -29,9 +26,6 @@ export function SceneLauncher({
   canKillRun,
   onDownloadWav,
   canDownloadWav,
-  onTogglePlayback,
-  canPlayOutput,
-  isPlaybackActive,
   latencyMs,
   onLatencyMsChange,
   processingMode,
@@ -99,9 +93,6 @@ export function SceneLauncher({
         </button>
         <button onClick={onDownloadWav} disabled={!canDownloadWav}>
           Download WAV
-        </button>
-        <button onClick={onTogglePlayback} disabled={!canPlayOutput}>
-          {isPlaybackActive ? "Stop Playback" : "Play Beamformed Output"}
         </button>
       </div>
       <p className="status">Status: {status}</p>

@@ -5,7 +5,9 @@ import math
 import threading
 import time
 import uuid
+import wave
 from collections import deque
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +86,8 @@ class DemoSession:
         self._obs_idx = 0
         self._ground_truth_speakers: list[dict[str, float | int]] = []
         self._ground_truth_focus_direction_deg: float | None = None
+        self._raw_mix_mono: np.ndarray | None = None
+        self._raw_mix_sample_rate_hz: int = 16000
 
     @property
     def status(self) -> str:
@@ -135,6 +139,22 @@ class DemoSession:
         with self._lock:
             items = [payload for s, payload in self._events if s > seq]
             return self._event_seq, items
+
+    def get_raw_mix_wav_bytes(self) -> bytes:
+        with self._lock:
+            raw = None if self._raw_mix_mono is None else self._raw_mix_mono.copy()
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
+        if raw is None or raw.size == 0:
+            return b""
+        clipped = np.clip(raw, -1.0, 1.0)
+        pcm16 = (clipped * 32767.0).astype(np.int16, copy=False)
+        buf = BytesIO()
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate_hz)
+            wav.writeframes(pcm16.tobytes())
+        return buf.getvalue()
 
     def select_speaker(self, speaker_id: int) -> None:
         if self.req.processing_mode != "specific_speaker_enhancement":
@@ -360,6 +380,8 @@ class DemoSession:
             sim_cfg = SimulationConfig.from_file(self.req.scene_config_path)
             mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
             with self._lock:
+                self._raw_mix_mono = np.mean(mic_audio, axis=1).astype(np.float32, copy=False)
+                self._raw_mix_sample_rate_hz = int(sim_cfg.audio.fs)
                 self._ground_truth_speakers = _ground_truth_from_scene(sim_cfg)
                 target_source_ids = list(iter_target_source_indices(sim_cfg))
                 if target_source_ids:

@@ -74,7 +74,8 @@ test("localize and beamform shows active speakers only without numbered speaker 
   expect(screen.getByTestId("active-speaker-1")).toBeInTheDocument();
   expect(screen.queryByTestId("active-speaker-2")).not.toBeInTheDocument();
   expect(screen.queryByTestId("speaker-1")).not.toBeInTheDocument();
-  expect(screen.queryByTestId("ground-truth-stage")).not.toBeInTheDocument();
+  expect(screen.getByTestId("ground-truth-stage")).toBeInTheDocument();
+  expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();
 });
 
 test("beamform from ground truth shows ground truth only", () => {

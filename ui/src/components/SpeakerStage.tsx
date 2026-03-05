@@ -20,7 +20,7 @@ function polarToXY(directionDeg: number): { x: number; y: number } {
 export function SpeakerStage({ speakers, groundTruth, processingMode, selectedSpeakerId, onSpeakerTap }: Props) {
   const activeSpeakers = speakers.filter((speaker) => speaker.active);
   const showTrackedRoom = processingMode !== "beamform_from_ground_truth";
-  const showGroundTruthBlock = processingMode !== "localize_and_beamform";
+  const showGroundTruthBlock = true;
 
   return (
     <section className="panel speaker-stage">

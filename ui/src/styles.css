@@ -41,6 +41,12 @@ input {
   margin-top: 0.5rem;
 }
 
+select {
+  width: 100%;
+  padding: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 .actions {
   display: flex;
   gap: 0.5rem;
@@ -209,6 +215,16 @@ button:disabled {
   overflow: hidden;
 }
 
+.waveform-track + .waveform-track {
+  margin-top: 0.55rem;
+}
+
+.waveform-track-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
 .waveform-svg {
   width: 100%;
   height: 100%;
@@ -223,6 +239,18 @@ button:disabled {
 .waveform-playhead {
   stroke: #d0431e;
   stroke-width: 1.2;
+}
+
+.waveform-controls {
+  margin-top: 0.6rem;
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+}
+
+.waveform-controls label {
+  grid-column: 1 / -1;
 }
 
 .waveform-times {
