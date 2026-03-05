@@ -28,7 +28,7 @@ export function SceneLauncher({
   const [scenePath, setScenePath] = useState(defaultScenePath);
 
   function applyLatency(v: number): void {
-    const clamped = Math.max(80, Math.min(500, Math.round(v)));
+    const clamped = Math.max(80, Math.min(2000, Math.round(v)));
     onLatencyMsChange(clamped);
   }
 
@@ -48,7 +48,7 @@ export function SceneLauncher({
         id="latency-range"
         type="range"
         min={80}
-        max={500}
+        max={2000}
         step={10}
         value={latencyMs}
         onChange={(e) => applyLatency(Number(e.target.value))}
@@ -57,7 +57,7 @@ export function SceneLauncher({
         aria-label="Playback latency number"
         type="number"
         min={80}
-        max={500}
+        max={2000}
         value={latencyMs}
         onChange={(e) => applyLatency(Number(e.target.value))}
       />

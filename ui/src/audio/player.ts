@@ -39,7 +39,7 @@ function parsePacket(payload: ArrayBuffer): ParsedPacket | null {
 }
 
 function clampLatencyMs(ms: number): number {
-  return Math.max(80, Math.min(500, Math.round(ms)));
+  return Math.max(80, Math.min(2000, Math.round(ms)));
 }
 
 export class RealtimeAudioPlayer {
