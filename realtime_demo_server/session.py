@@ -5,7 +5,9 @@ import math
 import threading
 import time
 import uuid
+import wave
 from collections import deque
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,7 @@ from realtime_pipeline.catchup_metrics import compute_catchup_metrics
 from realtime_pipeline.contracts import PipelineConfig
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
 from realtime_pipeline.separation_backends import MockSeparationBackend, build_default_backend
-from simulation.simulation_config import SimulationConfig
+from simulation.simulation_config import SimulationConfig, SimulationSource
 from simulation.simulator import run_simulation
 from simulation.target_policy import iter_target_source_indices
 
@@ -54,6 +56,25 @@ def _ground_truth_from_scene(scene_cfg: SimulationConfig) -> list[dict[str, floa
     return out
 
 
+def _inject_background_noise_source(
+    scene_cfg: SimulationConfig, *, audio_path: str | None, gain: float
+) -> None:
+    path = "" if audio_path is None else str(audio_path).strip()
+    if not path:
+        return
+    room = scene_cfg.room.dimensions
+    # Place background source near a room corner away from mic center for diffuse-like field.
+    loc = [max(0.2, float(room[0]) * 0.15), max(0.2, float(room[1]) * 0.85), 1.4]
+    scene_cfg.audio.sources.append(
+        SimulationSource(
+            loc=loc,
+            audio_path=path,
+            gain=float(np.clip(float(gain), 0.0, 2.0)),
+            classification="noise",
+        )
+    )
+
+
 class DemoSession:
     def __init__(self, req: SessionStartRequest):
         self.session_id = uuid.uuid4().hex[:12]
@@ -83,6 +104,9 @@ class DemoSession:
         self._observations: list[dict[str, Any]] = []
         self._obs_idx = 0
         self._ground_truth_speakers: list[dict[str, float | int]] = []
+        self._ground_truth_focus_direction_deg: float | None = None
+        self._raw_mix_mono: np.ndarray | None = None
+        self._raw_mix_sample_rate_hz: int = 16000
 
     @property
     def status(self) -> str:
@@ -135,7 +159,25 @@ class DemoSession:
             items = [payload for s, payload in self._events if s > seq]
             return self._event_seq, items
 
+    def get_raw_mix_wav_bytes(self) -> bytes:
+        with self._lock:
+            raw = None if self._raw_mix_mono is None else self._raw_mix_mono.copy()
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
+        if raw is None or raw.size == 0:
+            return b""
+        clipped = np.clip(raw, -1.0, 1.0)
+        pcm16 = (clipped * 32767.0).astype(np.int16, copy=False)
+        buf = BytesIO()
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate_hz)
+            wav.writeframes(pcm16.tobytes())
+        return buf.getvalue()
+
     def select_speaker(self, speaker_id: int) -> None:
+        if self.req.processing_mode != "specific_speaker_enhancement":
+            return
         with self._lock:
             sid = int(speaker_id)
             self._selected_speaker_id = sid
@@ -144,6 +186,8 @@ class DemoSession:
         self._apply_focus_control()
 
     def adjust_speaker_gain(self, speaker_id: int, delta_db_step: int) -> float:
+        if self.req.processing_mode != "specific_speaker_enhancement":
+            return 0.0
         sid = int(speaker_id)
         step = int(delta_db_step)
         with self._lock:
@@ -203,6 +247,12 @@ class DemoSession:
         best = max(speakers, key=lambda s: (float(s.gain_weight), float(s.confidence)))
         return int(best.speaker_id)
 
+    def _best_speaker_direction_deg(self, speakers: list[SpeakerStateItem]) -> float | None:
+        if not speakers:
+            return None
+        best = max(speakers, key=lambda s: (float(s.gain_weight), float(s.confidence)))
+        return _normalize_angle_deg(float(best.direction_degrees))
+
     def _publish_speaker_state(self) -> None:
         pipe = self._pipeline
         if pipe is None:
@@ -223,6 +273,9 @@ class DemoSession:
             ground_truth = list(self._ground_truth_speakers)
         msg = SpeakerStateMessage(timestamp_ms=_now_ms(), speakers=speakers, ground_truth=ground_truth).model_dump()
 
+        if self.req.processing_mode == "localize_and_beamform":
+            self._apply_focus_control(speakers=speakers)
+
         nearest = self._nearest_speaker_id(speakers)
         with self._lock:
             self._speaker_state = msg
@@ -231,7 +284,7 @@ class DemoSession:
                 {
                     "frame_idx": int(self._obs_idx),
                     "timestamp_ms": float(msg["timestamp_ms"]),
-                    "mode": "speaker_id" if self._selected_speaker_id is not None else "none",
+                    "mode": str(self.req.processing_mode),
                     "locked_speaker_id": "" if self._selected_speaker_id is None else int(self._selected_speaker_id),
                     "nearest_speaker_id": "" if nearest is None else int(nearest),
                 }
@@ -271,9 +324,27 @@ class DemoSession:
             self._metrics_state = msg
             self._metrics_version += 1
 
-    def _apply_focus_control(self) -> None:
+    def _apply_focus_control(self, speakers: list[SpeakerStateItem] | None = None) -> None:
         pipe = self._pipeline
         if pipe is None:
+            return
+
+        mode = self.req.processing_mode
+        if mode == "localize_and_beamform":
+            direction = self._best_speaker_direction_deg(speakers or [])
+            pipe.set_focus_control(
+                focused_speaker_ids=None,
+                focused_direction_deg=direction,
+                user_boost_db=0.0,
+            )
+            return
+
+        if mode == "beamform_from_ground_truth":
+            pipe.set_focus_control(
+                focused_speaker_ids=None,
+                focused_direction_deg=self._ground_truth_focus_direction_deg,
+                user_boost_db=0.0,
+            )
             return
 
         with self._lock:
@@ -326,9 +397,27 @@ class DemoSession:
     def _run(self) -> None:
         try:
             sim_cfg = SimulationConfig.from_file(self.req.scene_config_path)
+            _inject_background_noise_source(
+                sim_cfg,
+                audio_path=self.req.background_noise_audio_path,
+                gain=self.req.background_noise_gain,
+            )
             mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
             with self._lock:
+                self._raw_mix_mono = np.mean(mic_audio, axis=1).astype(np.float32, copy=False)
+                self._raw_mix_sample_rate_hz = int(sim_cfg.audio.fs)
                 self._ground_truth_speakers = _ground_truth_from_scene(sim_cfg)
+                target_source_ids = list(iter_target_source_indices(sim_cfg))
+                if target_source_ids:
+                    target_source_id = int(target_source_ids[0])
+                else:
+                    target_source_id = 0
+                focus_direction = None
+                for item in self._ground_truth_speakers:
+                    if int(item["source_id"]) == target_source_id:
+                        focus_direction = _normalize_angle_deg(float(item["direction_degrees"]))
+                        break
+                self._ground_truth_focus_direction_deg = focus_direction
 
             cfg = PipelineConfig(
                 sample_rate_hz=int(sim_cfg.audio.fs),

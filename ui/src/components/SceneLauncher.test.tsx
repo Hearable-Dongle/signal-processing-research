@@ -7,23 +7,24 @@ test("latency controls invoke callback", async () => {
   const user = userEvent.setup();
   const onLatency = vi.fn();
   const onKill = vi.fn();
-  const onTogglePlayback = vi.fn();
+  const onProcessingModeChange = vi.fn();
 
   render(
     <SceneLauncher
       status="idle"
       defaultScenePath="x.json"
+      defaultBackgroundNoisePath="noise.wav"
+      defaultBackgroundNoiseGain={0.15}
       onStart={() => undefined}
       onStop={() => undefined}
       onKillRun={onKill}
       canKillRun={true}
       onDownloadWav={() => undefined}
       canDownloadWav={false}
-      onTogglePlayback={onTogglePlayback}
-      canPlayOutput={true}
-      isPlaybackActive={false}
       latencyMs={180}
       onLatencyMsChange={onLatency}
+      processingMode="specific_speaker_enhancement"
+      onProcessingModeChange={onProcessingModeChange}
     />
   );
 
@@ -37,6 +38,6 @@ test("latency controls invoke callback", async () => {
   await user.click(screen.getByRole("button", { name: "Kill Current Run" }));
   expect(onKill).toHaveBeenCalledTimes(1);
 
-  await user.click(screen.getByRole("button", { name: "Play Beamformed Output" }));
-  expect(onTogglePlayback).toHaveBeenCalledTimes(1);
+  await user.selectOptions(screen.getByLabelText("Beamforming mode"), "beamform_from_ground_truth");
+  expect(onProcessingModeChange).toHaveBeenCalledWith("beamform_from_ground_truth");
 });

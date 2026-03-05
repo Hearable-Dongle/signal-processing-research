@@ -59,5 +59,6 @@ Notes:
 - `POST /api/session/start`
 - `GET /api/session/{id}/status`
 - `POST /api/session/{id}/stop`
+- `GET /api/session/{id}/raw-mix-wav`
 - `GET /api/scenes`
 - `WS /ws/session/{id}`

@@ -1,37 +1,43 @@
 import { useState } from "react";
 
+import type { ProcessingMode } from "../types/contracts";
+
 type Props = {
   status: string;
   defaultScenePath: string;
-  onStart: (scenePath: string) => void;
+  defaultBackgroundNoisePath: string;
+  defaultBackgroundNoiseGain: number;
+  onStart: (scenePath: string, backgroundNoisePath: string, backgroundNoiseGain: number) => void;
   onStop: () => void;
   onKillRun: () => void;
   canKillRun: boolean;
   onDownloadWav: () => void;
   canDownloadWav: boolean;
-  onTogglePlayback: () => void;
-  canPlayOutput: boolean;
-  isPlaybackActive: boolean;
   latencyMs: number;
   onLatencyMsChange: (latencyMs: number) => void;
+  processingMode: ProcessingMode;
+  onProcessingModeChange: (mode: ProcessingMode) => void;
 };
 
 export function SceneLauncher({
   status,
   defaultScenePath,
+  defaultBackgroundNoisePath,
+  defaultBackgroundNoiseGain,
   onStart,
   onStop,
   onKillRun,
   canKillRun,
   onDownloadWav,
   canDownloadWav,
-  onTogglePlayback,
-  canPlayOutput,
-  isPlaybackActive,
   latencyMs,
   onLatencyMsChange,
+  processingMode,
+  onProcessingModeChange,
 }: Props) {
   const [scenePath, setScenePath] = useState(defaultScenePath);
+  const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
+  const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
@@ -47,6 +53,23 @@ export function SceneLauncher({
         value={scenePath}
         onChange={(e) => setScenePath(e.target.value)}
         placeholder="simulation/simulations/configs/library_scene/library_k1_scene00.json"
+      />
+      <label htmlFor="background-noise">Background noise audio path</label>
+      <input
+        id="background-noise"
+        value={backgroundNoisePath}
+        onChange={(e) => setBackgroundNoisePath(e.target.value)}
+        placeholder="wham_noise/tr/01dc0215_0.22439_01fc0207_-0.22439sp12.wav"
+      />
+      <label htmlFor="background-noise-gain">Background noise gain</label>
+      <input
+        id="background-noise-gain"
+        type="number"
+        min={0}
+        max={2}
+        step={0.05}
+        value={backgroundNoiseGain}
+        onChange={(e) => setBackgroundNoiseGain(Math.max(0, Math.min(2, Number(e.target.value))))}
       />
 
       <label htmlFor="latency-range">Playback latency (ms)</label>
@@ -68,8 +91,24 @@ export function SceneLauncher({
         onChange={(e) => applyLatency(Number(e.target.value))}
       />
 
+      <label htmlFor="processing-mode">Beamforming mode</label>
+      <select
+        id="processing-mode"
+        aria-label="Beamforming mode"
+        value={processingMode}
+        disabled={status === "running" || status === "starting"}
+        onChange={(e) => onProcessingModeChange(e.target.value as ProcessingMode)}
+      >
+        <option value="specific_speaker_enhancement">Specific speaker enhancement</option>
+        <option value="localize_and_beamform">Localize and beamform</option>
+        <option value="beamform_from_ground_truth">Beamform from ground truth</option>
+      </select>
+
       <div className="actions">
-        <button onClick={() => onStart(scenePath)} disabled={status === "running" || status === "starting"}>
+        <button
+          onClick={() => onStart(scenePath, backgroundNoisePath, backgroundNoiseGain)}
+          disabled={status === "running" || status === "starting"}
+        >
           Start
         </button>
         <button onClick={onStop} disabled={status !== "running" && status !== "starting"}>
@@ -80,9 +119,6 @@ export function SceneLauncher({
         </button>
         <button onClick={onDownloadWav} disabled={!canDownloadWav}>
           Download WAV
-        </button>
-        <button onClick={onTogglePlayback} disabled={!canPlayOutput}>
-          {isPlaybackActive ? "Stop Playback" : "Play Beamformed Output"}
         </button>
       </div>
       <p className="status">Status: {status}</p>

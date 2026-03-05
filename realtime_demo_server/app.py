@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .manager import manager
@@ -64,6 +64,15 @@ def stop_session(session_id: str) -> SessionStopResponse:
 @app.get("/api/scenes")
 def get_scenes() -> dict[str, list[str]]:
     return {"scenes": list_sample_scenes()}
+
+
+@app.get("/api/session/{session_id}/raw-mix-wav")
+def get_raw_mix_wav(session_id: str) -> Response:
+    session = manager.get_session(session_id)
+    wav_bytes = session.get_raw_mix_wav_bytes()
+    if not wav_bytes:
+        raise HTTPException(status_code=404, detail="raw mixed audio not available yet")
+    return Response(content=wav_bytes, media_type="audio/wav")
 
 
 def _parse_client_message(raw: dict) -> SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | StopSessionMessage:

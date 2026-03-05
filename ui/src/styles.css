@@ -41,6 +41,12 @@ input {
   margin-top: 0.5rem;
 }
 
+select {
+  width: 100%;
+  padding: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 .actions {
   display: flex;
   gap: 0.5rem;
@@ -101,6 +107,13 @@ button:disabled {
 
 .speaker-dot.inactive {
   opacity: 0.35;
+}
+
+.speaker-dot-passive {
+  width: 20px;
+  height: 20px;
+  border-width: 1px;
+  pointer-events: none;
 }
 
 .ground-truth-block {
@@ -202,15 +215,31 @@ button:disabled {
   overflow: hidden;
 }
 
+.waveform-track + .waveform-track {
+  margin-top: 0.55rem;
+}
+
+.waveform-track-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
 .waveform-svg {
   width: 100%;
   height: 100%;
 }
 
-.waveform-line {
-  fill: none;
-  stroke: #6a7a8a;
-  stroke-width: 1.2;
+.waveform-envelope {
+  fill: rgba(75, 106, 132, 0.32);
+  stroke: #4d6f89;
+  stroke-width: 0.7;
+}
+
+.waveform-midline {
+  stroke: #8a939d;
+  stroke-width: 0.45;
+  stroke-dasharray: 1.2 1;
 }
 
 .waveform-playhead {
@@ -224,4 +253,8 @@ button:disabled {
   margin-top: 0.4rem;
   font-size: 0.9rem;
   color: #4d5560;
+}
+
+.waveform-track-actions {
+  margin-top: 0.45rem;
 }

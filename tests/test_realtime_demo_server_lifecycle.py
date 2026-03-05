@@ -63,3 +63,32 @@ def test_second_start_returns_409_while_running() -> None:
     assert second.status_code == 409
 
     _cleanup()
+
+
+def test_raw_mix_wav_endpoint_available_after_start() -> None:
+    _cleanup()
+    resp = client.post(
+        "/api/session/start",
+        json={
+            "scene_config_path": "simulation/simulations/configs/library_scene/library_k1_scene00.json",
+            "separation_mode": "mock",
+            "slow_chunk_ms": 200,
+        },
+    )
+    assert resp.status_code == 200
+    sid = resp.json()["session_id"]
+
+    wav_resp = None
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        candidate = client.get(f"/api/session/{sid}/raw-mix-wav")
+        if candidate.status_code == 200:
+            wav_resp = candidate
+            break
+        time.sleep(0.05)
+
+    assert wav_resp is not None
+    assert wav_resp.headers["content-type"].startswith("audio/wav")
+    assert wav_resp.content[:4] == b"RIFF"
+
+    _cleanup()
