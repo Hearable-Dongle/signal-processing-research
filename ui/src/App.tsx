@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 
 import { DemoWsClient } from "./api/ws";
-import { RealtimeAudioPlayer } from "./audio/player";
+import { RealtimeAudioPlayer, type PlaybackStats } from "./audio/player";
 import { createWavBlobFromFloat32Chunks } from "./audio/wav";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { SceneLauncher } from "./components/SceneLauncher";
@@ -12,6 +12,18 @@ import { SCHEMA_VERSION, type MetricsMessage, type ServerMessage, type Speaker }
 const DEFAULT_SCENE = "simulation/simulations/configs/library_scene/library_k1_scene00.json";
 const AUDIO_HEADER_BYTES = 16;
 const AUDIO_SAMPLE_RATE = 16000;
+const DEFAULT_LATENCY_MS = 180;
+const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
+  play_state: "buffering",
+  buffered_ms: 0,
+  queued_packet_count: 0,
+  dropped_packet_count: 0,
+  late_packet_count: 0,
+  reanchor_count: 0,
+  rebuffer_count: 0,
+  startup_gate_wait_ms: 0,
+  parse_error_count: 0,
+};
 
 export default function App() {
   const [status, setStatus] = useState("idle");
@@ -20,6 +32,8 @@ export default function App() {
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<number | null>(null);
   const [gainBySpeaker, setGainBySpeaker] = useState<Record<number, number>>({});
   const [metrics, setMetrics] = useState<MetricsMessage | null>(null);
+  const [latencyMs, setLatencyMs] = useState(DEFAULT_LATENCY_MS);
+  const [playbackStats, setPlaybackStats] = useState<PlaybackStats>(DEFAULT_PLAYBACK_STATS);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
@@ -47,6 +61,7 @@ export default function App() {
             }
           }
           audioRef.current.pushPacket(chunk);
+          setPlaybackStats(audioRef.current.getStats());
         },
         onClose: () => setStatus((s) => (s === "running" ? "disconnected" : s)),
       }),
@@ -67,7 +82,9 @@ export default function App() {
     }
     const payload = (await resp.json()) as { session_id: string };
     setSessionId(payload.session_id);
+    audioRef.current.setTargetLatencyMs(latencyMs);
     await audioRef.current.start();
+    setPlaybackStats(audioRef.current.getStats());
     ws.connect(payload.session_id);
     setStatus("running");
   }
@@ -78,8 +95,15 @@ export default function App() {
     }
     ws.close();
     audioRef.current.stop();
+    setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setStatus("stopped");
     setSelectedSpeakerId(null);
+  }
+
+  function onLatencyMsChange(nextLatencyMs: number): void {
+    setLatencyMs(nextLatencyMs);
+    audioRef.current.setTargetLatencyMs(nextLatencyMs);
+    setPlaybackStats(audioRef.current.getStats());
   }
 
   function selectSpeaker(speakerId: number): void {
@@ -126,9 +150,11 @@ export default function App() {
           onStop={stopSession}
           onDownloadWav={downloadWav}
           canDownloadWav={capturedAudioRef.current.length > 0}
+          latencyMs={latencyMs}
+          onLatencyMsChange={onLatencyMsChange}
         />
         <SpeakerStage speakers={speakers} selectedSpeakerId={selectedSpeakerId} onSpeakerTap={selectSpeaker} />
-        <MetricsPanel metrics={metrics} />
+        <MetricsPanel metrics={metrics} playback={playbackStats} />
       </div>
       {selectedSpeakerId !== null && (
         <SpeakerControlPopover

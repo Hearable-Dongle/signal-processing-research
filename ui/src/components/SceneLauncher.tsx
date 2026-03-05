@@ -7,10 +7,26 @@ type Props = {
   onStop: () => void;
   onDownloadWav: () => void;
   canDownloadWav: boolean;
+  latencyMs: number;
+  onLatencyMsChange: (latencyMs: number) => void;
 };
 
-export function SceneLauncher({ status, defaultScenePath, onStart, onStop, onDownloadWav, canDownloadWav }: Props) {
+export function SceneLauncher({
+  status,
+  defaultScenePath,
+  onStart,
+  onStop,
+  onDownloadWav,
+  canDownloadWav,
+  latencyMs,
+  onLatencyMsChange,
+}: Props) {
   const [scenePath, setScenePath] = useState(defaultScenePath);
+
+  function applyLatency(v: number): void {
+    const clamped = Math.max(80, Math.min(500, Math.round(v)));
+    onLatencyMsChange(clamped);
+  }
 
   return (
     <section className="panel">
@@ -22,6 +38,26 @@ export function SceneLauncher({ status, defaultScenePath, onStart, onStop, onDow
         onChange={(e) => setScenePath(e.target.value)}
         placeholder="simulation/simulations/configs/library_scene/library_k1_scene00.json"
       />
+
+      <label htmlFor="latency-range">Playback latency (ms)</label>
+      <input
+        id="latency-range"
+        type="range"
+        min={80}
+        max={500}
+        step={10}
+        value={latencyMs}
+        onChange={(e) => applyLatency(Number(e.target.value))}
+      />
+      <input
+        aria-label="Playback latency number"
+        type="number"
+        min={80}
+        max={500}
+        value={latencyMs}
+        onChange={(e) => applyLatency(Number(e.target.value))}
+      />
+
       <div className="actions">
         <button onClick={() => onStart(scenePath)} disabled={status === "running" || status === "starting"}>
           Start
