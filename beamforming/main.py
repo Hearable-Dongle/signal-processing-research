@@ -29,13 +29,6 @@ from simulation.target_policy import is_speech_target, iter_target_source_indice
 BEAMFORMER_STFT_KEYS = {
     "MVDR (Iterative Steepest)": "steepest_stft",
     "MVDR (Iterative Newton)": "newton_stft",
-    "MVDR (Neural)": "mvdr_stft",
-    "LCMV (Closed Form)": "lcmv_stft",
-    "GSC (Closed Form)": "gsc_stft",
-    "GSC (Iterative)": "gsc_iterative_stft",
-    "LCMV (Weighted)": "lcmv_weighted_stft",
-    "GSC (Weighted)": "gsc_weighted_stft",
-    "GSC (Iterative Weighted)": "gsc_iterative_weighted_stft",
 }
 
 
@@ -146,22 +139,6 @@ def _build_results_packet(results: dict, mic_pos_rel: NDArray) -> dict:
         "newton_weights": results["newton"][0],
         "newton_hist": results["newton"][1],
         "newton_stft": apply_beamformer_stft(stft_tensor, results["newton"][0]),
-        "mvdr_weights": results["mvdr"][0],
-        "mvdr_stft": apply_beamformer_stft(stft_tensor, results["mvdr"][0]),
-        "lcmv_weights": results["lcmv"][0],
-        "lcmv_stft": apply_beamformer_stft(stft_tensor, results["lcmv"][0]),
-        "gsc_weights": results["gsc"][0],
-        "gsc_stft": apply_beamformer_stft(stft_tensor, results["gsc"][0]),
-        "gsc_iterative_weights": results["gsc_iterative"][0],
-        "gsc_iterative_hist": results["gsc_iterative"][1],
-        "gsc_iterative_stft": apply_beamformer_stft(stft_tensor, results["gsc_iterative"][0]),
-        "lcmv_weighted_weights": results["lcmv_weighted"][0],
-        "lcmv_weighted_stft": apply_beamformer_stft(stft_tensor, results["lcmv_weighted"][0]),
-        "gsc_weighted_weights": results["gsc_weighted"][0],
-        "gsc_weighted_stft": apply_beamformer_stft(stft_tensor, results["gsc_weighted"][0]),
-        "gsc_iterative_weighted_weights": results["gsc_iterative_weighted"][0],
-        "gsc_iterative_weighted_hist": results["gsc_iterative_weighted"][1],
-        "gsc_iterative_weighted_stft": apply_beamformer_stft(stft_tensor, results["gsc_iterative_weighted"][0]),
         "target_weights": [float(v) for v in results.get("target_weights", [])],
     }
     return packet
@@ -237,13 +214,6 @@ def evaluate_results(
         hist_data["MVDR Steepest"] = (np.mean(results_dict["steepest_hist"], axis=0), {"color": "blue", "alpha": 0.5})
     if "newton_hist" in results_dict:
         hist_data["MVDR Newton"] = (np.mean(results_dict["newton_hist"], axis=0), {"color": "green", "alpha": 0.5})
-    if "gsc_iterative_hist" in results_dict:
-        hist_data["GSC Iterative"] = (np.mean(results_dict["gsc_iterative_hist"], axis=0), {"color": "red", "alpha": 0.5})
-    if "gsc_iterative_weighted_hist" in results_dict:
-        hist_data["GSC Iterative Weighted"] = (
-            np.mean(results_dict["gsc_iterative_weighted_hist"], axis=0),
-            {"color": "purple", "alpha": 0.5},
-        )
     if hist_data:
         plot_history(hist_data, output_dir)
 
@@ -252,13 +222,6 @@ def evaluate_results(
     patterns_to_plot = {
         "MVDR_Steepest": "steepest_weights",
         "MVDR_Newton": "newton_weights",
-        "MVDR_Neural": "mvdr_weights",
-        "LCMV": "lcmv_weights",
-        "GSC": "gsc_weights",
-        "GSC_Iterative": "gsc_iterative_weights",
-        "LCMV_Weighted": "lcmv_weighted_weights",
-        "GSC_Weighted": "gsc_weighted_weights",
-        "GSC_Iterative_Weighted": "gsc_iterative_weighted_weights",
     }
     for name, weight_key in patterns_to_plot.items():
         if weight_key in results_dict:

@@ -11,9 +11,6 @@ This directory contains a frequency-domain beamforming simulation pipeline.
 - localization-estimated DOAs.
 4. Solve beamformer weights:
 - MVDR (iterative steepest/newton)
-- MVDR (neural-mask)
-- LCMV / GSC / GSC iterative
-- weighted LCMV / weighted GSC variants
 5. Reconstruct waveforms and evaluate RMSE / SNR / SI-SDR.
 
 ## Run
