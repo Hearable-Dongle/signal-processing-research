@@ -5,6 +5,8 @@ type Props = {
   defaultScenePath: string;
   onStart: (scenePath: string) => void;
   onStop: () => void;
+  onKillRun: () => void;
+  canKillRun: boolean;
   onDownloadWav: () => void;
   canDownloadWav: boolean;
   latencyMs: number;
@@ -16,6 +18,8 @@ export function SceneLauncher({
   defaultScenePath,
   onStart,
   onStop,
+  onKillRun,
+  canKillRun,
   onDownloadWav,
   canDownloadWav,
   latencyMs,
@@ -64,6 +68,9 @@ export function SceneLauncher({
         </button>
         <button onClick={onStop} disabled={status !== "running" && status !== "starting"}>
           Stop
+        </button>
+        <button onClick={onKillRun} disabled={!canKillRun}>
+          Kill Current Run
         </button>
         <button onClick={onDownloadWav} disabled={!canDownloadWav}>
           Download WAV

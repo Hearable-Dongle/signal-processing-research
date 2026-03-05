@@ -58,6 +58,7 @@ class MockAudioContext {
 test("speaker interaction emits select and adjust messages", async () => {
   const user = userEvent.setup();
   (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
+  const closeSpy = vi.spyOn(MockAudioContext.prototype, "close");
   (globalThis as unknown as { AudioContext: typeof AudioContext }).AudioContext = MockAudioContext as unknown as typeof AudioContext;
   globalThis.fetch = vi.fn().mockResolvedValue({
     ok: true,
@@ -94,4 +95,8 @@ test("speaker interaction emits select and adjust messages", async () => {
   const messages = ws.sent.map((s) => JSON.parse(s));
   expect(messages.some((m) => m.type === "select_speaker" && m.speaker_id === 9)).toBe(true);
   expect(messages.some((m) => m.type === "adjust_speaker_gain" && m.speaker_id === 9 && m.delta_db_step === 1)).toBe(true);
+
+  await user.click(screen.getByRole("button", { name: "Kill Current Run" }));
+  expect(closeSpy).toHaveBeenCalled();
+  expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[0]).includes("/stop"))).toBe(true);
 });

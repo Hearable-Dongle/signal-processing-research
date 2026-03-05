@@ -6,6 +6,7 @@ import { SceneLauncher } from "./SceneLauncher";
 test("latency controls invoke callback", async () => {
   const user = userEvent.setup();
   const onLatency = vi.fn();
+  const onKill = vi.fn();
 
   render(
     <SceneLauncher
@@ -13,6 +14,8 @@ test("latency controls invoke callback", async () => {
       defaultScenePath="x.json"
       onStart={() => undefined}
       onStop={() => undefined}
+      onKillRun={onKill}
+      canKillRun={true}
       onDownloadWav={() => undefined}
       canDownloadWav={false}
       latencyMs={180}
@@ -26,4 +29,7 @@ test("latency controls invoke callback", async () => {
   await user.click(slider);
 
   expect(onLatency).toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "Kill Current Run" }));
+  expect(onKill).toHaveBeenCalledTimes(1);
 });

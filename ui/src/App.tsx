@@ -38,6 +38,14 @@ export default function App() {
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
 
+  function resetLocalSessionState(nextStatus: string): void {
+    ws.close();
+    audioRef.current.stop();
+    setPlaybackStats(DEFAULT_PLAYBACK_STATS);
+    setSelectedSpeakerId(null);
+    setStatus(nextStatus);
+  }
+
   const ws = useMemo(
     () =>
       new DemoWsClient({
@@ -93,11 +101,20 @@ export default function App() {
     if (sessionId) {
       await fetch(`http://localhost:8000/api/session/${sessionId}/stop`, { method: "POST" });
     }
-    ws.close();
-    audioRef.current.stop();
-    setPlaybackStats(DEFAULT_PLAYBACK_STATS);
-    setStatus("stopped");
-    setSelectedSpeakerId(null);
+    resetLocalSessionState("stopped");
+  }
+
+  async function killCurrentRun(): Promise<void> {
+    setStatus("stopping");
+    const sid = sessionId;
+    resetLocalSessionState("stopped");
+    if (sid) {
+      try {
+        await fetch(`http://localhost:8000/api/session/${sid}/stop`, { method: "POST" });
+      } catch {
+        // Local teardown is authoritative for kill; backend stop is best effort.
+      }
+    }
   }
 
   function onLatencyMsChange(nextLatencyMs: number): void {
@@ -148,6 +165,8 @@ export default function App() {
           defaultScenePath={DEFAULT_SCENE}
           onStart={startSession}
           onStop={stopSession}
+          onKillRun={killCurrentRun}
+          canKillRun={status === "running" || status === "starting" || status === "stopping"}
           onDownloadWav={downloadWav}
           canDownloadWav={capturedAudioRef.current.length > 0}
           latencyMs={latencyMs}
