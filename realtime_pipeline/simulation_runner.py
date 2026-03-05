@@ -78,6 +78,24 @@ def run_simulation_pipeline(
 
     enhanced = np.concatenate(enhanced_parts)[: mic_audio.shape[0]] if enhanced_parts else np.zeros(mic_audio.shape[0], dtype=np.float32)
     sf.write(out_root / "enhanced_fast_path.wav", enhanced, cfg.sample_rate_hz)
+    raw_mix_mean = np.mean(np.asarray(mic_audio, dtype=np.float64), axis=1).astype(np.float32, copy=False)
+    sf.write(out_root / "raw_mix_mean.wav", raw_mix_mean, cfg.sample_rate_hz)
+
+    final_speaker_map = pipe.shared_state.get_speaker_map_snapshot()
+    speaker_map_rows = [
+        {
+            "speaker_id": int(v.speaker_id),
+            "direction_degrees": float(v.direction_degrees),
+            "gain_weight": float(v.gain_weight),
+            "confidence": float(v.confidence),
+            "active": bool(v.active),
+            "activity_confidence": float(v.activity_confidence),
+            "updated_at_ms": float(v.updated_at_ms),
+        }
+        for v in final_speaker_map.values()
+    ]
+    with (out_root / "speaker_map_final.json").open("w", encoding="utf-8") as f:
+        json.dump({"speakers": speaker_map_rows}, f, indent=2)
 
     stats = pipe.stats_snapshot()
     summary = {
@@ -109,6 +127,7 @@ def run_simulation_pipeline(
         "beamforming_mode": str(cfg.beamforming_mode),
         "output_normalization_enabled": bool(cfg.output_normalization_enabled),
         "output_allow_amplification": bool(cfg.output_allow_amplification),
+        "speaker_map_final": speaker_map_rows,
     }
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as f:
