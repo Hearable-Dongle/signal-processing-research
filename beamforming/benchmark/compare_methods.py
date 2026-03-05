@@ -86,43 +86,31 @@ def _plot_method_bars(summary_rows: list[dict], out_dir: Path) -> None:
         plt.close(fig)
 
 
-def _plot_waveforms(scene_name: str, ref: np.ndarray, raw: np.ndarray, method_to_audio: dict[str, np.ndarray], fs: int, out_dir: Path) -> None:
+def _plot_spectrogram_grid(scene_name: str, method_to_audio: dict[str, np.ndarray], fs: int, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    take = min(len(raw), int(2.0 * fs))
-    t = np.arange(take) / float(fs)
-    ordered_methods = sorted(method_to_audio.keys())
-    rows = 2 + len(ordered_methods)
-    fig, axes = plt.subplots(rows, 1, figsize=(13, 2.2 * rows), sharex=True)
-    axes[0].plot(t, raw[:take], linewidth=1.0, color="#555")
-    axes[0].set_ylabel("raw")
-    axes[0].grid(alpha=0.2)
-    axes[0].set_title(f"{scene_name}: aligned waveforms (first 2s)")
-
-    axes[1].plot(t, ref[:take], linewidth=1.0, color="#000")
-    axes[1].set_ylabel("clean_ref")
-    axes[1].grid(alpha=0.2)
-
-    for idx, method in enumerate(ordered_methods, start=2):
+    ordered = sorted(method_to_audio.keys())
+    n = len(ordered)
+    cols = 2
+    rows = int(np.ceil(n / cols))
+    fig, axes = plt.subplots(rows, cols, figsize=(12, 3.2 * rows), squeeze=False)
+    for i, method in enumerate(ordered):
+        r = i // cols
+        c = i % cols
+        ax = axes[r][c]
         audio = method_to_audio[method]
-        axes[idx].plot(t, audio[:take], linewidth=1.0)
-        axes[idx].set_ylabel(method)
-        axes[idx].grid(alpha=0.2)
+        ax.specgram(audio, NFFT=512, Fs=fs, noverlap=256, cmap="viridis")
+        ax.set_title(method)
+        ax.set_xlabel("time (s)")
+        ax.set_ylabel("Hz")
 
-    axes[-1].set_xlabel("seconds")
+    for j in range(n, rows * cols):
+        r = j // cols
+        c = j % cols
+        axes[r][c].axis("off")
+
+    fig.suptitle(f"{scene_name}: beamformer spectrograms", y=1.02)
     fig.tight_layout()
-    fig.savefig(out_dir / f"{_slug(scene_name)}_waveforms_aligned_subplots.png", dpi=160)
-    plt.close(fig)
-
-
-def _plot_spectrogram(scene_name: str, method: str, audio: np.ndarray, fs: int, out_dir: Path) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.specgram(audio, NFFT=512, Fs=fs, noverlap=256, cmap="viridis")
-    ax.set_title(f"{scene_name}: {method} spectrogram")
-    ax.set_xlabel("time (s)")
-    ax.set_ylabel("frequency (Hz)")
-    fig.tight_layout()
-    fig.savefig(out_dir / f"{_slug(scene_name)}_{_slug(method)}_spectrogram.png", dpi=160)
+    fig.savefig(out_dir / f"{_slug(scene_name)}_spectrograms_grid.png", dpi=160)
     plt.close(fig)
 
 
@@ -143,41 +131,56 @@ def _source_doa_rows(scene_path: Path) -> list[dict]:
     return out
 
 
-def _plot_beamformer_shape(scene_name: str, method: str, speaker_rows: list[dict], source_rows: list[dict], out_dir: Path) -> None:
+def _plot_beamformer_shape_grid(scene_name: str, method_to_speakers: dict[str, list[dict]], source_rows: list[dict], out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(method_to_speakers.keys())
+    n = len(ordered)
+    cols = 2
+    rows = int(np.ceil(n / cols))
+    fig, axes = plt.subplots(rows, cols, figsize=(12, 4.8 * rows), subplot_kw={"projection": "polar"}, squeeze=False)
+
     theta_deg = np.linspace(0.0, 360.0, 720, endpoint=False)
-    response = np.zeros_like(theta_deg, dtype=float)
     sigma_deg = 16.0
-    for row in speaker_rows:
-        doa = float(row.get("direction_degrees", 0.0))
-        gain = float(max(0.0, row.get("gain_weight", 0.0)))
-        d = ((theta_deg - doa + 180.0) % 360.0) - 180.0
-        response += gain * np.exp(-0.5 * (d / sigma_deg) ** 2)
-    if float(np.max(response)) > 0:
-        response = response / float(np.max(response))
+    for i, method in enumerate(ordered):
+        r = i // cols
+        c = i % cols
+        ax = axes[r][c]
+        speaker_rows = method_to_speakers[method]
+        response = np.zeros_like(theta_deg, dtype=float)
+        for row in speaker_rows:
+            doa = float(row.get("direction_degrees", 0.0))
+            gain = float(max(0.0, row.get("gain_weight", 0.0)))
+            d = ((theta_deg - doa + 180.0) % 360.0) - 180.0
+            response += gain * np.exp(-0.5 * (d / sigma_deg) ** 2)
+        if float(np.max(response)) > 0:
+            response = response / float(np.max(response))
+        ax.plot(np.deg2rad(theta_deg), response, linewidth=1.4, label="beamformer_shape_proxy")
 
-    fig = plt.figure(figsize=(8, 7))
-    ax = fig.add_subplot(111, projection="polar")
-    ax.plot(np.deg2rad(theta_deg), response, linewidth=1.4, label="beamformer_shape_proxy")
+        for row in speaker_rows:
+            doa = float(row.get("direction_degrees", 0.0))
+            gain = float(max(0.0, row.get("gain_weight", 0.0)))
+            ax.scatter(np.deg2rad(doa), max(0.05, min(1.2, gain)), c="tab:blue", marker="o", s=36, label="identified_speaker")
 
-    for row in speaker_rows:
-        doa = float(row.get("direction_degrees", 0.0))
-        gain = float(max(0.0, row.get("gain_weight", 0.0)))
-        ax.scatter(np.deg2rad(doa), max(0.05, min(1.2, gain)), c="tab:blue", marker="o", s=36, label="identified_speaker")
+        for row in source_rows:
+            marker = "x" if row.get("classification", "") == "signal" else "+"
+            ax.scatter(np.deg2rad(float(row["doa_deg"])), 1.1, c="tab:red", marker=marker, s=44, label="scene_source")
 
-    for row in source_rows:
-        marker = "x" if row.get("classification", "") == "signal" else "+"
-        ax.scatter(np.deg2rad(float(row["doa_deg"])), 1.1, c="tab:red", marker=marker, s=44, label="scene_source")
+        handles, labels = ax.get_legend_handles_labels()
+        dedup: dict[str, object] = {}
+        for h, l in zip(handles, labels):
+            if l not in dedup:
+                dedup[l] = h
+        ax.legend(dedup.values(), dedup.keys(), loc="upper right", bbox_to_anchor=(1.25, 1.15), fontsize=7)
+        ax.set_title(method)
 
-    handles, labels = ax.get_legend_handles_labels()
-    dedup: dict[str, object] = {}
-    for h, l in zip(handles, labels):
-        if l not in dedup:
-            dedup[l] = h
-    ax.legend(dedup.values(), dedup.keys(), loc="upper right", bbox_to_anchor=(1.25, 1.15), fontsize=8)
-    ax.set_title(f"{scene_name}: {method} beamformer shape + identified/source directions")
+    for j in range(n, rows * cols):
+        r = j // cols
+        c = j % cols
+        axes[r][c].axis("off")
+
+    fig.suptitle(f"{scene_name}: beamformer shape + identified/source directions", y=1.02)
     fig.tight_layout()
-    fig.savefig(out_dir / f"{_slug(scene_name)}_{_slug(method)}_beamformer_shape.png", dpi=160)
+    fig.savefig(out_dir / f"{_slug(scene_name)}_beamformer_shapes_grid.png", dpi=160)
     plt.close(fig)
 
 
@@ -213,11 +216,15 @@ def main() -> None:
     rows: list[dict] = []
     sanity_rows: list[dict] = []
     per_scene_outputs: dict[str, dict[str, np.ndarray]] = defaultdict(dict)
+    per_scene_speaker_rows: dict[str, dict[str, list[dict]]] = defaultdict(dict)
 
     for scene_path in scene_paths:
         scene_name = scene_path.stem
         ref, raw, fs = _load_ref_and_raw(scene_path)
         source_rows = _source_doa_rows(scene_path)
+        raw_out = out_dir / "runs" / "raw_input" / scene_name
+        raw_out.mkdir(parents=True, exist_ok=True)
+        sf.write(raw_out / "raw_mix_mean.wav", raw.astype(np.float32), fs)
         for method in args.methods:
             run_dir = out_dir / "runs" / _slug(method) / scene_name
             summary = run_simulation_pipeline(
@@ -227,10 +234,10 @@ def main() -> None:
                 beamforming_mode=method,
                 output_normalization_enabled=not args.disable_output_normalization,
                 output_allow_amplification=bool(args.allow_output_amplification),
+                write_raw_mix_output=False,
             )
             proc, sr = load_audio_mono(str(run_dir / "enhanced_fast_path.wav"))
             n = min(len(ref), len(raw), len(proc))
-            sf.write(run_dir / "raw_mix_mean.wav", raw[:n].astype(np.float32), int(sr if sr > 0 else fs))
             bundle = compute_metric_bundle(
                 clean_ref=ref[:n],
                 raw_audio=raw[:n],
@@ -238,6 +245,7 @@ def main() -> None:
                 sample_rate=int(sr if sr > 0 else fs),
             )
             per_scene_outputs[scene_name][method] = proc[:n]
+            per_scene_speaker_rows[scene_name][method] = list(summary.get("speaker_map_final", []))
             rows.append(
                 {
                     "scene": scene_name,
@@ -268,21 +276,16 @@ def main() -> None:
                     ),
                 }
             )
-            _plot_spectrogram(scene_name, method, proc[:n], int(sr if sr > 0 else fs), out_dir / "visualizations")
-            _plot_beamformer_shape(
-                scene_name=scene_name,
-                method=method,
-                speaker_rows=list(summary.get("speaker_map_final", [])),
-                source_rows=source_rows,
-                out_dir=out_dir / "visualizations",
-            )
-
-        _plot_waveforms(
+        _plot_spectrogram_grid(
             scene_name=scene_name,
-            ref=ref,
-            raw=raw,
             method_to_audio=per_scene_outputs[scene_name],
             fs=fs,
+            out_dir=out_dir / "visualizations",
+        )
+        _plot_beamformer_shape_grid(
+            scene_name=scene_name,
+            method_to_speakers=per_scene_speaker_rows[scene_name],
+            source_rows=source_rows,
             out_dir=out_dir / "visualizations",
         )
 

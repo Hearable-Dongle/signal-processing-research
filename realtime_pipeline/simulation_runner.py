@@ -34,6 +34,7 @@ def run_simulation_pipeline(
     beamforming_mode: str = "mvdr_fd",
     output_normalization_enabled: bool = True,
     output_allow_amplification: bool = False,
+    write_raw_mix_output: bool = True,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -79,7 +80,8 @@ def run_simulation_pipeline(
     enhanced = np.concatenate(enhanced_parts)[: mic_audio.shape[0]] if enhanced_parts else np.zeros(mic_audio.shape[0], dtype=np.float32)
     sf.write(out_root / "enhanced_fast_path.wav", enhanced, cfg.sample_rate_hz)
     raw_mix_mean = np.mean(np.asarray(mic_audio, dtype=np.float64), axis=1).astype(np.float32, copy=False)
-    sf.write(out_root / "raw_mix_mean.wav", raw_mix_mean, cfg.sample_rate_hz)
+    if write_raw_mix_output:
+        sf.write(out_root / "raw_mix_mean.wav", raw_mix_mean, cfg.sample_rate_hz)
 
     final_speaker_map = pipe.shared_state.get_speaker_map_snapshot()
     speaker_map_rows = [
