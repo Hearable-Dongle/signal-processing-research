@@ -1,8 +1,9 @@
 import { speakerColor } from "../utils/color";
-import type { Speaker } from "../types/contracts";
+import type { GroundTruthSpeaker, Speaker } from "../types/contracts";
 
 type Props = {
   speakers: Speaker[];
+  groundTruth: GroundTruthSpeaker[];
   selectedSpeakerId: number | null;
   onSpeakerTap: (speakerId: number) => void;
 };
@@ -15,7 +16,7 @@ function polarToXY(directionDeg: number): { x: number; y: number } {
   return { x, y };
 }
 
-export function SpeakerStage({ speakers, selectedSpeakerId, onSpeakerTap }: Props) {
+export function SpeakerStage({ speakers, groundTruth, selectedSpeakerId, onSpeakerTap }: Props) {
   return (
     <section className="panel speaker-stage">
       <h2>Speaker Stage</h2>
@@ -38,6 +39,20 @@ export function SpeakerStage({ speakers, selectedSpeakerId, onSpeakerTap }: Prop
             </button>
           );
         })}
+      </div>
+      <div className="ground-truth-block">
+        <h3>Ground Truth</h3>
+        {groundTruth.length === 0 ? (
+          <p className="ground-truth-empty">No ground truth loaded.</p>
+        ) : (
+          <div className="ground-truth-list">
+            {groundTruth.map((gt) => (
+              <span key={gt.source_id} className="ground-truth-item">
+                src {gt.source_id}: {gt.direction_degrees.toFixed(1)}°
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

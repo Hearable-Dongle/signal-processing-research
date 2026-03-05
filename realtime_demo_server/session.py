@@ -39,6 +39,21 @@ def _ratio_to_db(ratio: float) -> float:
     return float(20.0 * math.log10(max(float(ratio), 1e-6)))
 
 
+def _normalize_angle_deg(v: float) -> float:
+    return float(v % 360.0)
+
+
+def _ground_truth_from_scene(scene_cfg: SimulationConfig) -> list[dict[str, float | int]]:
+    mic_center = scene_cfg.microphone_array.mic_center
+    out: list[dict[str, float | int]] = []
+    for idx, src in enumerate(scene_cfg.audio.sources):
+        dx = float(src.loc[0] - mic_center[0])
+        dy = float(src.loc[1] - mic_center[1])
+        doa = _normalize_angle_deg(np.degrees(np.arctan2(dy, dx)))
+        out.append({"source_id": int(idx), "direction_degrees": float(doa)})
+    return out
+
+
 class DemoSession:
     def __init__(self, req: SessionStartRequest):
         self.session_id = uuid.uuid4().hex[:12]
@@ -67,6 +82,7 @@ class DemoSession:
 
         self._observations: list[dict[str, Any]] = []
         self._obs_idx = 0
+        self._ground_truth_speakers: list[dict[str, float | int]] = []
 
     @property
     def status(self) -> str:
@@ -203,7 +219,9 @@ class DemoSession:
             )
             for v in speaker_map.values()
         ]
-        msg = SpeakerStateMessage(timestamp_ms=_now_ms(), speakers=speakers).model_dump()
+        with self._lock:
+            ground_truth = list(self._ground_truth_speakers)
+        msg = SpeakerStateMessage(timestamp_ms=_now_ms(), speakers=speakers, ground_truth=ground_truth).model_dump()
 
         nearest = self._nearest_speaker_id(speakers)
         with self._lock:
@@ -309,6 +327,8 @@ class DemoSession:
         try:
             sim_cfg = SimulationConfig.from_file(self.req.scene_config_path)
             mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
+            with self._lock:
+                self._ground_truth_speakers = _ground_truth_from_scene(sim_cfg)
 
             cfg = PipelineConfig(
                 sample_rate_hz=int(sim_cfg.audio.fs),

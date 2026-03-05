@@ -20,6 +20,7 @@ function Harness() {
             gain_weight: 1.0,
           },
         ]}
+        groundTruth={[{ source_id: 0, direction_degrees: 30 }]}
         selectedSpeakerId={selected}
         onSpeakerTap={(id) => setSelected(id)}
       />

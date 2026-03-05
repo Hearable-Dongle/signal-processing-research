@@ -9,11 +9,17 @@ export type Speaker = {
   gain_weight: number;
 };
 
+export type GroundTruthSpeaker = {
+  source_id: number;
+  direction_degrees: number;
+};
+
 export type SpeakerStateMessage = {
   schema_version: "v1";
   type: "speaker_state";
   timestamp_ms: number;
   speakers: Speaker[];
+  ground_truth: GroundTruthSpeaker[];
 };
 
 export type MetricsMessage = {

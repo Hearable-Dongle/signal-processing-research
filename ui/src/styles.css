@@ -103,6 +103,37 @@ button:disabled {
   opacity: 0.35;
 }
 
+.ground-truth-block {
+  margin-top: 0.8rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #ead9cd;
+}
+
+.ground-truth-block h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.ground-truth-empty {
+  margin: 0;
+  color: #667;
+  font-size: 0.88rem;
+}
+
+.ground-truth-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.ground-truth-item {
+  font-size: 0.82rem;
+  padding: 0.2rem 0.45rem;
+  background: #f5e5d8;
+  border: 1px solid #e2c5b0;
+  border-radius: 999px;
+}
+
 .popover {
   position: fixed;
   right: 1rem;

@@ -8,7 +8,13 @@ import { SceneLauncher } from "./components/SceneLauncher";
 import { SpeakerControlPopover } from "./components/SpeakerControlPopover";
 import { SpeakerStage } from "./components/SpeakerStage";
 import { WaveformTimeline } from "./components/WaveformTimeline";
-import { SCHEMA_VERSION, type MetricsMessage, type ServerMessage, type Speaker } from "./types/contracts";
+import {
+  SCHEMA_VERSION,
+  type GroundTruthSpeaker,
+  type MetricsMessage,
+  type ServerMessage,
+  type Speaker,
+} from "./types/contracts";
 
 const DEFAULT_SCENE = "simulation/simulations/configs/library_scene/library_k1_scene00.json";
 const AUDIO_HEADER_BYTES = 16;
@@ -46,6 +52,7 @@ export default function App() {
   const [status, setStatus] = useState("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
+  const [groundTruth, setGroundTruth] = useState<GroundTruthSpeaker[]>([]);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<number | null>(null);
   const [gainBySpeaker, setGainBySpeaker] = useState<Record<number, number>>({});
   const [metrics, setMetrics] = useState<MetricsMessage | null>(null);
@@ -80,6 +87,7 @@ export default function App() {
     stopOutputPlayback();
     setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setSelectedSpeakerId(null);
+    setGroundTruth([]);
     setPlayheadMs(0);
     setStatus(nextStatus);
   }
@@ -90,6 +98,7 @@ export default function App() {
         onServerMessage: (msg: ServerMessage) => {
           if (msg.type === "speaker_state") {
             setSpeakers(msg.speakers);
+            setGroundTruth(msg.ground_truth ?? []);
           }
           if (msg.type === "metrics") {
             setMetrics(msg);
@@ -251,7 +260,12 @@ export default function App() {
           latencyMs={latencyMs}
           onLatencyMsChange={onLatencyMsChange}
         />
-        <SpeakerStage speakers={speakers} selectedSpeakerId={selectedSpeakerId} onSpeakerTap={selectSpeaker} />
+        <SpeakerStage
+          speakers={speakers}
+          groundTruth={groundTruth}
+          selectedSpeakerId={selectedSpeakerId}
+          onSpeakerTap={selectSpeaker}
+        />
         <MetricsPanel metrics={metrics} playback={playbackStats} />
       </div>
 

@@ -45,11 +45,17 @@ class SpeakerStateItem(BaseModel):
     gain_weight: float
 
 
+class GroundTruthSpeakerItem(BaseModel):
+    source_id: int
+    direction_degrees: float
+
+
 class SpeakerStateMessage(BaseModel):
     schema_version: Literal["v1"] = SCHEMA_VERSION
     type: Literal["speaker_state"] = "speaker_state"
     timestamp_ms: float
     speakers: list[SpeakerStateItem]
+    ground_truth: list[GroundTruthSpeakerItem] = []
 
 
 class MetricsMessage(BaseModel):
