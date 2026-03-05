@@ -1,0 +1,2 @@
+Cleanup beamforming pipeline and docs.
+Remove legacy mask NN path and simplify config/runtime wiring.

@@ -7,12 +7,9 @@ import random
 import sys
 from logging import Formatter, Logger, StreamHandler
 from pathlib import Path
-from typing import Any
 
 import numpy as np
-import torch
 from numpy.random import Generator
-from numpy.typing import NDArray
 
 
 @dataclasses.dataclass
@@ -71,14 +68,10 @@ class Config:
         atexit.register(self.close)
 
         self.set_all_seeds(self.__project_config.get("seed", 42))
-        self.__device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.__device = "cpu"
         self.__log.info(f"Using device: {self.__device}")
 
     def set_all_seeds(self, seed: int) -> None:
-        torch.manual_seed(seed)  # pyright: ignore [reportUnknownMemberType]
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
         random.seed(seed)
         self.__rng = np.random.default_rng(seed=seed)
 
@@ -91,7 +84,7 @@ class Config:
         return self.__rng
 
     @property
-    def device(self) -> torch.device:
+    def device(self) -> str:
         return self.__device
 
     @property
