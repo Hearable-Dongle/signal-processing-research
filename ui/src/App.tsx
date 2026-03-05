@@ -7,12 +7,15 @@ import { MetricsPanel } from "./components/MetricsPanel";
 import { SceneLauncher } from "./components/SceneLauncher";
 import { SpeakerControlPopover } from "./components/SpeakerControlPopover";
 import { SpeakerStage } from "./components/SpeakerStage";
+import { WaveformTimeline } from "./components/WaveformTimeline";
 import { SCHEMA_VERSION, type MetricsMessage, type ServerMessage, type Speaker } from "./types/contracts";
 
 const DEFAULT_SCENE = "simulation/simulations/configs/library_scene/library_k1_scene00.json";
 const AUDIO_HEADER_BYTES = 16;
 const AUDIO_SAMPLE_RATE = 16000;
-const DEFAULT_LATENCY_MS = 180;
+const DEFAULT_LATENCY_MS = 220;
+const WAVEFORM_BINS = 800;
+
 const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
   play_state: "buffering",
   buffered_ms: 0,
@@ -25,6 +28,20 @@ const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
   parse_error_count: 0,
 };
 
+function accumulateWaveformBin(samples: Float32Array): number {
+  if (!samples.length) {
+    return 0;
+  }
+  let peak = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const v = Math.abs(samples[i]);
+    if (v > peak) {
+      peak = v;
+    }
+  }
+  return Math.max(0, Math.min(1, peak));
+}
+
 export default function App() {
   const [status, setStatus] = useState("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -34,15 +51,19 @@ export default function App() {
   const [metrics, setMetrics] = useState<MetricsMessage | null>(null);
   const [latencyMs, setLatencyMs] = useState(DEFAULT_LATENCY_MS);
   const [playbackStats, setPlaybackStats] = useState<PlaybackStats>(DEFAULT_PLAYBACK_STATS);
+  const [waveformBins, setWaveformBins] = useState<number[]>([]);
+  const [playheadMs, setPlayheadMs] = useState(0);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
+  const totalSamplesRef = useRef(0);
 
   function resetLocalSessionState(nextStatus: string): void {
     ws.close();
     audioRef.current.stop();
     setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setSelectedSpeakerId(null);
+    setPlayheadMs(0);
     setStatus(nextStatus);
   }
 
@@ -66,10 +87,18 @@ export default function App() {
             const copy = new Float32Array(payload.slice(0));
             if (copy.length > 0) {
               capturedAudioRef.current.push(copy);
+              totalSamplesRef.current += copy.length;
+              const amp = accumulateWaveformBin(copy);
+              setWaveformBins((prev) => {
+                const next = prev.length >= WAVEFORM_BINS ? prev.slice(prev.length - WAVEFORM_BINS + 1) : [...prev];
+                next.push(amp);
+                return next;
+              });
             }
           }
           audioRef.current.pushPacket(chunk);
           setPlaybackStats(audioRef.current.getStats());
+          setPlayheadMs(audioRef.current.getPlaybackPositionMs());
         },
         onClose: () => setStatus((s) => (s === "running" ? "disconnected" : s)),
       }),
@@ -79,6 +108,9 @@ export default function App() {
   async function startSession(scenePath: string): Promise<void> {
     setStatus("starting");
     capturedAudioRef.current = [];
+    totalSamplesRef.current = 0;
+    setWaveformBins([]);
+    setPlayheadMs(0);
     const resp = await fetch("http://localhost:8000/api/session/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -156,6 +188,8 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  const totalDurationMs = (totalSamplesRef.current / AUDIO_SAMPLE_RATE) * 1000;
+
   return (
     <main className="app-shell">
       <h1>Realtime Speaker UI Demo</h1>
@@ -175,6 +209,9 @@ export default function App() {
         <SpeakerStage speakers={speakers} selectedSpeakerId={selectedSpeakerId} onSpeakerTap={selectSpeaker} />
         <MetricsPanel metrics={metrics} playback={playbackStats} />
       </div>
+
+      <WaveformTimeline bins={waveformBins} totalDurationMs={totalDurationMs} playheadMs={playheadMs} />
+
       {selectedSpeakerId !== null && (
         <SpeakerControlPopover
           speakerId={selectedSpeakerId}

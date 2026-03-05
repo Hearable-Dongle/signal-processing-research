@@ -76,7 +76,9 @@ describe("PlaybackQueueConsumer", () => {
     const started = c.drain(0);
     expect(started.length).toBeGreaterThan(0);
 
-    const stalled = c.drain(2000);
+    c.drain(2000);
+    c.drain(2010);
+    const stalled = c.drain(2020);
     expect(stalled).toHaveLength(0);
     expect(c.getStats().play_state).toBe("buffering");
     expect(c.getStats().rebuffer_count).toBeGreaterThan(0);

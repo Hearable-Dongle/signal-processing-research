@@ -9,6 +9,7 @@ export type ConsumerConfig = {
   rebufferThresholdMs: number;
   lateDropMs: number;
   monotonicEpsilonMs: number;
+  rebufferConsecutiveLowCount: number;
 };
 
 export type ConsumerPacket<T> = {
@@ -35,19 +36,20 @@ export type ConsumerStats = {
   startup_gate_wait_ms: number;
 };
 
-const DEFAULT_TARGET_MS = 180;
+const DEFAULT_TARGET_MS = 220;
 
 function defaultConfig(targetLatencyMs: number): ConsumerConfig {
   const target = Math.max(1, targetLatencyMs);
   return {
     targetLatencyMs: target,
     startThresholdMs: target,
-    minBufferMs: Math.max(20, Math.round(target * 0.6)),
-    maxBufferMs: Math.max(target + 20, Math.round(target * 1.8)),
+    minBufferMs: Math.max(40, Math.round(target * 0.6)),
+    maxBufferMs: Math.max(300, Math.round(target * 1.8)),
     minLeadMs: 10,
     rebufferThresholdMs: 20,
-    lateDropMs: Math.max(40, Math.round(target * 1.2)),
+    lateDropMs: Math.max(50, Math.round(target * 1.2)),
     monotonicEpsilonMs: 1,
+    rebufferConsecutiveLowCount: 3,
   };
 }
 
@@ -60,6 +62,7 @@ export class PlaybackQueueConsumer<T> {
   private anchorPlayoutTimeSec = 0;
   private lastScheduledEndSec = 0;
   private startupBufferingStartMs: number | null = null;
+  private lowBufferStreak = 0;
 
   private stats: ConsumerStats = {
     play_state: "buffering",
@@ -84,6 +87,7 @@ export class PlaybackQueueConsumer<T> {
     this.anchorPlayoutTimeSec = 0;
     this.lastScheduledEndSec = 0;
     this.startupBufferingStartMs = null;
+    this.lowBufferStreak = 0;
     this.stats = {
       play_state: "buffering",
       buffered_ms: 0,
@@ -104,13 +108,13 @@ export class PlaybackQueueConsumer<T> {
       partial.startThresholdMs = nextTarget;
     }
     if (partial.targetLatencyMs !== undefined && partial.minBufferMs === undefined) {
-      partial.minBufferMs = Math.max(20, Math.round(nextTarget * 0.6));
+      partial.minBufferMs = Math.max(40, Math.round(nextTarget * 0.6));
     }
     if (partial.targetLatencyMs !== undefined && partial.maxBufferMs === undefined) {
-      partial.maxBufferMs = Math.max(nextTarget + 20, Math.round(nextTarget * 1.8));
+      partial.maxBufferMs = Math.max(300, Math.round(nextTarget * 1.8));
     }
     if (partial.targetLatencyMs !== undefined && partial.lateDropMs === undefined) {
-      partial.lateDropMs = Math.max(40, Math.round(nextTarget * 1.2));
+      partial.lateDropMs = Math.max(50, Math.round(nextTarget * 1.2));
     }
 
     this.cfg = {
@@ -156,11 +160,17 @@ export class PlaybackQueueConsumer<T> {
 
     const bufferedAhead = this.computeBufferedAheadMs(nowMs);
     if (bufferedAhead < this.cfg.rebufferThresholdMs) {
-      this.state = "buffering";
-      this.stats.rebuffer_count += 1;
-      this.stats.play_state = "buffering";
-      this.updateBufferedStats(nowMs);
-      return [];
+      this.lowBufferStreak += 1;
+      if (this.lowBufferStreak >= this.cfg.rebufferConsecutiveLowCount) {
+        this.state = "buffering";
+        this.stats.rebuffer_count += 1;
+        this.stats.play_state = "buffering";
+        this.lowBufferStreak = 0;
+        this.updateBufferedStats(nowMs);
+        return [];
+      }
+    } else {
+      this.lowBufferStreak = 0;
     }
 
     const out: ScheduledPacket<T>[] = [];
@@ -214,6 +224,14 @@ export class PlaybackQueueConsumer<T> {
     return { ...this.stats };
   }
 
+  getPlaybackPositionMs(nowMs: number): number {
+    if (this.anchorPacketTsMs === null) {
+      return 0;
+    }
+    const mediaNowMs = this.anchorPacketTsMs + (nowMs / 1000 - this.anchorPlayoutTimeSec) * 1000;
+    return Math.max(0, mediaNowMs);
+  }
+
   private enterPlaying(nowMs: number): void {
     if (!this.queue.length) {
       this.state = "buffering";
@@ -226,6 +244,7 @@ export class PlaybackQueueConsumer<T> {
     this.lastScheduledEndSec = this.anchorPlayoutTimeSec;
     this.state = "playing";
     this.stats.play_state = "playing";
+    this.lowBufferStreak = 0;
     if (this.startupBufferingStartMs !== null) {
       this.stats.startup_gate_wait_ms += Math.max(0, nowMs - this.startupBufferingStartMs);
     }

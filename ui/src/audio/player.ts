@@ -44,9 +44,10 @@ function clampLatencyMs(ms: number): number {
 
 export class RealtimeAudioPlayer {
   private ctx: AudioContext | null = null;
-  private consumer = new PlaybackQueueConsumer<AudioBuffer>({ targetLatencyMs: 180 });
+  private consumer = new PlaybackQueueConsumer<AudioBuffer>({ targetLatencyMs: 220 });
   private packetId = 0;
   private parseErrors = 0;
+  private drainTimerId: number | null = null;
 
   async start(): Promise<void> {
     if (this.ctx) {
@@ -57,9 +58,11 @@ export class RealtimeAudioPlayer {
     this.packetId = 0;
     this.parseErrors = 0;
     this.consumer.reset();
+    this.startDrainTimer();
   }
 
   stop(): void {
+    this.stopDrainTimer();
     if (!this.ctx) {
       return;
     }
@@ -107,6 +110,30 @@ export class RealtimeAudioPlayer {
       ...this.consumer.getStats(),
       parse_error_count: this.parseErrors,
     };
+  }
+
+  getPlaybackPositionMs(): number {
+    if (!this.ctx) {
+      return 0;
+    }
+    return this.consumer.getPlaybackPositionMs(this.ctx.currentTime * 1000);
+  }
+
+  private startDrainTimer(): void {
+    if (this.drainTimerId !== null) {
+      return;
+    }
+    this.drainTimerId = window.setInterval(() => {
+      this.drain();
+    }, 10);
+  }
+
+  private stopDrainTimer(): void {
+    if (this.drainTimerId === null) {
+      return;
+    }
+    window.clearInterval(this.drainTimerId);
+    this.drainTimerId = null;
   }
 
   private drain(): void {
