@@ -53,14 +53,31 @@ export default function App() {
   const [playbackStats, setPlaybackStats] = useState<PlaybackStats>(DEFAULT_PLAYBACK_STATS);
   const [waveformBins, setWaveformBins] = useState<number[]>([]);
   const [playheadMs, setPlayheadMs] = useState(0);
+  const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
   const totalSamplesRef = useRef(0);
+  const outputPlaybackRef = useRef<HTMLAudioElement | null>(null);
+  const outputPlaybackUrlRef = useRef<string | null>(null);
+
+  function stopOutputPlayback(): void {
+    const player = outputPlaybackRef.current;
+    if (player) {
+      player.pause();
+      outputPlaybackRef.current = null;
+    }
+    if (outputPlaybackUrlRef.current) {
+      URL.revokeObjectURL(outputPlaybackUrlRef.current);
+      outputPlaybackUrlRef.current = null;
+    }
+    setIsOutputPlaybackActive(false);
+  }
 
   function resetLocalSessionState(nextStatus: string): void {
     ws.close();
     audioRef.current.stop();
+    stopOutputPlayback();
     setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setSelectedSpeakerId(null);
     setPlayheadMs(0);
@@ -188,6 +205,31 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  async function toggleOutputPlayback(): Promise<void> {
+    if (isOutputPlaybackActive) {
+      stopOutputPlayback();
+      return;
+    }
+    if (!capturedAudioRef.current.length) {
+      return;
+    }
+    stopOutputPlayback();
+    const blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, AUDIO_SAMPLE_RATE);
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    outputPlaybackUrlRef.current = url;
+    outputPlaybackRef.current = audio;
+    audio.onended = () => {
+      stopOutputPlayback();
+    };
+    try {
+      await audio.play();
+      setIsOutputPlaybackActive(true);
+    } catch {
+      stopOutputPlayback();
+    }
+  }
+
   const totalDurationMs = (totalSamplesRef.current / AUDIO_SAMPLE_RATE) * 1000;
 
   return (
@@ -203,6 +245,9 @@ export default function App() {
           canKillRun={status === "running" || status === "starting" || status === "stopping"}
           onDownloadWav={downloadWav}
           canDownloadWav={capturedAudioRef.current.length > 0}
+          onTogglePlayback={toggleOutputPlayback}
+          canPlayOutput={capturedAudioRef.current.length > 0}
+          isPlaybackActive={isOutputPlaybackActive}
           latencyMs={latencyMs}
           onLatencyMsChange={onLatencyMsChange}
         />
