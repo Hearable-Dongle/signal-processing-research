@@ -45,12 +45,32 @@ export function SpeakerStage({ speakers, groundTruth, selectedSpeakerId, onSpeak
         {groundTruth.length === 0 ? (
           <p className="ground-truth-empty">No ground truth loaded.</p>
         ) : (
-          <div className="ground-truth-list">
-            {groundTruth.map((gt) => (
-              <span key={gt.source_id} className="ground-truth-item">
-                src {gt.source_id}: {gt.direction_degrees.toFixed(1)}°
-              </span>
-            ))}
+          <div className="ground-truth-viz-wrap">
+            <div className="ground-truth-room" data-testid="ground-truth-stage">
+              <div className="mic-center" />
+              {groundTruth.map((gt) => {
+                const { x, y } = polarToXY(gt.direction_degrees);
+                return (
+                  <div
+                    key={gt.source_id}
+                    className="ground-truth-dot"
+                    data-testid={`ground-truth-${gt.source_id}`}
+                    style={{ left: `${x}%`, top: `${y}%` }}
+                    aria-label={`ground-truth-${gt.source_id}`}
+                    title={`src ${gt.source_id}: ${gt.direction_degrees.toFixed(1)}°`}
+                  >
+                    {gt.source_id}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="ground-truth-list">
+              {groundTruth.map((gt) => (
+                <span key={gt.source_id} className="ground-truth-item">
+                  src {gt.source_id}: {gt.direction_degrees.toFixed(1)}°
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </div>

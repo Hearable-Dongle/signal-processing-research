@@ -33,6 +33,9 @@ test("speaker tap opens popover", async () => {
   const user = userEvent.setup();
   render(<Harness />);
 
+  expect(screen.getByTestId("ground-truth-stage")).toBeInTheDocument();
+  expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();
+
   await user.click(screen.getByTestId("speaker-4"));
 
   expect(screen.getByRole("dialog", { name: "speaker-4-control" })).toBeInTheDocument();

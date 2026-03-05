@@ -126,6 +126,36 @@ button:disabled {
   gap: 0.4rem;
 }
 
+.ground-truth-viz-wrap {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ground-truth-room {
+  position: relative;
+  width: min(70vw, 260px);
+  height: min(70vw, 260px);
+  margin: 0 auto;
+  border-radius: 50%;
+  border: 2px dashed #d6b8a4;
+  background: radial-gradient(circle, #fff 15%, #f8ece2 75%);
+}
+
+.ground-truth-dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: #fff;
+  background: #355070;
+}
+
 .ground-truth-item {
   font-size: 0.82rem;
   padding: 0.2rem 0.45rem;
