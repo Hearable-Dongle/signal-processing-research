@@ -13,6 +13,8 @@ test("latency controls invoke callback", async () => {
     <SceneLauncher
       status="idle"
       defaultScenePath="x.json"
+      defaultBackgroundNoisePath="noise.wav"
+      defaultBackgroundNoiseGain={0.15}
       onStart={() => undefined}
       onStop={() => undefined}
       onKillRun={onKill}

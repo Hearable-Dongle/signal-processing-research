@@ -17,7 +17,7 @@ from realtime_pipeline.catchup_metrics import compute_catchup_metrics
 from realtime_pipeline.contracts import PipelineConfig
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
 from realtime_pipeline.separation_backends import MockSeparationBackend, build_default_backend
-from simulation.simulation_config import SimulationConfig
+from simulation.simulation_config import SimulationConfig, SimulationSource
 from simulation.simulator import run_simulation
 from simulation.target_policy import iter_target_source_indices
 
@@ -54,6 +54,25 @@ def _ground_truth_from_scene(scene_cfg: SimulationConfig) -> list[dict[str, floa
         doa = _normalize_angle_deg(np.degrees(np.arctan2(dy, dx)))
         out.append({"source_id": int(idx), "direction_degrees": float(doa)})
     return out
+
+
+def _inject_background_noise_source(
+    scene_cfg: SimulationConfig, *, audio_path: str | None, gain: float
+) -> None:
+    path = "" if audio_path is None else str(audio_path).strip()
+    if not path:
+        return
+    room = scene_cfg.room.dimensions
+    # Place background source near a room corner away from mic center for diffuse-like field.
+    loc = [max(0.2, float(room[0]) * 0.15), max(0.2, float(room[1]) * 0.85), 1.4]
+    scene_cfg.audio.sources.append(
+        SimulationSource(
+            loc=loc,
+            audio_path=path,
+            gain=float(np.clip(float(gain), 0.0, 2.0)),
+            classification="noise",
+        )
+    )
 
 
 class DemoSession:
@@ -378,6 +397,11 @@ class DemoSession:
     def _run(self) -> None:
         try:
             sim_cfg = SimulationConfig.from_file(self.req.scene_config_path)
+            _inject_background_noise_source(
+                sim_cfg,
+                audio_path=self.req.background_noise_audio_path,
+                gain=self.req.background_noise_gain,
+            )
             mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
             with self._lock:
                 self._raw_mix_mono = np.mean(mic_audio, axis=1).astype(np.float32, copy=False)

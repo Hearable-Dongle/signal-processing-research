@@ -1,18 +1,19 @@
 import { useMemo } from "react";
 
-type PlaybackSource = "beamformed_output" | "raw_mixed_input";
-
 type Props = {
   beamformedBins: number[];
   beamformedDurationMs: number;
   rawMixedBins: number[];
   rawMixedDurationMs: number;
   playheadMs: number;
-  playbackSource: PlaybackSource;
-  onPlaybackSourceChange: (value: PlaybackSource) => void;
-  onTogglePlayback: () => void;
-  canPlay: boolean;
-  isPlaybackActive: boolean;
+  canPlayBeamformed: boolean;
+  canPauseBeamformed: boolean;
+  isBeamformedPlaying: boolean;
+  onPlayBeamformed: () => void;
+  onPauseBeamformed: () => void;
+  canPlayRawMixed: boolean;
+  isRawMixedPlaying: boolean;
+  onToggleRawMixedPlayback: () => void;
 };
 
 function formatMs(ms: number): string {
@@ -27,25 +28,60 @@ function WaveformTrack({
   bins,
   durationMs,
   playheadMs,
+  canPlay,
+  isPlaying,
+  onTogglePlayback,
+  onPausePlayback,
+  showPauseButton,
+  primaryLabel,
 }: {
   label: string;
   bins: number[];
   durationMs: number;
   playheadMs: number;
+  canPlay: boolean;
+  isPlaying: boolean;
+  onTogglePlayback: () => void;
+  onPausePlayback?: () => void;
+  showPauseButton?: boolean;
+  primaryLabel?: string;
 }) {
-  const points = useMemo(() => {
+  const smoothed = useMemo(() => {
     if (!bins.length) {
-      return "";
+      return [];
     }
-    const n = bins.length;
-    return bins
+    const out = new Array<number>(bins.length);
+    for (let i = 0; i < bins.length; i += 1) {
+      const a = bins[Math.max(0, i - 1)];
+      const b = bins[i];
+      const c = bins[Math.min(bins.length - 1, i + 1)];
+      out[i] = Math.max(0, Math.min(1, (a + 2 * b + c) / 4));
+    }
+    return out;
+  }, [bins]);
+
+  const envelopePath = useMemo(() => {
+    if (!smoothed.length) {
+      return "M 0 50 L 100 50";
+    }
+    const n = smoothed.length;
+    const top = smoothed
       .map((v, i) => {
         const x = (i / Math.max(1, n - 1)) * 100;
-        const y = 50 - Math.max(0, Math.min(1, v)) * 45;
-        return `${x},${y}`;
+        const y = 50 - v * 42;
+        return `${x} ${y}`;
       })
-      .join(" ");
-  }, [bins]);
+      .join(" L ");
+    const bottom = smoothed
+      .map((v, i) => {
+        const idx = n - 1 - i;
+        const x = (idx / Math.max(1, n - 1)) * 100;
+        const y = 50 + smoothed[idx] * 42;
+        return `${x} ${y}`;
+      })
+      .join(" L ");
+    return `M ${top} L ${bottom} Z`;
+  }, [smoothed]);
 
   const playheadPct = durationMs > 0 ? Math.max(0, Math.min(100, (playheadMs / durationMs) * 100)) : 0;
 
@@ -54,7 +90,8 @@ function WaveformTrack({
       <div className="waveform-track-title">{label}</div>
       <div className="waveform-svg-wrap">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="waveform-svg">
-          <polyline points={points || "0,50 100,50"} className="waveform-line" />
+          <path d={envelopePath} className="waveform-envelope" />
+          <line x1={0} y1={50} x2={100} y2={50} className="waveform-midline" />
           <line x1={playheadPct} y1={0} x2={playheadPct} y2={100} className="waveform-playhead" />
         </svg>
       </div>
@@ -63,6 +100,16 @@ function WaveformTrack({
         <span>
           {formatMs(playheadMs)} / {formatMs(durationMs)}
         </span>
+      </div>
+      <div className="waveform-track-actions">
+        <button onClick={onTogglePlayback} disabled={!canPlay}>
+          {primaryLabel ?? (isPlaying ? `Stop ${label}` : `Play ${label}`)}
+        </button>
+        {showPauseButton && (
+          <button onClick={onPausePlayback} disabled={!isPlaying}>
+            Pause {label}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -74,13 +121,15 @@ export function WaveformTimeline({
   rawMixedBins,
   rawMixedDurationMs,
   playheadMs,
-  playbackSource,
-  onPlaybackSourceChange,
-  onTogglePlayback,
-  canPlay,
-  isPlaybackActive,
+  canPlayBeamformed,
+  canPauseBeamformed,
+  isBeamformedPlaying,
+  onPlayBeamformed,
+  onPauseBeamformed,
+  canPlayRawMixed,
+  isRawMixedPlaying,
+  onToggleRawMixedPlayback,
 }: Props) {
-
   return (
     <section className="waveform-panel" aria-label="Waveform timeline">
       <WaveformTrack
@@ -88,23 +137,22 @@ export function WaveformTimeline({
         bins={beamformedBins}
         durationMs={beamformedDurationMs}
         playheadMs={playheadMs}
+        canPlay={canPlayBeamformed}
+        isPlaying={isBeamformedPlaying}
+        onTogglePlayback={onPlayBeamformed}
+        onPausePlayback={onPauseBeamformed}
+        showPauseButton={canPauseBeamformed || isBeamformedPlaying}
+        primaryLabel="Play Beamformed output"
       />
-      <WaveformTrack label="Raw mixed input" bins={rawMixedBins} durationMs={rawMixedDurationMs} playheadMs={playheadMs} />
-      <div className="waveform-controls">
-        <label htmlFor="playback-source">Playback source</label>
-        <select
-          id="playback-source"
-          aria-label="Playback source"
-          value={playbackSource}
-          onChange={(e) => onPlaybackSourceChange(e.target.value as PlaybackSource)}
-        >
-          <option value="beamformed_output">Beamformed output</option>
-          <option value="raw_mixed_input">Raw mixed input</option>
-        </select>
-        <button onClick={onTogglePlayback} disabled={!canPlay}>
-          {isPlaybackActive ? "Stop Playback" : "Play Output"}
-        </button>
-      </div>
+      <WaveformTrack
+        label="Raw mixed input"
+        bins={rawMixedBins}
+        durationMs={rawMixedDurationMs}
+        playheadMs={playheadMs}
+        canPlay={canPlayRawMixed}
+        isPlaying={isRawMixedPlaying}
+        onTogglePlayback={onToggleRawMixedPlayback}
+      />
     </section>
   );
 }

@@ -230,27 +230,21 @@ button:disabled {
   height: 100%;
 }
 
-.waveform-line {
-  fill: none;
-  stroke: #6a7a8a;
-  stroke-width: 1.2;
+.waveform-envelope {
+  fill: rgba(75, 106, 132, 0.32);
+  stroke: #4d6f89;
+  stroke-width: 0.7;
+}
+
+.waveform-midline {
+  stroke: #8a939d;
+  stroke-width: 0.45;
+  stroke-dasharray: 1.2 1;
 }
 
 .waveform-playhead {
   stroke: #d0431e;
   stroke-width: 1.2;
-}
-
-.waveform-controls {
-  margin-top: 0.6rem;
-  display: grid;
-  gap: 0.4rem;
-  grid-template-columns: 1fr auto;
-  align-items: end;
-}
-
-.waveform-controls label {
-  grid-column: 1 / -1;
 }
 
 .waveform-times {
@@ -259,4 +253,8 @@ button:disabled {
   margin-top: 0.4rem;
   font-size: 0.9rem;
   color: #4d5560;
+}
+
+.waveform-track-actions {
+  margin-top: 0.45rem;
 }

@@ -9,6 +9,8 @@ SCHEMA_VERSION = "v1"
 
 class SessionStartRequest(BaseModel):
     scene_config_path: str
+    background_noise_audio_path: str | None = None
+    background_noise_gain: float = 0.15
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4

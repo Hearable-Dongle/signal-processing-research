@@ -5,7 +5,9 @@ import type { ProcessingMode } from "../types/contracts";
 type Props = {
   status: string;
   defaultScenePath: string;
-  onStart: (scenePath: string) => void;
+  defaultBackgroundNoisePath: string;
+  defaultBackgroundNoiseGain: number;
+  onStart: (scenePath: string, backgroundNoisePath: string, backgroundNoiseGain: number) => void;
   onStop: () => void;
   onKillRun: () => void;
   canKillRun: boolean;
@@ -20,6 +22,8 @@ type Props = {
 export function SceneLauncher({
   status,
   defaultScenePath,
+  defaultBackgroundNoisePath,
+  defaultBackgroundNoiseGain,
   onStart,
   onStop,
   onKillRun,
@@ -32,6 +36,8 @@ export function SceneLauncher({
   onProcessingModeChange,
 }: Props) {
   const [scenePath, setScenePath] = useState(defaultScenePath);
+  const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
+  const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
@@ -47,6 +53,23 @@ export function SceneLauncher({
         value={scenePath}
         onChange={(e) => setScenePath(e.target.value)}
         placeholder="simulation/simulations/configs/library_scene/library_k1_scene00.json"
+      />
+      <label htmlFor="background-noise">Background noise audio path</label>
+      <input
+        id="background-noise"
+        value={backgroundNoisePath}
+        onChange={(e) => setBackgroundNoisePath(e.target.value)}
+        placeholder="wham_noise/tr/01dc0215_0.22439_01fc0207_-0.22439sp12.wav"
+      />
+      <label htmlFor="background-noise-gain">Background noise gain</label>
+      <input
+        id="background-noise-gain"
+        type="number"
+        min={0}
+        max={2}
+        step={0.05}
+        value={backgroundNoiseGain}
+        onChange={(e) => setBackgroundNoiseGain(Math.max(0, Math.min(2, Number(e.target.value))))}
       />
 
       <label htmlFor="latency-range">Playback latency (ms)</label>
@@ -82,7 +105,10 @@ export function SceneLauncher({
       </select>
 
       <div className="actions">
-        <button onClick={() => onStart(scenePath)} disabled={status === "running" || status === "starting"}>
+        <button
+          onClick={() => onStart(scenePath, backgroundNoisePath, backgroundNoiseGain)}
+          disabled={status === "running" || status === "starting"}
+        >
           Start
         </button>
         <button onClick={onStop} disabled={status !== "running" && status !== "starting"}>

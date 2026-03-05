@@ -18,6 +18,8 @@ import {
 } from "./types/contracts";
 
 const DEFAULT_SCENE = "simulation/simulations/configs/library_scene/library_k1_scene00.json";
+const DEFAULT_BACKGROUND_NOISE = "wham_noise/tr/01dc0215_0.22439_01fc0207_-0.22439sp12.wav";
+const DEFAULT_BACKGROUND_NOISE_GAIN = 0.15;
 const AUDIO_HEADER_BYTES = 16;
 const AUDIO_SAMPLE_RATE = 16000;
 const DEFAULT_LATENCY_MS = 220;
@@ -110,8 +112,9 @@ export default function App() {
   const [rawWaveformBins, setRawWaveformBins] = useState<number[]>([]);
   const [playheadMs, setPlayheadMs] = useState(0);
   const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
+  const [isOutputPlaybackPaused, setIsOutputPlaybackPaused] = useState(false);
   const [processingMode, setProcessingMode] = useState<ProcessingMode>(DEFAULT_PROCESSING_MODE);
-  const [playbackSource, setPlaybackSource] = useState<PlaybackSource>("beamformed_output");
+  const [activePlaybackSource, setActivePlaybackSource] = useState<PlaybackSource | null>(null);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
@@ -131,6 +134,8 @@ export default function App() {
       outputPlaybackUrlRef.current = null;
     }
     setIsOutputPlaybackActive(false);
+    setIsOutputPlaybackPaused(false);
+    setActivePlaybackSource(null);
   }
 
   function resetLocalSessionState(nextStatus: string): void {
@@ -185,7 +190,11 @@ export default function App() {
     []
   );
 
-  async function startSession(scenePath: string): Promise<void> {
+  async function startSession(
+    scenePath: string,
+    backgroundNoisePath: string,
+    backgroundNoiseGain: number
+  ): Promise<void> {
     setStatus("starting");
     capturedAudioRef.current = [];
     totalSamplesRef.current = 0;
@@ -200,6 +209,8 @@ export default function App() {
         scene_config_path: scenePath,
         separation_mode: "mock",
         processing_mode: processingMode,
+        background_noise_audio_path: backgroundNoisePath,
+        background_noise_gain: backgroundNoiseGain,
       }),
     });
     if (!resp.ok) {
@@ -308,14 +319,21 @@ export default function App() {
     }
   }
 
-  async function toggleOutputPlayback(): Promise<void> {
-    if (isOutputPlaybackActive) {
-      stopOutputPlayback();
+  async function toggleOutputPlayback(source: PlaybackSource): Promise<void> {
+    const player = outputPlaybackRef.current;
+    if (activePlaybackSource === source && player) {
+      try {
+        await player.play();
+        setIsOutputPlaybackActive(true);
+        setIsOutputPlaybackPaused(false);
+      } catch {
+        stopOutputPlayback();
+      }
       return;
     }
     stopOutputPlayback();
     let blob: Blob;
-    if (playbackSource === "beamformed_output") {
+    if (source === "beamformed_output") {
       if (!capturedAudioRef.current.length) {
         return;
       }
@@ -340,15 +358,30 @@ export default function App() {
     try {
       await audio.play();
       setIsOutputPlaybackActive(true);
+      setIsOutputPlaybackPaused(false);
+      setActivePlaybackSource(source);
     } catch {
       stopOutputPlayback();
     }
   }
 
+  function pauseBeamformedPlayback(): void {
+    if (activePlaybackSource !== "beamformed_output") {
+      return;
+    }
+    const player = outputPlaybackRef.current;
+    if (!player) {
+      return;
+    }
+    player.pause();
+    setIsOutputPlaybackActive(false);
+    setIsOutputPlaybackPaused(true);
+  }
+
   const totalDurationMs = (totalSamplesRef.current / AUDIO_SAMPLE_RATE) * 1000;
   const rawMixedDurationMs = (rawMixedTotalSamplesRef.current / AUDIO_SAMPLE_RATE) * 1000;
-  const canPlayOutput =
-    playbackSource === "beamformed_output" ? capturedAudioRef.current.length > 0 : Boolean(sessionId);
+  const canPlayBeamformed = capturedAudioRef.current.length > 0;
+  const canPlayRawMixed = Boolean(sessionId);
 
   return (
     <main className="app-shell">
@@ -357,6 +390,8 @@ export default function App() {
         <SceneLauncher
           status={status}
           defaultScenePath={DEFAULT_SCENE}
+          defaultBackgroundNoisePath={DEFAULT_BACKGROUND_NOISE}
+          defaultBackgroundNoiseGain={DEFAULT_BACKGROUND_NOISE_GAIN}
           onStart={startSession}
           onStop={stopSession}
           onKillRun={killCurrentRun}
@@ -384,14 +419,18 @@ export default function App() {
         rawMixedBins={rawWaveformBins}
         rawMixedDurationMs={rawMixedDurationMs}
         playheadMs={playheadMs}
-        playbackSource={playbackSource}
-        onPlaybackSourceChange={(next) => {
-          setPlaybackSource(next);
-          stopOutputPlayback();
+        canPlayBeamformed={canPlayBeamformed}
+        canPauseBeamformed={activePlaybackSource === "beamformed_output" && isOutputPlaybackActive}
+        isBeamformedPlaying={isOutputPlaybackActive && activePlaybackSource === "beamformed_output"}
+        onPlayBeamformed={() => {
+          void toggleOutputPlayback("beamformed_output");
         }}
-        onTogglePlayback={toggleOutputPlayback}
-        canPlay={canPlayOutput}
-        isPlaybackActive={isOutputPlaybackActive}
+        onPauseBeamformed={pauseBeamformedPlayback}
+        canPlayRawMixed={canPlayRawMixed}
+        isRawMixedPlaying={isOutputPlaybackActive && activePlaybackSource === "raw_mixed_input"}
+        onToggleRawMixedPlayback={() => {
+          void toggleOutputPlayback("raw_mixed_input");
+        }}
       />
 
       {processingMode === "specific_speaker_enhancement" && selectedSpeakerId !== null && (
