@@ -31,6 +31,9 @@ def run_simulation_pipeline(
     scene_config_path: str | Path,
     out_dir: str | Path,
     use_mock_separation: bool = True,
+    beamforming_mode: str = "mvdr_fd",
+    output_normalization_enabled: bool = True,
+    output_allow_amplification: bool = False,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -44,6 +47,9 @@ def run_simulation_pipeline(
         fast_frame_ms=frame_ms,
         slow_chunk_ms=200,
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
+        beamforming_mode=str(beamforming_mode),
+        output_normalization_enabled=bool(output_normalization_enabled),
+        output_allow_amplification=bool(output_allow_amplification),
     )
     frame_samples = int(cfg.sample_rate_hz * cfg.fast_frame_ms / 1000)
 
@@ -100,6 +106,9 @@ def run_simulation_pipeline(
             "publish": stats.slow_publish_avg_ms,
         },
         "use_mock_separation": bool(use_mock_separation),
+        "beamforming_mode": str(cfg.beamforming_mode),
+        "output_normalization_enabled": bool(cfg.output_normalization_enabled),
+        "output_allow_amplification": bool(cfg.output_allow_amplification),
     }
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as f:
@@ -114,6 +123,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-dir", default="realtime_pipeline/output/sim_run")
     p.add_argument("--real-separation", action="store_true", help="Use real Asteroid ConvTasNet instead of mock backend")
     p.add_argument("--validate-only", action="store_true", help="Run sanity checks and emit validation_report.json")
+    p.add_argument("--beamforming-mode", choices=["mvdr_fd", "gsc_fd", "delay_sum"], default="mvdr_fd")
+    p.add_argument("--disable-output-normalization", action="store_true")
+    p.add_argument("--allow-output-amplification", action="store_true")
     return p
 
 
@@ -130,6 +142,9 @@ def main() -> None:
         scene_config_path=args.scene_config,
         out_dir=args.out_dir,
         use_mock_separation=not args.real_separation,
+        beamforming_mode=args.beamforming_mode,
+        output_normalization_enabled=not args.disable_output_normalization,
+        output_allow_amplification=bool(args.allow_output_amplification),
     )
     print(json.dumps(summary, indent=2))
 

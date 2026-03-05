@@ -133,3 +133,49 @@ def test_realtime_pipeline_focus_boost_increases_output_rms(tmp_path: Path) -> N
     assert rms_boost > rms_base
     if 0 in smap_base and 0 in smap_boost:
         assert smap_boost[0].gain_weight > smap_base[0].gain_weight
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+@pytest.mark.parametrize("method", ["mvdr_fd", "gsc_fd", "delay_sum"])
+def test_realtime_pipeline_methods_execute(tmp_path: Path, method: str) -> None:
+    pytest.importorskip("pyroomacoustics")
+
+    repo = Path(__file__).resolve().parents[1]
+    input_dir = repo / "beamforming" / "input"
+    scene = {
+        "room": {"dimensions": [5.0, 4.0, 3.0], "absorption": 0.25},
+        "microphone_array": {"mic_center": [2.5, 2.0, 1.5], "mic_radius": 0.05, "mic_count": 4},
+        "audio": {
+            "sources": [
+                {
+                    "loc": [1.5, 1.5, 1.5],
+                    "audio": str((input_dir / "brit_talking.wav").resolve()),
+                    "gain": 1.0,
+                    "classification": "signal",
+                },
+                {
+                    "loc": [3.5, 2.8, 1.5],
+                    "audio": str((input_dir / "babble_10dB.wav").resolve()),
+                    "gain": 0.25,
+                    "classification": "noise",
+                },
+            ],
+            "duration": 0.5,
+            "fs": 16000,
+        },
+    }
+    scene_path = tmp_path / f"scene_{method}.json"
+    scene_path.write_text(json.dumps(scene), encoding="utf-8")
+    out_dir = tmp_path / f"out_{method}"
+    summary = run_simulation_pipeline(
+        scene_config_path=scene_path,
+        out_dir=out_dir,
+        use_mock_separation=True,
+        beamforming_mode=method,
+        output_normalization_enabled=True,
+        output_allow_amplification=False,
+    )
+    assert summary["fast_frames"] > 0
+    assert summary["slow_chunks"] > 0
+    assert summary["beamforming_mode"] == method
+    assert (out_dir / "enhanced_fast_path.wav").exists()
