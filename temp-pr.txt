@@ -30,3 +30,16 @@ Decision:
 - Preferred method: mvdr_fd (current).
 - Why: clearly reduced static while preserving voice clarity.
 - Next tweak: tune postfilter and covariance update gating for remaining edge-case artifacts.
+
+MVDR defaults tuning (quick pass):
+- tested:
+  - baseline: scale=0.25, floor=0.18, gain_ema=0.20
+  - mid:      scale=0.25, floor=0.22, gain_ema=0.20
+  - aggressive: scale=0.25, floor=0.28, gain_ema=0.20
+- selected default: floor=0.22 (middle ground)
+- reason: improved STOI/naturalness vs baseline with smaller artifact tradeoff than floor=0.28.
+
+Deferred follow-up:
+- Next-stage beamforming ideas (GSC stabilization, profile presets, report gates) moved to:
+  - beamforming/look_into.md
+- Reason: prioritizing other work now; keep this as ready backlog.
