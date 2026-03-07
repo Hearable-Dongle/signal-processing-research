@@ -27,6 +27,13 @@ def _shift_with_zeros(x: np.ndarray, shift: int) -> np.ndarray:
     return y
 
 
+def _fractional_delay_shift(x: np.ndarray, delay_samples: float) -> np.ndarray:
+    n = x.shape[0]
+    t = np.arange(n, dtype=np.float64)
+    src_t = t - float(delay_samples)
+    return np.interp(src_t, t, np.asarray(x, dtype=np.float64), left=0.0, right=0.0)
+
+
 def _norm_deg(v: float) -> float:
     return float(v % 360.0)
 
@@ -74,11 +81,11 @@ def delay_and_sum_frame(
     direction = np.array([np.cos(az), np.sin(az), 0.0], dtype=float)
     tau = (mic_pos @ direction) / float(sound_speed_m_s)
     tau = tau - float(np.mean(tau))
-    delays = np.rint(tau * fs).astype(int)
+    delays = tau * float(fs)
 
     aligned = np.zeros(frame.shape[0], dtype=np.float64)
     for m in range(frame.shape[1]):
-        aligned += _shift_with_zeros(frame[:, m], int(delays[m]))
+        aligned += _fractional_delay_shift(frame[:, m], float(delays[m]))
 
     return (aligned / max(1, frame.shape[1])).astype(np.float32, copy=False)
 
@@ -114,27 +121,52 @@ class _FDBufferedBeamformer:
         self.mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=np.float64)
         self.rnn_mvdr: np.ndarray | None = None
         self.rnn_gsc: np.ndarray | None = None
+        self._win = np.sqrt(np.hanning(max(4, 2 * self.n))).astype(np.float64)
+        self._prev_mc = np.zeros((self.n, self.n_mics), dtype=np.float64)
+        self._ola_tail_mvdr = np.zeros(self.n, dtype=np.float64)
+        self._ola_tail_gsc = np.zeros(self.n, dtype=np.float64)
 
-    def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray) -> np.ndarray:
+    def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
         f_bins, mics = x_fft.shape
         inst = np.einsum("fm,fn->fmn", x_fft, x_fft.conj())
         if rnn_prev is None:
             rnn = inst
         else:
-            a = float(np.clip(self.cfg.fd_cov_ema_alpha, 0.0, 1.0))
+            a = float(np.clip(cov_alpha, 0.0, 1.0))
             rnn = (1.0 - a) * rnn_prev + a * inst
         diag = float(max(self.cfg.fd_diag_load, 1e-9))
         rnn += diag * np.eye(mics, dtype=np.complex128)[None, :, :]
         return rnn
 
-    def mvdr(self, frame_mc: np.ndarray, doa_deg: float) -> np.ndarray:
+    def _analysis_block(self, frame_mc: np.ndarray) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
-        x_fft = np.fft.rfft(x, axis=0)  # (F, M)
-        self.rnn_mvdr = self._update_covariance(self.rnn_mvdr, x_fft)
+        block = np.concatenate([self._prev_mc, x], axis=0)  # (2N, M)
+        self._prev_mc = x.copy()
+        xw = block * self._win[:, None]
+        return np.fft.rfft(xw, axis=0)  # (F, M)
+
+    def _synthesis_block(self, y_fft: np.ndarray, tail: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        y_block = np.fft.irfft(y_fft, n=2 * self.n).real
+        yw = y_block * self._win
+        out = tail + yw[: self.n]
+        next_tail = yw[self.n :].copy()
+        return out.astype(np.float32, copy=False), next_tail
+
+    def _cov_alpha_from_activity(self, speech_activity: float) -> float:
+        base = float(np.clip(self.cfg.fd_cov_ema_alpha, 0.0, 1.0))
+        scale = float(np.clip(self.cfg.fd_speech_cov_update_scale, 0.0, 1.0))
+        if speech_activity >= 0.5:
+            return base * scale
+        return base
+
+    def mvdr(self, frame_mc: np.ndarray, doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
+        x = np.asarray(frame_mc, dtype=np.float64)
+        x_fft = self._analysis_block(x)  # (F, M)
+        self.rnn_mvdr = self._update_covariance(self.rnn_mvdr, x_fft, self._cov_alpha_from_activity(speech_activity))
         a = _steering_vector_f_domain(
             doa_deg=doa_deg,
-            n_fft=self.n,
+            n_fft=2 * self.n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
@@ -151,16 +183,16 @@ class _FDBufferedBeamformer:
             wf = rinv_a / (denom + 1e-10)
             y_fft[f] = (wf.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
 
-        y = np.fft.irfft(y_fft, n=self.n).astype(np.float32, copy=False)
+        y, self._ola_tail_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr)
         return y
 
-    def gsc(self, frame_mc: np.ndarray, doa_deg: float) -> np.ndarray:
+    def gsc(self, frame_mc: np.ndarray, doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
-        x_fft = np.fft.rfft(x, axis=0)  # (F, M)
-        self.rnn_gsc = self._update_covariance(self.rnn_gsc, x_fft)
+        x_fft = self._analysis_block(x)  # (F, M)
+        self.rnn_gsc = self._update_covariance(self.rnn_gsc, x_fft, self._cov_alpha_from_activity(speech_activity))
         a = _steering_vector_f_domain(
             doa_deg=doa_deg,
-            n_fft=self.n,
+            n_fft=2 * self.n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
@@ -186,8 +218,48 @@ class _FDBufferedBeamformer:
                 wf = wq - b @ wa
             y_fft[f] = (wf.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
 
-        y = np.fft.irfft(y_fft, n=self.n).astype(np.float32, copy=False)
+        y, self._ola_tail_gsc = self._synthesis_block(y_fft, self._ola_tail_gsc)
         return y
+
+
+class _PostFilterState:
+    def __init__(self, frame_samples: int, cfg: PipelineConfig):
+        self.n = int(frame_samples)
+        self.cfg = cfg
+        self.noise_psd: np.ndarray | None = None
+        self.speech_psd: np.ndarray | None = None
+        self.gain_prev: np.ndarray | None = None
+
+    def process(self, frame: np.ndarray, speech_activity: float) -> np.ndarray:
+        x = np.asarray(frame, dtype=np.float64).reshape(-1)
+        x_fft = np.fft.rfft(x, n=self.n)
+        psd = np.abs(x_fft) ** 2
+
+        if self.noise_psd is None:
+            self.noise_psd = psd.copy()
+        if self.speech_psd is None:
+            self.speech_psd = psd.copy()
+        if self.gain_prev is None:
+            self.gain_prev = np.ones_like(psd, dtype=np.float64)
+
+        n_alpha = float(np.clip(self.cfg.postfilter_noise_ema_alpha, 0.0, 1.0))
+        s_alpha = float(np.clip(self.cfg.postfilter_speech_ema_alpha, 0.0, 1.0))
+        g_alpha = float(np.clip(self.cfg.postfilter_gain_ema_alpha, 0.0, 1.0))
+        floor = float(np.clip(self.cfg.postfilter_gain_floor, 0.05, 1.0))
+
+        if speech_activity < 0.5:
+            self.noise_psd = (1.0 - n_alpha) * self.noise_psd + n_alpha * psd
+        self.speech_psd = (1.0 - s_alpha) * self.speech_psd + s_alpha * psd
+
+        signal_est = np.maximum(self.speech_psd - self.noise_psd, 1e-12)
+        gain = signal_est / (signal_est + self.noise_psd + 1e-12)
+        gain = np.maximum(gain, floor)
+        gain = (1.0 - g_alpha) * self.gain_prev + g_alpha * gain
+        self.gain_prev = gain
+
+        y_fft = x_fft * gain
+        y = np.fft.irfft(y_fft, n=self.n).real
+        return y.astype(np.float32, copy=False)
 
 
 def _soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
@@ -258,6 +330,7 @@ class FastPathWorker(threading.Thread):
             cfg=config,
             mic_geometry_xyz=self._mic_geometry_xyz,
         )
+        self._postfilter = _PostFilterState(frame_samples=frame_samples, cfg=config)
 
     def _smooth_speaker_items(self, speaker_map) -> list:
         alpha_doa = float(np.clip(self._cfg.doa_ema_alpha, 0.0, 1.0))
@@ -336,6 +409,9 @@ class FastPathWorker(threading.Thread):
                     if speaker_map:
                         out = np.zeros(x.shape[0], dtype=np.float32)
                         smoothed_items = self._smooth_speaker_items(speaker_map)
+                        speech_activity = float(
+                            max((float(getattr(v, "activity_confidence", 0.0)) for v in speaker_map.values()), default=0.0)
+                        )
                         for _sid, doa_deg, gain_weight in smoothed_items:
                             mode = str(self._cfg.beamforming_mode).strip().lower()
                             if mode == "delay_sum":
@@ -347,10 +423,12 @@ class FastPathWorker(threading.Thread):
                                     sound_speed_m_s=self._cfg.sound_speed_m_s,
                                 )
                             elif mode == "gsc_fd":
-                                bf = self._fd.gsc(x, doa_deg=doa_deg)
+                                bf = self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
                             else:
-                                bf = self._fd.mvdr(x, doa_deg=doa_deg)
+                                bf = self._fd.mvdr(x, doa_deg=doa_deg, speech_activity=speech_activity)
                             out += float(gain_weight) * bf
+                        if self._cfg.postfilter_enabled:
+                            out = self._postfilter.process(out, speech_activity=speech_activity)
                     else:
                         out = np.mean(x, axis=1).astype(np.float32, copy=False)
                     beamform_ms += (perf_counter() - t0) * 1000.0

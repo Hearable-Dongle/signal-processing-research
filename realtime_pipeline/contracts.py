@@ -61,6 +61,13 @@ class PipelineConfig:
     # Frequency-domain covariance smoothing
     fd_cov_ema_alpha: float = 0.08
     fd_diag_load: float = 1e-3
+    fd_speech_cov_update_scale: float = 0.25
+    # Optional postfilter (mild, speech-preserving)
+    postfilter_enabled: bool = True
+    postfilter_noise_ema_alpha: float = 0.08
+    postfilter_speech_ema_alpha: float = 0.12
+    postfilter_gain_floor: float = 0.18
+    postfilter_gain_ema_alpha: float = 0.2
     # Fast-path safety
     output_soft_clip_enabled: bool = True
     output_soft_clip_drive: float = 1.2

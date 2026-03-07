@@ -191,6 +191,64 @@ def _clip_rate(x: np.ndarray, threshold: float = 0.99) -> float:
     return float(np.mean(np.abs(y) >= threshold))
 
 
+def _high_band_noise_ratio(x: np.ndarray, fs: int, high_hz: int = 4000) -> float:
+    y = np.asarray(x, dtype=np.float64).reshape(-1)
+    if y.size == 0:
+        return 0.0
+    spec = np.fft.rfft(y)
+    p = np.abs(spec) ** 2
+    f = np.fft.rfftfreq(y.size, d=1.0 / float(fs))
+    total = float(np.sum(p) + 1e-12)
+    high = float(np.sum(p[f >= float(high_hz)]))
+    return high / total
+
+
+def _frame_gain_delta_p95(raw: np.ndarray, proc: np.ndarray, frame_len: int = 160) -> float:
+    x = np.asarray(raw, dtype=np.float64).reshape(-1)
+    y = np.asarray(proc, dtype=np.float64).reshape(-1)
+    n = min(x.size, y.size)
+    if n <= frame_len:
+        return 0.0
+    x = x[:n]
+    y = y[:n]
+    ratios = []
+    for s in range(0, n - frame_len + 1, frame_len):
+        xr = float(np.sqrt(np.mean(x[s : s + frame_len] ** 2) + 1e-12))
+        yr = float(np.sqrt(np.mean(y[s : s + frame_len] ** 2) + 1e-12))
+        ratios.append(yr / max(xr, 1e-6))
+    if len(ratios) < 3:
+        return 0.0
+    d = np.abs(np.diff(np.asarray(ratios, dtype=np.float64)))
+    return float(np.percentile(d, 95))
+
+
+def _spectral_flux_non_speech(clean_ref: np.ndarray, proc: np.ndarray, fs: int) -> float:
+    c = np.asarray(clean_ref, dtype=np.float64).reshape(-1)
+    p = np.asarray(proc, dtype=np.float64).reshape(-1)
+    n = min(c.size, p.size)
+    if n < 1024:
+        return 0.0
+    c = c[:n]
+    p = p[:n]
+    win = 512
+    hop = 256
+    flux_vals = []
+    prev_mag = None
+    for s in range(0, n - win + 1, hop):
+        cfrm = c[s : s + win]
+        pfrm = p[s : s + win]
+        c_rms = float(np.sqrt(np.mean(cfrm**2) + 1e-12))
+        if c_rms > 0.01:
+            continue
+        mag = np.abs(np.fft.rfft(pfrm * np.hanning(win)))
+        if prev_mag is not None:
+            flux_vals.append(float(np.mean(np.maximum(0.0, mag - prev_mag))))
+        prev_mag = mag
+    if not flux_vals:
+        return 0.0
+    return float(np.mean(flux_vals))
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Compare realtime beamforming methods with metrics + visualizations.")
     p.add_argument("--scene-config-dir", default="simulation/simulations/configs/library_scene")
@@ -260,6 +318,9 @@ def main() -> None:
                     "si_sdr_processed_db": float(bundle.si_sdr_db_processed),
                     "fast_rtf": float(summary["fast_rtf"]),
                     "slow_rtf": float(summary["slow_rtf"]),
+                    "high_band_noise_ratio": _high_band_noise_ratio(proc[:n], int(sr if sr > 0 else fs)),
+                    "frame_gain_delta_p95": _frame_gain_delta_p95(raw[:n], proc[:n]),
+                    "spectral_flux_non_speech": _spectral_flux_non_speech(ref[:n], proc[:n], int(sr if sr > 0 else fs)),
                 }
             )
             sanity_rows.append(
@@ -268,6 +329,9 @@ def main() -> None:
                     "method": method,
                     "clip_rate_ge_0p99": _clip_rate(proc[:n]),
                     "signal_rms": float(np.sqrt(np.mean(np.asarray(proc[:n], dtype=np.float64) ** 2) + 1e-12)),
+                    "high_band_noise_ratio": _high_band_noise_ratio(proc[:n], int(sr if sr > 0 else fs)),
+                    "frame_gain_delta_p95": _frame_gain_delta_p95(raw[:n], proc[:n]),
+                    "spectral_flux_non_speech": _spectral_flux_non_speech(ref[:n], proc[:n], int(sr if sr > 0 else fs)),
                     "finite_audio": bool(np.all(np.isfinite(proc[:n]))),
                     "finite_metrics": bool(
                         np.isfinite(bundle.delta_sii)
@@ -308,6 +372,9 @@ def main() -> None:
                 "delta_si_sdr_db_mean": float(np.mean([float(v["delta_si_sdr_db"]) for v in items])),
                 "fast_rtf_mean": float(np.mean([float(v["fast_rtf"]) for v in items])),
                 "slow_rtf_mean": float(np.mean([float(v["slow_rtf"]) for v in items])),
+                "high_band_noise_ratio_mean": float(np.mean([float(v["high_band_noise_ratio"]) for v in items])),
+                "frame_gain_delta_p95_mean": float(np.mean([float(v["frame_gain_delta_p95"]) for v in items])),
+                "spectral_flux_non_speech_mean": float(np.mean([float(v["spectral_flux_non_speech"]) for v in items])),
             }
         )
     summary_rows.sort(key=lambda x: (x["delta_sii_mean"], x["delta_si_sdr_db_mean"]), reverse=True)
