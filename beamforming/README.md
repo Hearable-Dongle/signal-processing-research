@@ -90,6 +90,21 @@ Benchmark outputs:
 - `beamforming/benchmark/results/<run_id>/top_methods.csv`
 - `beamforming/benchmark/results/<run_id>/PR_REPORT.md`
 
+Realtime method comparison (MVDR FD / GSC FD / Delay-and-Sum):
+
+```bash
+python -m beamforming.benchmark.compare_methods \
+  --scene-config-dir simulation/simulations/configs/library_scene \
+  --max-scenes 3 \
+  --methods mvdr_fd gsc_fd delay_sum
+```
+
+Artifacts include:
+- `summary_by_method.csv`
+- `scene_metrics.csv`
+- `sanity_checks.csv`
+- waveform/spectrogram/ranking plots under `visualizations/`
+
 Run only one scene family:
 
 ```bash

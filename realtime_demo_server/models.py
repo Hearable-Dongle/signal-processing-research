@@ -15,6 +15,9 @@ class SessionStartRequest(BaseModel):
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4
     separation_mode: Literal["auto", "mock"] = "auto"
+    beamforming_mode: Literal["mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
+    output_normalization_enabled: bool = True
+    output_allow_amplification: bool = False
     processing_mode: Literal[
         "specific_speaker_enhancement",
         "localize_and_beamform",

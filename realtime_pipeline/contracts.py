@@ -52,9 +52,27 @@ class PipelineConfig:
     direction_focus_gain_db: float = 0.0
     direction_non_focus_attenuation_db: float = -14.0
     max_user_boost_db: float = 12.0
+    # Beamformer mode
+    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum
+    # DOA/gain smoothing to reduce steering chatter
+    doa_ema_alpha: float = 0.2
+    gain_ema_alpha: float = 0.2
+    doa_max_step_deg_per_frame: float = 10.0
+    # Frequency-domain covariance smoothing
+    fd_cov_ema_alpha: float = 0.08
+    fd_diag_load: float = 1e-3
+    fd_speech_cov_update_scale: float = 0.25
+    # Optional postfilter (mild, speech-preserving)
+    postfilter_enabled: bool = True
+    postfilter_noise_ema_alpha: float = 0.08
+    postfilter_speech_ema_alpha: float = 0.12
+    postfilter_gain_floor: float = 0.18
+    postfilter_gain_ema_alpha: float = 0.2
     # Fast-path safety
     output_soft_clip_enabled: bool = True
     output_soft_clip_drive: float = 1.2
-    output_target_rms: float | None = None
+    output_target_rms: float | None = 0.08
     output_rms_ema_alpha: float = 0.2
     output_rms_max_gain_db: float = 6.0
+    output_normalization_enabled: bool = True
+    output_allow_amplification: bool = False

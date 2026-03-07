@@ -10,7 +10,10 @@ Integration/orchestration layer for real-time multi-speaker spatial processing.
   - read raw mic-array frames
   - run SRP-PHAT on rolling mixed audio window
   - produce candidate DOA peaks
-  - apply low-latency delay-and-sum beamforming with per-speaker gain weights from shared state
+  - apply low-latency beamforming with per-speaker gain weights from shared state
+    - `mvdr_fd` (default)
+    - `gsc_fd`
+    - `delay_sum`
 - Slow path (`~200 ms` chunk cadence):
   - buffer raw multichannel audio
   - run source separation backend
@@ -105,6 +108,7 @@ Behavior:
 - else if only `focused_direction_deg` is set, nearest tracked speaker is focused
 - if neither is set, all speaker gains default to `1.0`
 - fast path applies soft clipping by default and optional RMS normalization (`PipelineConfig.output_target_rms`)
+  - attenuation-only normalization is default (`output_allow_amplification=False`)
 
 ### 5) Run simulation E2E with real backend resolution
 
