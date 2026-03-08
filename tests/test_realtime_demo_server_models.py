@@ -1,6 +1,7 @@
 from mic_array_forwarder.models import (
     AdjustSpeakerGainMessage,
     MetricsMessage,
+    RawChannelsResponse,
     SCHEMA_VERSION,
     SelectSpeakerMessage,
     SessionStartRequest,
@@ -54,3 +55,19 @@ def test_adjust_message_allows_only_unit_steps() -> None:
 def test_select_message_schema() -> None:
     msg = SelectSpeakerMessage(schema_version="v1", type="select_speaker", speaker_id=3)
     assert msg.schema_version == "v1"
+
+
+def test_raw_channels_response_schema() -> None:
+    resp = RawChannelsResponse.model_validate(
+        {
+            "session_id": "abc123",
+            "sample_rate_hz": 16000,
+            "channel_count": 2,
+            "channels": [
+                {"channel_index": 0, "filename": "channel_000.wav"},
+                {"channel_index": 1, "filename": "channel_001.wav"},
+            ],
+        }
+    )
+    assert resp.channel_count == 2
+    assert resp.channels[1].filename == "channel_001.wav"

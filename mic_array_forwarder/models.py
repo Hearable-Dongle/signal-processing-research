@@ -53,6 +53,18 @@ class SessionStopResponse(BaseModel):
     status: Literal["stopped"]
 
 
+class RawChannelDescriptor(BaseModel):
+    channel_index: int
+    filename: str
+
+
+class RawChannelsResponse(BaseModel):
+    session_id: str
+    sample_rate_hz: int
+    channel_count: int
+    channels: list[RawChannelDescriptor]
+
+
 class SpeakerStateItem(BaseModel):
     speaker_id: int
     direction_degrees: float
