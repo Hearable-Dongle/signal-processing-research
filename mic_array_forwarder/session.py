@@ -467,6 +467,8 @@ class DemoSession:
                 slow_chunk_ms=int(self.req.slow_chunk_ms),
                 max_speakers_hint=max(int(self.req.max_speakers_hint), len(list(iter_target_source_indices(sim_cfg))), 1),
                 beamforming_mode=str(self.req.beamforming_mode),
+                localization_backend=str(self.req.localization_backend),
+                tracking_mode=str(self.req.tracking_mode),
                 output_normalization_enabled=bool(self.req.output_normalization_enabled),
                 output_allow_amplification=bool(self.req.output_allow_amplification),
             )

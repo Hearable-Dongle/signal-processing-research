@@ -27,18 +27,24 @@ def run_simulation(config: SimulationConfig) -> Tuple[np.ndarray, np.ndarray, Li
     )
 
     # Setup Microphones
-    R = config.microphone_array.mic_radius
-    M = config.microphone_array.mic_count
-    center = np.array(config.microphone_array.mic_center)
-    
-    # Assuming center[2] provides the height, and the circle is on that plane.
-    phi = np.linspace(0, 2 * np.pi, M, endpoint=False)
-    mic_pos_rel = np.array([
-        R * np.cos(phi),
-        R * np.sin(phi),
-        np.zeros(M)
-    ])
-    
+    center = np.array(config.microphone_array.mic_center, dtype=float)
+    explicit_positions = config.microphone_array.mic_positions
+    if explicit_positions:
+        mic_pos_rel = np.asarray(explicit_positions, dtype=float).T
+        if mic_pos_rel.shape[0] != 3:
+            raise ValueError("microphone_array.mic_positions must have shape (n_mics, 3)")
+        M = mic_pos_rel.shape[1]
+    else:
+        R = config.microphone_array.mic_radius
+        M = config.microphone_array.mic_count
+        # Assuming center[2] provides the height, and the circle is on that plane.
+        phi = np.linspace(0, 2 * np.pi, M, endpoint=False)
+        mic_pos_rel = np.array([
+            R * np.cos(phi),
+            R * np.sin(phi),
+            np.zeros(M)
+        ])
+
     # Absolute positions
     mic_pos = mic_pos_rel + center.reshape(3, 1)
     

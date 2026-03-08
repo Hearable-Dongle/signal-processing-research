@@ -181,6 +181,12 @@ def main() -> int:
         choices=["respeaker_v3_0457", "respeaker_cross_0640"],
         default="respeaker_v3_0457",
     )
+    parser.add_argument(
+        "--localization-backend",
+        choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy"],
+        default="tiny_dp_ipd",
+    )
+    parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
     parser.add_argument("--channel-map", default="", help="Comma-separated channel map, e.g. 0,1,2,3")
     args = parser.parse_args()
 
@@ -191,6 +197,8 @@ def main() -> int:
         "sample_rate_hz": args.sample_rate_hz,
         "monitor_source": args.monitor_source,
         "mic_array_profile": args.mic_array_profile,
+        "localization_backend": args.localization_backend,
+        "tracking_mode": args.tracking_mode,
         "channel_map": [int(v) for v in args.channel_map.split(",") if v.strip()] if args.channel_map else None,
         "separation_mode": "mock",
     }
