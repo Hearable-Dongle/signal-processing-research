@@ -14,6 +14,8 @@ class SessionStartRequest(BaseModel):
     channel_count: int = 4
     sample_rate_hz: int = 48000
     monitor_source: Literal["processed", "raw_mixed"] = "processed"
+    mic_array_profile: Literal["respeaker_v3_0457", "respeaker_cross_0640"] = "respeaker_v3_0457"
+    channel_map: list[int] | None = None
     background_noise_audio_path: str | None = None
     background_noise_gain: float = 0.15
     focus_ratio: float = 2.0

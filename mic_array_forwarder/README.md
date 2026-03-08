@@ -93,6 +93,12 @@ Stop the currently running session:
 python -m mic_array_forwarder.tools.ws_stop
 ```
 
+Channel mapping (if your device order differs from MIC1..MIC4):
+
+```bash
+python -m mic_array_forwarder.tools.ws_play --channel-map 0,1,2,3
+```
+
 Start the frontend in another terminal:
 
 ```bash

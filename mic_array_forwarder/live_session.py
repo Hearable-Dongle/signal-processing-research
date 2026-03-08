@@ -26,15 +26,29 @@ from realtime_pipeline.contracts import SpeakerGainDirection
 from realtime_pipeline.fast_path import delay_and_sum_frame
 from realtime_pipeline.srp_tracker import SRPPeakTracker
 
-_RESPKER_4MIC_GEOMETRY_XYZ = np.array(
-    [
-        [0.032, 0.0, 0.0],
-        [0.0, 0.032, 0.0],
-        [-0.032, 0.0, 0.0],
-        [0.0, -0.032, 0.0],
-    ],
-    dtype=np.float64,
-)
+def _mic_geometry_from_profile(profile: str) -> np.ndarray:
+    if profile == "respeaker_cross_0640":
+        r = 0.032  # 64.0 mm across
+        return np.array(
+            [
+                [r, 0.0, 0.0],
+                [0.0, r, 0.0],
+                [-r, 0.0, 0.0],
+                [0.0, -r, 0.0],
+            ],
+            dtype=np.float64,
+        )
+    # ReSpeaker Mic Array v3.0 ~45.7 mm across the array.
+    r = 0.0457 / 2.0
+    return np.array(
+        [
+            [r, 0.0, 0.0],
+            [0.0, r, 0.0],
+            [-r, 0.0, 0.0],
+            [0.0, -r, 0.0],
+        ],
+        dtype=np.float64,
+    )
 
 
 def _now_ms() -> float:
@@ -112,6 +126,22 @@ class LiveDemoSession:
         self._last_tracker_debug: dict[str, Any] = {}
         self._last_device_name = ""
         self._monitor_source = str(req.monitor_source)
+        self._mic_geometry_xyz = _mic_geometry_from_profile(str(req.mic_array_profile))
+        self._channel_map = self._normalize_channel_map(req.channel_map, int(req.channel_count))
+
+    @staticmethod
+    def _normalize_channel_map(raw: list[int] | None, channel_count: int) -> list[int] | None:
+        if raw is None:
+            return None
+        try:
+            items = [int(v) for v in raw]
+        except (TypeError, ValueError):
+            return None
+        if len(items) != channel_count:
+            return None
+        if sorted(items) != list(range(channel_count)):
+            return None
+        return items
 
     @property
     def status(self) -> str:
@@ -343,6 +373,8 @@ class LiveDemoSession:
         msg["sample_rate_hz"] = int(self.req.sample_rate_hz)
         with self._lock:
             msg["monitor_source"] = str(self._monitor_source)
+            msg["mic_array_profile"] = str(self.req.mic_array_profile)
+            msg["channel_map"] = list(self._channel_map) if self._channel_map is not None else None
         msg["tracker_debug"] = dict(self._last_tracker_debug)
         with self._lock:
             self._metrics_state = msg
@@ -377,7 +409,7 @@ class LiveDemoSession:
         mono = delay_and_sum_frame(
             frame,
             doa_deg=float(focus_direction),
-            mic_geometry_xyz=_RESPKER_4MIC_GEOMETRY_XYZ,
+            mic_geometry_xyz=self._mic_geometry_xyz,
             fs=int(self.req.sample_rate_hz),
             sound_speed_m_s=343.0,
         )
@@ -412,7 +444,7 @@ class LiveDemoSession:
             self._last_device_name = str(device_info.get("name", f"device-{device_idx}"))
 
             tracker = SRPPeakTracker(
-                mic_pos=_RESPKER_4MIC_GEOMETRY_XYZ.T,
+                mic_pos=self._mic_geometry_xyz.T,
                 fs=sample_rate_hz,
                 window_ms=40,
                 nfft=512,
@@ -467,6 +499,8 @@ class LiveDemoSession:
                     t0 = time.perf_counter()
                     if frame_mc.ndim != 2 or frame_mc.shape[1] != channel_count:
                         continue
+                    if self._channel_map is not None:
+                        frame_mc = frame_mc[:, self._channel_map]
                     raw_mono = np.mean(frame_mc, axis=1).astype(np.float32, copy=False)
                     self._append_raw_mix(raw_mono)
                     peaks, scores, tracker_debug = tracker.update(frame_mc)

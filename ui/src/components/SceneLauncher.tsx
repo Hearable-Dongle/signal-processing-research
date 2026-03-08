@@ -12,6 +12,7 @@ export type SessionLaunchConfig = {
   audioDeviceQuery: string;
   monitorSource: MonitorSource;
   sampleRateHz: number;
+  channelMap: string;
 };
 
 type Props = {
@@ -59,6 +60,7 @@ export function SceneLauncher({
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
   const [audioDeviceQuery, setAudioDeviceQuery] = useState("ReSpeaker");
   const [sampleRateHz, setSampleRateHz] = useState(48000);
+  const [channelMap, setChannelMap] = useState("0,1,2,3");
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
@@ -93,6 +95,14 @@ export function SceneLauncher({
         onChange={(e) => setAudioDeviceQuery(e.target.value)}
         disabled={inputSource !== "respeaker_live"}
         placeholder="ReSpeaker"
+      />
+      <label htmlFor="channel-map">Channel map (optional)</label>
+      <input
+        id="channel-map"
+        value={channelMap}
+        onChange={(e) => setChannelMap(e.target.value)}
+        disabled={inputSource !== "respeaker_live"}
+        placeholder="0,1,2,3"
       />
       <label htmlFor="sample-rate-hz">Sample rate (Hz)</label>
       <input
@@ -179,6 +189,7 @@ export function SceneLauncher({
               audioDeviceQuery,
               monitorSource,
               sampleRateHz,
+              channelMap,
             })
           }
           disabled={status === "running" || status === "starting"}

@@ -203,6 +203,7 @@ export default function App() {
       audioDeviceQuery,
       monitorSource: nextMonitorSource,
       sampleRateHz,
+      channelMap,
     } = config;
     const playbackSampleRateHz = inputSource === "respeaker_live" ? sampleRateHz : DEFAULT_SAMPLE_RATE;
     setStatus("starting");
@@ -228,6 +229,10 @@ export default function App() {
         background_noise_audio_path: backgroundNoisePath,
         background_noise_gain: backgroundNoiseGain,
         audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
+        channel_map:
+          inputSource === "respeaker_live" && channelMap.trim()
+            ? channelMap.split(",").map((v) => Number(v.trim())).filter((v) => Number.isFinite(v))
+            : undefined,
       }),
     });
     if (!resp.ok) {

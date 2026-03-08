@@ -57,6 +57,12 @@ def main() -> int:
     parser.add_argument("--audio-device-query", default="ReSpeaker", help="Substring to match input device")
     parser.add_argument("--channel-count", type=int, default=4)
     parser.add_argument("--sample-rate-hz", type=int, default=48000)
+    parser.add_argument(
+        "--mic-array-profile",
+        choices=["respeaker_v3_0457", "respeaker_cross_0640"],
+        default="respeaker_v3_0457",
+    )
+    parser.add_argument("--channel-map", default="", help="Comma-separated channel map, e.g. 0,1,2,3")
     parser.add_argument("--monitor-source", choices=["processed", "raw_mixed"], default="processed")
     args = parser.parse_args()
 
@@ -66,6 +72,8 @@ def main() -> int:
         "channel_count": args.channel_count,
         "sample_rate_hz": args.sample_rate_hz,
         "monitor_source": args.monitor_source,
+        "mic_array_profile": args.mic_array_profile,
+        "channel_map": [int(v) for v in args.channel_map.split(",") if v.strip()] if args.channel_map else None,
         "separation_mode": "mock",
     }
 

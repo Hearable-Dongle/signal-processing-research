@@ -126,4 +126,5 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.input_source).toBe("respeaker_live");
   expect(body.audio_device_query).toBe("USB Mic");
   expect(body.sample_rate_hz).toBe(48000);
+  expect(body.channel_map).toEqual([0, 1, 2, 3]);
 });

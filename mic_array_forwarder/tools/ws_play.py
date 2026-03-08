@@ -176,6 +176,12 @@ def main() -> int:
     parser.add_argument("--buffer-ms", type=int, default=120, help="Jitter buffer (ms)")
     parser.add_argument("--wav-out", default="", help="Optional path to save output WAV")
     parser.add_argument("--stop-existing", action="store_true", help="Stop any active session before starting")
+    parser.add_argument(
+        "--mic-array-profile",
+        choices=["respeaker_v3_0457", "respeaker_cross_0640"],
+        default="respeaker_v3_0457",
+    )
+    parser.add_argument("--channel-map", default="", help="Comma-separated channel map, e.g. 0,1,2,3")
     args = parser.parse_args()
 
     payload = {
@@ -184,6 +190,8 @@ def main() -> int:
         "channel_count": args.channel_count,
         "sample_rate_hz": args.sample_rate_hz,
         "monitor_source": args.monitor_source,
+        "mic_array_profile": args.mic_array_profile,
+        "channel_map": [int(v) for v in args.channel_map.split(",") if v.strip()] if args.channel_map else None,
         "separation_mode": "mock",
     }
 
