@@ -40,6 +40,11 @@ class SlowPathWorker(threading.Thread):
                 sample_rate_hz=config.sample_rate_hz,
                 chunk_duration_ms=config.slow_chunk_ms,
                 max_speakers=config.max_speakers_hint,
+                continuity_bonus=config.identity_continuity_bonus,
+                switch_penalty=config.identity_switch_penalty,
+                hold_similarity_threshold=config.identity_hold_similarity_threshold,
+                carry_forward_chunks=config.identity_carry_forward_chunks,
+                confidence_decay=config.identity_confidence_decay,
             )
         )
         self._direction = DirectionAssignmentEngine(
@@ -50,8 +55,14 @@ class SlowPathWorker(threading.Thread):
                 focus_gain_db=config.direction_focus_gain_db,
                 non_focus_attenuation_db=config.direction_non_focus_attenuation_db,
                 max_user_boost_db=config.max_user_boost_db,
+                transition_penalty_deg=config.direction_transition_penalty_deg,
+                min_confidence_for_switch=config.direction_min_confidence_for_switch,
+                hold_confidence_decay=config.direction_hold_confidence_decay,
+                stale_confidence_decay=config.direction_stale_confidence_decay,
+                min_persist_confidence=config.direction_min_persist_confidence,
             ),
         )
+        self._published_map: dict[int, SpeakerGainDirection] = {}
 
     def _process_chunk(self, raw_chunk_mc: np.ndarray) -> None:
         ts_ms = 1000.0 * (self._chunk_id * self._chunk_samples) / self._cfg.sample_rate_hz
@@ -127,6 +138,7 @@ class SlowPathWorker(threading.Thread):
                     updated_at_ms=ts_ms,
                 )
 
+            speaker_map = self._merge_with_published_map(speaker_map, ts_ms)
             self._state.publish_speaker_map(speaker_map)
             publish_ms += (perf_counter() - t0) * 1000.0
 
@@ -169,3 +181,51 @@ class SlowPathWorker(threading.Thread):
             if chunk.shape[0] < self._chunk_samples:
                 chunk = np.pad(chunk, ((0, self._chunk_samples - chunk.shape[0]), (0, 0)))
             self._process_chunk(chunk[: self._chunk_samples, :])
+
+    def _merge_with_published_map(self, speaker_map: dict[int, SpeakerGainDirection], timestamp_ms: float) -> dict[int, SpeakerGainDirection]:
+        out: dict[int, SpeakerGainDirection] = {}
+        refresh_min = float(self._cfg.speaker_map_min_confidence_for_refresh)
+        hold_ms = float(self._cfg.speaker_map_hold_ms)
+        conf_decay = float(np.clip(self._cfg.speaker_map_confidence_decay, 0.0, 1.0))
+        activity_decay = float(np.clip(self._cfg.speaker_map_activity_decay, 0.0, 1.0))
+
+        for sid, item in speaker_map.items():
+            if float(item.confidence) >= refresh_min:
+                out[int(sid)] = item
+                continue
+            prev = self._published_map.get(int(sid))
+            if prev is None:
+                out[int(sid)] = item
+                continue
+            age_ms = float(timestamp_ms - prev.updated_at_ms)
+            if age_ms > hold_ms:
+                out[int(sid)] = item
+                continue
+            out[int(sid)] = SpeakerGainDirection(
+                speaker_id=prev.speaker_id,
+                direction_degrees=prev.direction_degrees,
+                gain_weight=item.gain_weight,
+                confidence=float(np.clip(prev.confidence * conf_decay, 0.0, 1.0)),
+                active=bool(prev.active),
+                activity_confidence=float(np.clip(prev.activity_confidence * activity_decay, 0.0, 1.0)),
+                updated_at_ms=prev.updated_at_ms,
+            )
+
+        for sid, prev in self._published_map.items():
+            if int(sid) in out:
+                continue
+            age_ms = float(timestamp_ms - prev.updated_at_ms)
+            if age_ms > hold_ms:
+                continue
+            out[int(sid)] = SpeakerGainDirection(
+                speaker_id=prev.speaker_id,
+                direction_degrees=prev.direction_degrees,
+                gain_weight=prev.gain_weight,
+                confidence=float(np.clip(prev.confidence * conf_decay, 0.0, 1.0)),
+                active=bool(prev.active),
+                activity_confidence=float(np.clip(prev.activity_confidence * activity_decay, 0.0, 1.0)),
+                updated_at_ms=prev.updated_at_ms,
+            )
+
+        self._published_map = dict(out)
+        return out

@@ -15,6 +15,11 @@ class IdentityConfig:
     max_speakers: int = 8
     retire_after_chunks: int = 25
     new_speaker_confidence: float = 0.5
+    continuity_bonus: float = 0.04
+    switch_penalty: float = 0.06
+    hold_similarity_threshold: float = 0.6
+    carry_forward_chunks: int = 1
+    confidence_decay: float = 0.92
 
     # Embedding controls
     n_mfcc: int = 13
@@ -41,6 +46,8 @@ class SpeakerState:
     sample_count: int
     last_seen_chunk: int
     last_seen_timestamp_ms: float
+    last_confidence: float = 0.0
+    hold_count: int = 0
 
 
 @dataclass(slots=True)

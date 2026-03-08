@@ -24,6 +24,10 @@ class SpeakerDirectionState:
     confidence: float
     last_update_ms: float
     updates: int = 0
+    last_observed_ms: float = 0.0
+    hold_count: int = 0
+    stale_updates: int = 0
+    last_raw_direction_deg: float | None = None
 
 
 @dataclass

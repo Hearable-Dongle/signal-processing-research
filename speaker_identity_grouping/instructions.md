@@ -52,6 +52,11 @@ Defaults:
 - `max_speakers=8`
 - `retire_after_chunks=25`
 - `new_speaker_confidence=0.5`
+- `continuity_bonus=0.04`
+- `switch_penalty=0.06`
+- `hold_similarity_threshold=0.6`
+- `carry_forward_chunks=1`
+- `confidence_decay=0.92`
 
 Embedding parameters:
 - `n_mfcc=13`
@@ -69,12 +74,15 @@ Embedding parameters:
 - Else extract MFCC-based embedding and normalize.
 3. For active streams, compute cosine similarity to active speaker centroids.
 4. Apply one-to-one assignment with Hungarian (`linear_sum_assignment`) on cost `1 - similarity`.
-5. Accept match only when similarity >= `match_threshold`.
-6. Unmatched streams:
+5. Apply continuity bonus only as a mild tie-break toward the previous speaker assignment.
+6. Accept match only when similarity >= `match_threshold`.
+7. Block speaker switches unless the new raw similarity exceeds the previous raw similarity by at least `switch_penalty`.
+8. Unmatched streams:
 - If registry has capacity: create new speaker ID.
 - Else: force-map to nearest existing speaker (continuity fallback).
-7. Update speaker centroids using EMA and re-normalize.
-8. Emit output contract.
+9. For weak evidence, allow short carry-forward of the previous speaker only when support remains above `hold_similarity_threshold`.
+10. Update speaker centroids using EMA and re-normalize.
+11. Emit output contract.
 
 ## Usage
 ```python

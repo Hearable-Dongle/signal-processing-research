@@ -30,7 +30,13 @@ class DirectionAssignmentConfig:
     doa_ema_alpha: float = 0.3
     min_stream_rms: float = 0.01
     min_confidence_for_update: float = 0.15
+    min_confidence_for_switch: float = 0.55
+    transition_penalty_deg: float = 22.0
+    hold_confidence_decay: float = 0.9
+    stale_confidence_decay: float = 0.96
+    min_persist_confidence: float = 0.05
     max_angular_jump_deg_per_chunk: float | None = 30.0
+    low_speaker_transition_bypass_count: int = 1
 
     # Speaker lifecycle
     speaker_stale_timeout_ms: float = 2000.0

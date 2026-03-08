@@ -1,45 +1,14 @@
-Beamforming static/chop reduction (concise)
+Prior-aware smoothing and overnight analysis support
 
-Why this change:
-- Reduce static/choppy artifacts while keeping intelligibility stable.
-- Prioritize beamforming continuity (WOLA, fractional delays, smoother steering/covariance).
-- Keep method comparisons reproducible with artifact-focused metrics.
+- Added configurable prior-aware smoothing/hold behavior across realtime localization, speaker grouping, direction assignment, and slow-path speaker-map publication.
+- Added a cross-stage comparison runner at `realtime_pipeline.robustness_validate` with bucket summaries, deltas, showcases, plots, and audio-backed artifacts where relevant.
+- Added plan/handoff docs:
+  - `localization-speaker-smoothing-plan.md`
+  - `SUN_MAR_8_MORNING_PLAN`
+  - `next-agent-grouping-instructions.md`
+- Updated validation/docs so the generated outputs are easier to inspect and compare.
+- Added tests for the new grouping carry-forward / robustness behavior.
 
-Changes:
-- Added WOLA-style FD processing for MVDR/GSC in realtime fast path.
-- Switched delay-and-sum to fractional-delay alignment.
-- Added covariance update gating during likely speech-active frames.
-- Added mild optional postfilter (Wiener-like, smoothed, with gain floor).
-- Added artifact metrics in method comparison outputs.
-
-Methods tested:
-- mvdr_fd:
-  - Result: very good static reduction (best subjective quality so far).
-  - Notes: most stable/clean in current tuning.
-  - Key metrics: delta_sii=, delta_stoi=, delta_si_sdr_db=, high_band_noise_ratio=, frame_gain_delta_p95=
-- gsc_fd:
-  - Result: pending detailed pass.
-  - Notes:
-  - Key metrics: delta_sii=, delta_stoi=, delta_si_sdr_db=, high_band_noise_ratio=, frame_gain_delta_p95=
-- delay_sum:
-  - Result: pending detailed pass.
-  - Notes:
-  - Key metrics: delta_sii=, delta_stoi=, delta_si_sdr_db=, high_band_noise_ratio=, frame_gain_delta_p95=
-
-Decision:
-- Preferred method: mvdr_fd (current).
-- Why: clearly reduced static while preserving voice clarity.
-- Next tweak: tune postfilter and covariance update gating for remaining edge-case artifacts.
-
-MVDR defaults tuning (quick pass):
-- tested:
-  - baseline: scale=0.25, floor=0.18, gain_ema=0.20
-  - mid:      scale=0.25, floor=0.22, gain_ema=0.20
-  - aggressive: scale=0.25, floor=0.28, gain_ema=0.20
-- selected default: floor=0.22 (middle ground)
-- reason: improved STOI/naturalness vs baseline with smaller artifact tradeoff than floor=0.28.
-
-Deferred follow-up:
-- Next-stage beamforming ideas (GSC stabilization, profile presets, report gates) moved to:
-  - beamforming/look_into.md
-- Reason: prioritizing other work now; keep this as ready backlog.
+Current measured outcome:
+- Better instrumentation and clearer before/after review paths.
+- Mixed quality results: some stability wins, but grouping and some dense-scene cases still regress and need retuning.
