@@ -4,7 +4,7 @@ import { DemoWsClient } from "./api/ws";
 import { RealtimeAudioPlayer, type PlaybackStats } from "./audio/player";
 import { createWavBlobFromFloat32Chunks } from "./audio/wav";
 import { MetricsPanel } from "./components/MetricsPanel";
-import { SceneLauncher } from "./components/SceneLauncher";
+import { SceneLauncher, type SessionLaunchConfig } from "./components/SceneLauncher";
 import { SpeakerControlPopover } from "./components/SpeakerControlPopover";
 import { SpeakerStage } from "./components/SpeakerStage";
 import { WaveformTimeline } from "./components/WaveformTimeline";
@@ -190,11 +190,8 @@ export default function App() {
     []
   );
 
-  async function startSession(
-    scenePath: string,
-    backgroundNoisePath: string,
-    backgroundNoiseGain: number
-  ): Promise<void> {
+  async function startSession(config: SessionLaunchConfig): Promise<void> {
+    const { inputSource, scenePath, backgroundNoisePath, backgroundNoiseGain, audioDeviceQuery } = config;
     setStatus("starting");
     capturedAudioRef.current = [];
     totalSamplesRef.current = 0;
@@ -206,11 +203,13 @@ export default function App() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        input_source: inputSource,
         scene_config_path: scenePath,
         separation_mode: "mock",
         processing_mode: processingMode,
         background_noise_audio_path: backgroundNoisePath,
         background_noise_gain: backgroundNoiseGain,
+        audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
       }),
     });
     if (!resp.ok) {

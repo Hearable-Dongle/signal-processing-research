@@ -5,5 +5,6 @@ scipy==1.13.1
 librosa==0.10.2.post1
 pyroomacoustics==0.7.4
 soundfile==0.13.1
+sounddevice==0.5.3
 tqdm==4.67.1
 scikit-learn==1.5.2

@@ -43,9 +43,10 @@ def healthz() -> dict[str, str]:
 
 @app.post("/api/session/start", response_model=SessionStartResponse)
 def start_session(req: SessionStartRequest) -> SessionStartResponse:
-    scene_path = Path(req.scene_config_path)
-    if not scene_path.exists():
-        raise HTTPException(status_code=400, detail=f"scene_config_path does not exist: {scene_path}")
+    if req.input_source == "simulation":
+        scene_path = Path(req.scene_config_path)
+        if not scene_path.exists():
+            raise HTTPException(status_code=400, detail=f"scene_config_path does not exist: {scene_path}")
     session = manager.start_session(req)
     return SessionStartResponse(session_id=session.session_id, status=session.status, config_echo=req)
 

@@ -8,7 +8,11 @@ SCHEMA_VERSION = "v1"
 
 
 class SessionStartRequest(BaseModel):
-    scene_config_path: str
+    scene_config_path: str = ""
+    input_source: Literal["simulation", "respeaker_live"] = "simulation"
+    audio_device_query: str | None = None
+    channel_count: int = 4
+    sample_rate_hz: int = 16000
     background_noise_audio_path: str | None = None
     background_noise_gain: float = 0.15
     focus_ratio: float = 2.0

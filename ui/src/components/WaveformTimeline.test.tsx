@@ -11,8 +11,10 @@ test("renders waveform timeline with playhead and time labels", () => {
       rawMixedDurationMs={4000}
       playheadMs={1500}
       canPlayBeamformed={true}
+      canPauseBeamformed={false}
       isBeamformedPlaying={false}
-      onToggleBeamformedPlayback={() => undefined}
+      onPlayBeamformed={() => undefined}
+      onPauseBeamformed={() => undefined}
       canPlayRawMixed={true}
       isRawMixedPlaying={false}
       onToggleRawMixedPlayback={() => undefined}
