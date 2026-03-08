@@ -70,6 +70,7 @@ class SpeakerIdentityGrouper:
         matched_stream_conf: dict[int, float] = {}
         held_streams: list[int] = []
         blocked_switch_streams: list[int] = []
+        continuity_tiebreak_margin = 0.03
 
         if active_obs:
             stream_ids = [obs.stream_index for obs in active_obs]
@@ -91,14 +92,18 @@ class SpeakerIdentityGrouper:
                 for r, c in zip(rows.tolist(), cols.tolist()):
                     score = float(np.clip(sim[r, c], -1.0, 1.0))
                     adjusted_score = float(adjusted[r, c])
+                    best_raw_score = float(np.max(sim[r]))
+                    raw_margin = best_raw_score - score
                     if score >= cfg.match_threshold:
                         sidx = stream_ids[r]
                         sid = known_ids[c]
                         prev_sid = self._prev_stream_to_speaker.get(sidx)
+                        if prev_sid in known_ids and sid == prev_sid and raw_margin > continuity_tiebreak_margin:
+                            continue
                         if prev_sid in known_ids and sid != prev_sid:
                             prev_idx = known_ids.index(prev_sid)
-                            prev_score = float(adjusted[r, prev_idx])
-                            if adjusted_score < prev_score + cfg.switch_penalty:
+                            prev_score = float(sim[r, prev_idx])
+                            if score < prev_score + cfg.switch_penalty:
                                 blocked_switch_streams.append(sidx)
                                 continue
                         matched_stream_to_speaker[sidx] = sid

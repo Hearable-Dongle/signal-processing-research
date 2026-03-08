@@ -92,11 +92,11 @@ def _robust_identity_config(sample_rate: int, chunk_ms: int, robust_mode: bool) 
     return IdentityConfig(
         sample_rate_hz=sample_rate,
         chunk_duration_ms=chunk_ms,
-        continuity_bonus=0.12 if robust_mode else 0.0,
-        switch_penalty=0.2 if robust_mode else 0.0,
-        hold_similarity_threshold=0.45 if robust_mode else 1.1,
-        carry_forward_chunks=3 if robust_mode else 0,
-        confidence_decay=0.85 if robust_mode else 0.0,
+        continuity_bonus=0.04 if robust_mode else 0.0,
+        switch_penalty=0.06 if robust_mode else 0.0,
+        hold_similarity_threshold=0.6 if robust_mode else 1.1,
+        carry_forward_chunks=1 if robust_mode else 0,
+        confidence_decay=0.92 if robust_mode else 0.0,
     )
 
 
@@ -104,8 +104,8 @@ def _robust_direction_config(sample_rate: int, chunk_ms: int, robust_mode: bool)
     return DirectionAssignmentConfig(
         sample_rate=sample_rate,
         chunk_ms=chunk_ms,
-        transition_penalty_deg=35.0 if robust_mode else 180.0,
-        min_confidence_for_switch=0.55 if robust_mode else 0.0,
+        transition_penalty_deg=22.0 if robust_mode else 180.0,
+        min_confidence_for_switch=0.35 if robust_mode else 0.0,
         hold_confidence_decay=0.9 if robust_mode else 1.0,
         stale_confidence_decay=0.96 if robust_mode else 1.0,
         min_persist_confidence=0.05 if robust_mode else 0.0,

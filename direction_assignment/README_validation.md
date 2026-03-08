@@ -24,6 +24,11 @@ PYTHONPATH=. python -m realtime_pipeline.robustness_validate \
   --synthetic-scenes-per-bucket 2
 ```
 
+Current direction-tracking defaults favor faster reacquisition than the previous robust pass:
+- `transition_penalty_deg=22`
+- `min_confidence_for_switch=0.35`
+- low-speaker transition bypass is enabled when `<= 1` aggregated speaker is active
+
 ## Identity Modes
 
 - `--identity-mode online_only`

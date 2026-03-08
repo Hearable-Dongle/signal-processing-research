@@ -109,9 +109,16 @@ In `DirectionAssignmentConfig`:
 - `doa_ema_alpha`
 - `min_stream_rms`
 - `min_pair_coherence`
+- `transition_penalty_deg=22.0`
+- `min_confidence_for_switch=0.35`
+- `low_speaker_transition_bypass_count=1`
 - `speaker_stale_timeout_ms`
 - `speaker_forget_timeout_ms`
 - `non_focus_weight`
+
+Tracking behavior notes:
+- transition blocking is only used when multiple aggregated speakers are active
+- when `<= 1` aggregated speaker is active, the tracker bypasses the transition block and follows the snapped DOA directly
 
 ## Runtime Usage Example
 ```python

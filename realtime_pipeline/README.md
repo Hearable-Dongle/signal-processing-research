@@ -98,6 +98,13 @@ Robust tracking controls are enabled by default in this path:
 - direction-assignment transition penalties, low-confidence hold, stale decay
 - slow-path speaker-map hold/decay to avoid abrupt weak-evidence remaps
 
+Current robust defaults are intentionally conservative but less sticky than the prior pass:
+- SRP peak matching: `srp_peak_match_tolerance_deg=12`, `srp_peak_hold_frames=4`
+- identity grouping: `continuity_bonus=0.04`, `switch_penalty=0.06`, `hold_similarity_threshold=0.6`, `carry_forward_chunks=1`, `confidence_decay=0.92`
+- direction assignment: `transition_penalty_deg=22`, `min_confidence_for_switch=0.35`
+- low-speaker direction tracking bypasses the transition block when `<= 1` aggregated speaker is active
+- published speaker-map hold: `speaker_map_hold_ms=300`
+
 Disable them for ablation:
 
 ```bash

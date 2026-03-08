@@ -15,11 +15,11 @@ class IdentityConfig:
     max_speakers: int = 8
     retire_after_chunks: int = 25
     new_speaker_confidence: float = 0.5
-    continuity_bonus: float = 0.12
-    switch_penalty: float = 0.2
-    hold_similarity_threshold: float = 0.45
-    carry_forward_chunks: int = 3
-    confidence_decay: float = 0.85
+    continuity_bonus: float = 0.04
+    switch_penalty: float = 0.06
+    hold_similarity_threshold: float = 0.6
+    carry_forward_chunks: int = 1
+    confidence_decay: float = 0.92
 
     # Embedding controls
     n_mfcc: int = 13

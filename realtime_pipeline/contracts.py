@@ -45,8 +45,8 @@ class PipelineConfig:
     srp_peak_min_score: float = 0.05
     srp_peak_ema_alpha: float = 0.35
     srp_peak_hysteresis_margin: float = 0.08
-    srp_peak_match_tolerance_deg: float = 20.0
-    srp_peak_hold_frames: int = 8
+    srp_peak_match_tolerance_deg: float = 12.0
+    srp_peak_hold_frames: int = 4
     srp_peak_max_step_deg: float = 12.0
     srp_peak_score_decay: float = 0.9
     slow_queue_max_frames: int = 256
@@ -62,18 +62,18 @@ class PipelineConfig:
     direction_focus_gain_db: float = 0.0
     direction_non_focus_attenuation_db: float = -14.0
     max_user_boost_db: float = 12.0
-    identity_continuity_bonus: float = 0.12
-    identity_switch_penalty: float = 0.2
-    identity_hold_similarity_threshold: float = 0.45
-    identity_carry_forward_chunks: int = 3
-    identity_confidence_decay: float = 0.85
-    direction_transition_penalty_deg: float = 35.0
-    direction_min_confidence_for_switch: float = 0.55
+    identity_continuity_bonus: float = 0.04
+    identity_switch_penalty: float = 0.06
+    identity_hold_similarity_threshold: float = 0.6
+    identity_carry_forward_chunks: int = 1
+    identity_confidence_decay: float = 0.92
+    direction_transition_penalty_deg: float = 22.0
+    direction_min_confidence_for_switch: float = 0.35
     direction_hold_confidence_decay: float = 0.9
     direction_stale_confidence_decay: float = 0.96
     direction_min_persist_confidence: float = 0.05
     speaker_map_min_confidence_for_refresh: float = 0.2
-    speaker_map_hold_ms: float = 800.0
+    speaker_map_hold_ms: float = 300.0
     speaker_map_confidence_decay: float = 0.9
     speaker_map_activity_decay: float = 0.92
     # Beamformer mode

@@ -74,6 +74,7 @@ def update_speaker_states(
     held_low_confidence: list[int] = []
     blocked_transitions: list[int] = []
     updated_ids: set[int] = set()
+    allow_transition_bypass = len(aggregated_obs) <= max(0, int(cfg.low_speaker_transition_bypass_count))
 
     # Update from current observations.
     for sid, (raw_doa, conf) in aggregated_obs.items():
@@ -108,7 +109,11 @@ def update_speaker_states(
         else:
             st = states[sid]
             diff = circular_diff_deg(snapped_doa, st.direction_deg)
-            if abs(diff) > cfg.transition_penalty_deg and conf < cfg.min_confidence_for_switch:
+            if (
+                not allow_transition_bypass
+                and abs(diff) > cfg.transition_penalty_deg
+                and conf < cfg.min_confidence_for_switch
+            ):
                 st.confidence = float(np.clip(st.confidence * cfg.hold_confidence_decay, 0.0, 1.0))
                 st.hold_count += 1
                 st.last_raw_direction_deg = float(raw_doa)
@@ -168,6 +173,7 @@ def update_speaker_states(
         "skipped_low_confidence_speakers": skipped_low_confidence,
         "held_low_confidence_speakers": held_low_confidence,
         "blocked_transition_speakers": blocked_transitions,
+        "transition_bypass_active": bool(allow_transition_bypass),
         "forgotten_speakers": forget_ids,
         "stale_speakers": stale_ids,
     }
