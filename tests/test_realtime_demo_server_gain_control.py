@@ -1,5 +1,5 @@
-from realtime_demo_server.models import SessionStartRequest
-from realtime_demo_server.session import DemoSession, _inject_background_noise_source
+from mic_array_forwarder.models import SessionStartRequest
+from mic_array_forwarder.session import DemoSession, _inject_background_noise_source
 from simulation.simulation_config import SimulationConfig
 
 

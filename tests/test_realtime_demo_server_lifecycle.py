@@ -2,8 +2,8 @@ import time
 
 from fastapi.testclient import TestClient
 
-from realtime_demo_server.app import app
-from realtime_demo_server.manager import manager
+from mic_array_forwarder.app import app
+from mic_array_forwarder.manager import manager
 
 
 client = TestClient(app)

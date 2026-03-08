@@ -1,4 +1,4 @@
-# Realtime Demo Server
+# Mic Array Forwarder
 
 FastAPI backend bridge for the realtime speaker UI demo.
 
@@ -9,7 +9,7 @@ It serves two input modes behind the same REST + WebSocket contract:
 
 The frontend still talks to `http://localhost:8000` and `ws://localhost:8000/ws/session/{id}` either way.
 
-Dockerfile location: `realtime_demo_server/Dockerfile`.
+Dockerfile location: `mic_array_forwarder/Dockerfile`.
 
 ## How it works
 
@@ -48,7 +48,7 @@ python -m pip install -U fastapi uvicorn websockets sounddevice
 If you want the broader backend dependencies used by the demo server image:
 
 ```bash
-python -m pip install -r realtime_demo_server/requirements-docker.txt
+python -m pip install -r mic_array_forwarder/requirements-docker.txt
 ```
 
 `sounddevice` requires a working PortAudio setup on the host machine.
@@ -58,7 +58,13 @@ python -m pip install -r realtime_demo_server/requirements-docker.txt
 Start the backend from the repo root:
 
 ```bash
-PYTHONPATH=. uvicorn realtime_demo_server.app:app --reload --port 8000
+PYTHONPATH=. uvicorn mic_array_forwarder.app:app --reload --port 8000
+```
+
+Read live mic array messages in a terminal:
+
+```bash
+python -m mic_array_forwarder.tools.ws_read --audio-device-query "ReSpeaker"
 ```
 
 Start the frontend in another terminal:
@@ -76,7 +82,7 @@ Open `http://localhost:5173`.
 Build from repo root:
 
 ```bash
-docker build -f realtime_demo_server/Dockerfile -t speaker-demo-backend .
+docker build -f mic_array_forwarder/Dockerfile -t speaker-demo-backend .
 ```
 
 Run from repo root:

@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY realtime_demo_server/requirements-docker.txt /tmp/requirements-docker.txt
+COPY mic_array_forwarder/requirements-docker.txt /tmp/requirements-docker.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-docker.txt
 
 # Copy the repo so local module imports (simulation/, realtime_pipeline/, etc.) resolve.
@@ -20,4 +20,4 @@ COPY . /app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "realtime_demo_server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "mic_array_forwarder.app:app", "--host", "0.0.0.0", "--port", "8000"]

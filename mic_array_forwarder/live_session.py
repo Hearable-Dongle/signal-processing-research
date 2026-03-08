@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from realtime_demo_server.models import (
+from mic_array_forwarder.models import (
     MetricsMessage,
     SCHEMA_VERSION,
     SessionEventMessage,
@@ -21,7 +21,7 @@ from realtime_demo_server.models import (
     SpeakerStateItem,
     SpeakerStateMessage,
 )
-from realtime_demo_server.ws_codec import encode_audio_chunk
+from mic_array_forwarder.ws_codec import encode_audio_chunk
 from realtime_pipeline.contracts import SpeakerGainDirection
 from realtime_pipeline.fast_path import delay_and_sum_frame
 from realtime_pipeline.srp_tracker import SRPPeakTracker

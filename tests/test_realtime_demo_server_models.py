@@ -1,4 +1,4 @@
-from realtime_demo_server.models import (
+from mic_array_forwarder.models import (
     AdjustSpeakerGainMessage,
     MetricsMessage,
     SCHEMA_VERSION,
