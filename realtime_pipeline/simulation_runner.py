@@ -38,6 +38,7 @@ def run_simulation_pipeline(
     robust_mode: bool = True,
     capture_trace: bool = False,
     localization_backend: str = "tiny_dp_ipd",
+    tracking_mode: str = "multi_peak_v2",
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -51,6 +52,7 @@ def run_simulation_pipeline(
         fast_frame_ms=frame_ms,
         slow_chunk_ms=200,
         localization_backend=str(localization_backend),
+        tracking_mode=str(tracking_mode),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
         output_normalization_enabled=bool(output_normalization_enabled),
@@ -179,6 +181,7 @@ def run_simulation_pipeline(
         "speaker_map_final": speaker_map_rows,
         "robust_mode": bool(robust_mode),
         "localization_backend": str(cfg.localization_backend),
+        "tracking_mode": str(cfg.tracking_mode),
     }
     if capture_trace:
         summary["speaker_map_trace"] = speaker_map_trace
@@ -200,6 +203,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-output-amplification", action="store_true")
     p.add_argument("--disable-robust-mode", action="store_true")
     p.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy"], default="tiny_dp_ipd")
+    p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
     return p
 
 
@@ -221,6 +225,7 @@ def main() -> None:
         output_allow_amplification=bool(args.allow_output_amplification),
         robust_mode=not bool(args.disable_robust_mode),
         localization_backend=str(args.localization_backend),
+        tracking_mode=str(args.tracking_mode),
     )
     print(json.dumps(summary, indent=2))
 

@@ -69,6 +69,7 @@ def main() -> int:
         choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy"],
         default="tiny_dp_ipd",
     )
+    parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
     args = parser.parse_args()
 
     payload = {
@@ -79,6 +80,7 @@ def main() -> int:
         "monitor_source": args.monitor_source,
         "mic_array_profile": args.mic_array_profile,
         "localization_backend": args.localization_backend,
+        "tracking_mode": args.tracking_mode,
         "channel_map": [int(v) for v in args.channel_map.split(",") if v.strip()] if args.channel_map else None,
         "separation_mode": "mock",
     }

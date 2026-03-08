@@ -443,6 +443,8 @@ class LiveDemoSession:
                 grid_size=72,
                 min_peak_separation_deg=15.0,
                 small_aperture_bias=True,
+                tracking_mode=str(self.req.tracking_mode),
+                max_tracks=max(1, min(int(self.req.max_speakers_hint), 3)),
             )
 
             def callback(indata: np.ndarray, _frames: int, _time_info: Any, status: Any) -> None:

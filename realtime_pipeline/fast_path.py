@@ -331,6 +331,17 @@ class FastPathWorker(threading.Thread):
             min_peak_separation_deg=config.localization_min_peak_separation_deg,
             small_aperture_bias=config.localization_small_aperture_bias,
             sound_speed_m_s=config.sound_speed_m_s,
+            tracking_mode=config.tracking_mode,
+            max_tracks=config.localization_max_tracks,
+            max_assoc_distance_deg=config.localization_max_assoc_distance_deg,
+            track_hold_frames=config.localization_track_hold_frames,
+            track_kill_frames=config.localization_track_kill_frames,
+            new_track_min_confidence=config.localization_new_track_min_confidence,
+            track_confidence_decay=config.localization_track_confidence_decay,
+            velocity_alpha=config.localization_velocity_alpha,
+            angle_alpha=config.localization_angle_alpha,
+            min_relative_peak_score=config.localization_min_relative_peak_score,
+            min_peak_contrast=config.localization_min_peak_contrast,
         )
         self._frame_idx = 0
         self._rms_gain_ema = 1.0
