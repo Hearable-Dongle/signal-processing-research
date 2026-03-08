@@ -11,6 +11,7 @@ export type SessionLaunchConfig = {
   backgroundNoiseGain: number;
   audioDeviceQuery: string;
   monitorSource: MonitorSource;
+  sampleRateHz: number;
 };
 
 type Props = {
@@ -22,6 +23,7 @@ type Props = {
   onStop: () => void;
   onKillRun: () => void;
   canKillRun: boolean;
+  onStopActiveSession: () => void;
   onDownloadWav: () => void;
   canDownloadWav: boolean;
   latencyMs: number;
@@ -41,6 +43,7 @@ export function SceneLauncher({
   onStop,
   onKillRun,
   canKillRun,
+  onStopActiveSession,
   onDownloadWav,
   canDownloadWav,
   latencyMs,
@@ -55,6 +58,7 @@ export function SceneLauncher({
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
   const [audioDeviceQuery, setAudioDeviceQuery] = useState("ReSpeaker");
+  const [sampleRateHz, setSampleRateHz] = useState(48000);
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
@@ -89,6 +93,17 @@ export function SceneLauncher({
         onChange={(e) => setAudioDeviceQuery(e.target.value)}
         disabled={inputSource !== "respeaker_live"}
         placeholder="ReSpeaker"
+      />
+      <label htmlFor="sample-rate-hz">Sample rate (Hz)</label>
+      <input
+        id="sample-rate-hz"
+        type="number"
+        min={8000}
+        max={96000}
+        step={1000}
+        value={sampleRateHz}
+        onChange={(e) => setSampleRateHz(Math.max(8000, Math.min(96000, Number(e.target.value))))}
+        disabled={inputSource !== "respeaker_live"}
       />
       <label htmlFor="background-noise">Background noise audio path</label>
       <input
@@ -163,6 +178,7 @@ export function SceneLauncher({
               backgroundNoiseGain,
               audioDeviceQuery,
               monitorSource,
+              sampleRateHz,
             })
           }
           disabled={status === "running" || status === "starting"}
@@ -175,6 +191,7 @@ export function SceneLauncher({
         <button onClick={onKillRun} disabled={!canKillRun}>
           Kill Current Run
         </button>
+        <button onClick={onStopActiveSession}>Stop Active Session</button>
         <button onClick={onDownloadWav} disabled={!canDownloadWav}>
           Download WAV
         </button>

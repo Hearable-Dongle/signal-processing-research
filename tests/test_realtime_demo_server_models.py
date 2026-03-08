@@ -17,6 +17,7 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.separation_mode == "auto"
     assert req.processing_mode == "specific_speaker_enhancement"
     assert req.monitor_source == "processed"
+    assert req.sample_rate_hz == 48000
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,

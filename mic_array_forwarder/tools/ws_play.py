@@ -16,7 +16,7 @@ import websockets
 
 from mic_array_forwarder.ws_codec import decode_audio_chunk
 
-SAMPLE_RATE_HZ = 16000
+SAMPLE_RATE_HZ = 48000
 
 
 def _start_session(http_base: str, payload: dict, *, stop_existing: bool) -> str:

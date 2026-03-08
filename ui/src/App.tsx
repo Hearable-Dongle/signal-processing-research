@@ -22,7 +22,7 @@ const DEFAULT_SCENE = "simulation/simulations/configs/library_scene/library_k1_s
 const DEFAULT_BACKGROUND_NOISE = "wham_noise/tr/01dc0215_0.22439_01fc0207_-0.22439sp12.wav";
 const DEFAULT_BACKGROUND_NOISE_GAIN = 0.15;
 const AUDIO_HEADER_BYTES = 16;
-const AUDIO_SAMPLE_RATE = 16000;
+const DEFAULT_SAMPLE_RATE = 16000;
 const DEFAULT_LATENCY_MS = 220;
 const WAVEFORM_BINS = 800;
 const DEFAULT_PROCESSING_MODE: ProcessingMode = "specific_speaker_enhancement";
@@ -117,6 +117,8 @@ export default function App() {
   const [processingMode, setProcessingMode] = useState<ProcessingMode>(DEFAULT_PROCESSING_MODE);
   const [monitorSource, setMonitorSource] = useState<MonitorSource>("processed");
   const [activePlaybackSource, setActivePlaybackSource] = useState<PlaybackSource | null>(null);
+  const [activeInputSource, setActiveInputSource] = useState<SessionLaunchConfig["inputSource"]>("simulation");
+  const [audioSampleRateHz, setAudioSampleRateHz] = useState(DEFAULT_SAMPLE_RATE);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
@@ -200,9 +202,13 @@ export default function App() {
       backgroundNoiseGain,
       audioDeviceQuery,
       monitorSource: nextMonitorSource,
+      sampleRateHz,
     } = config;
+    const playbackSampleRateHz = inputSource === "respeaker_live" ? sampleRateHz : DEFAULT_SAMPLE_RATE;
     setStatus("starting");
+    setActiveInputSource(inputSource);
     setMonitorSource(nextMonitorSource);
+    setAudioSampleRateHz(playbackSampleRateHz);
     capturedAudioRef.current = [];
     totalSamplesRef.current = 0;
     rawMixedTotalSamplesRef.current = 0;
@@ -218,6 +224,7 @@ export default function App() {
         separation_mode: "mock",
         processing_mode: processingMode,
         monitor_source: nextMonitorSource,
+        sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
         background_noise_audio_path: backgroundNoisePath,
         background_noise_gain: backgroundNoiseGain,
         audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
@@ -229,29 +236,32 @@ export default function App() {
     }
     const payload = (await resp.json()) as { session_id: string };
     setSessionId(payload.session_id);
-    void (async () => {
-      try {
-        for (let i = 0; i < 30; i += 1) {
-          const rawResp = await fetch(`http://localhost:8000/api/session/${payload.session_id}/raw-mix-wav`);
-          if (rawResp.ok && typeof rawResp.arrayBuffer === "function") {
-            const parsed = parsePcm16MonoWav(await rawResp.arrayBuffer());
+    if (inputSource === "simulation") {
+      void (async () => {
+        try {
+          for (let i = 0; i < 30; i += 1) {
+            const rawResp = await fetch(`http://localhost:8000/api/session/${payload.session_id}/raw-mix-wav`);
+            if (rawResp.ok && typeof rawResp.arrayBuffer === "function") {
+              const parsed = parsePcm16MonoWav(await rawResp.arrayBuffer());
             if (parsed) {
               rawMixedTotalSamplesRef.current = parsed.samples.length;
               setRawWaveformBins(computeWaveformBinsFromPcm16(parsed.samples, WAVEFORM_BINS));
+              setAudioSampleRateHz(parsed.sampleRateHz);
             }
-            break;
+              break;
+            }
+            if (rawResp.ok) {
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 100));
           }
-          if (rawResp.ok) {
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 100));
+        } catch {
+          // Raw mixed waveform visualization is best-effort.
         }
-      } catch {
-        // Raw mixed waveform visualization is best-effort.
-      }
-    })();
+      })();
+    }
     audioRef.current.setTargetLatencyMs(latencyMs);
-    await audioRef.current.start();
+    await audioRef.current.start(playbackSampleRateHz);
     setPlaybackStats(audioRef.current.getStats());
     ws.connect(payload.session_id);
     setStatus("running");
@@ -274,6 +284,14 @@ export default function App() {
       } catch {
         // Local teardown is authoritative for kill; backend stop is best effort.
       }
+    }
+  }
+
+  async function stopActiveSession(): Promise<void> {
+    try {
+      await fetch("http://localhost:8000/api/session/active/stop", { method: "POST" });
+    } catch {
+      // Best-effort stop for any externally started session.
     }
   }
 
@@ -312,7 +330,7 @@ export default function App() {
     if (!capturedAudioRef.current.length) {
       return;
     }
-    const blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, AUDIO_SAMPLE_RATE);
+    const blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const suffix = sessionId ? sessionId : "session";
@@ -358,9 +376,9 @@ export default function App() {
       if (!capturedAudioRef.current.length) {
         return;
       }
-      blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, AUDIO_SAMPLE_RATE);
+      blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
     } else {
-      if (!sessionId) {
+      if (!sessionId || activeInputSource !== "simulation") {
         return;
       }
       const resp = await fetch(`http://localhost:8000/api/session/${sessionId}/raw-mix-wav`);
@@ -399,10 +417,10 @@ export default function App() {
     setIsOutputPlaybackPaused(true);
   }
 
-  const totalDurationMs = (totalSamplesRef.current / AUDIO_SAMPLE_RATE) * 1000;
-  const rawMixedDurationMs = (rawMixedTotalSamplesRef.current / AUDIO_SAMPLE_RATE) * 1000;
+  const totalDurationMs = (totalSamplesRef.current / audioSampleRateHz) * 1000;
+  const rawMixedDurationMs = (rawMixedTotalSamplesRef.current / audioSampleRateHz) * 1000;
   const canPlayBeamformed = capturedAudioRef.current.length > 0;
-  const canPlayRawMixed = Boolean(sessionId);
+  const canPlayRawMixed = Boolean(sessionId) && activeInputSource === "simulation";
 
   return (
     <main className="app-shell">
@@ -417,6 +435,7 @@ export default function App() {
           onStop={stopSession}
           onKillRun={killCurrentRun}
           canKillRun={status === "running" || status === "starting" || status === "stopping"}
+          onStopActiveSession={stopActiveSession}
           onDownloadWav={downloadWav}
           canDownloadWav={capturedAudioRef.current.length > 0}
           latencyMs={latencyMs}

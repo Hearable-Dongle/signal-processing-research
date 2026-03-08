@@ -12,7 +12,7 @@ class SessionStartRequest(BaseModel):
     input_source: Literal["simulation", "respeaker_live"] = "simulation"
     audio_device_query: str | None = None
     channel_count: int = 4
-    sample_rate_hz: int = 16000
+    sample_rate_hz: int = 48000
     monitor_source: Literal["processed", "raw_mixed"] = "processed"
     background_noise_audio_path: str | None = None
     background_noise_gain: float = 0.15
