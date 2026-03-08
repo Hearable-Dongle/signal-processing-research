@@ -25,30 +25,10 @@ from mic_array_forwarder.ws_codec import encode_audio_chunk
 from realtime_pipeline.contracts import SpeakerGainDirection
 from realtime_pipeline.fast_path import delay_and_sum_frame
 from realtime_pipeline.srp_tracker import SRPPeakTracker
+from simulation.mic_array_profiles import mic_positions_xyz
 
 def _mic_geometry_from_profile(profile: str) -> np.ndarray:
-    if profile == "respeaker_cross_0640":
-        r = 0.032  # 64.0 mm across
-        return np.array(
-            [
-                [r, 0.0, 0.0],
-                [0.0, r, 0.0],
-                [-r, 0.0, 0.0],
-                [0.0, -r, 0.0],
-            ],
-            dtype=np.float64,
-        )
-    # ReSpeaker Mic Array v3.0 ~45.7 mm across the array.
-    r = 0.0457 / 2.0
-    return np.array(
-        [
-            [r, 0.0, 0.0],
-            [0.0, r, 0.0],
-            [-r, 0.0, 0.0],
-            [0.0, -r, 0.0],
-        ],
-        dtype=np.float64,
-    )
+    return mic_positions_xyz(profile)
 
 
 def _now_ms() -> float:
@@ -446,7 +426,7 @@ class LiveDemoSession:
             tracker = SRPPeakTracker(
                 mic_pos=self._mic_geometry_xyz.T,
                 fs=sample_rate_hz,
-                window_ms=40,
+                window_ms=160,
                 nfft=512,
                 overlap=0.5,
                 freq_range=(200, 3000),
@@ -459,6 +439,10 @@ class LiveDemoSession:
                 hold_frames=6,
                 max_step_deg=12.0,
                 score_decay=0.9,
+                backend=str(self.req.localization_backend),
+                grid_size=72,
+                min_peak_separation_deg=15.0,
+                small_aperture_bias=True,
             )
 
             def callback(indata: np.ndarray, _frames: int, _time_info: Any, status: Any) -> None:

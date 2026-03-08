@@ -35,6 +35,15 @@ class PipelineConfig:
     sample_rate_hz: int = 16000
     fast_frame_ms: int = 10
     slow_chunk_ms: int = 200
+    localization_backend: str = "tiny_dp_ipd"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy
+    localization_window_ms: int = 160
+    localization_hop_ms: int = 50
+    localization_grid_size: int = 72
+    localization_min_peak_separation_deg: float = 15.0
+    localization_small_aperture_bias: bool = True
+    localization_fusion_enabled: bool = True
+    localization_model_path: str | None = None
+    localization_use_hailo: bool = False
     srp_window_ms: int = 40
     srp_nfft: int = 512
     srp_overlap: float = 0.5

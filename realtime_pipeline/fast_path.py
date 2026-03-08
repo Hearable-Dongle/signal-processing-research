@@ -313,7 +313,7 @@ class FastPathWorker(threading.Thread):
         self._tracker = SRPPeakTracker(
             mic_pos=self._mic_geometry_xyz if self._mic_geometry_xyz.shape[0] == 3 else self._mic_geometry_xyz.T,
             fs=config.sample_rate_hz,
-            window_ms=config.srp_window_ms,
+            window_ms=config.localization_window_ms,
             nfft=config.srp_nfft,
             overlap=config.srp_overlap,
             freq_range=(config.srp_freq_min_hz, config.srp_freq_max_hz),
@@ -326,6 +326,11 @@ class FastPathWorker(threading.Thread):
             hold_frames=config.srp_peak_hold_frames,
             max_step_deg=config.srp_peak_max_step_deg,
             score_decay=config.srp_peak_score_decay,
+            backend=config.localization_backend,
+            grid_size=config.localization_grid_size,
+            min_peak_separation_deg=config.localization_min_peak_separation_deg,
+            small_aperture_bias=config.localization_small_aperture_bias,
+            sound_speed_m_s=config.sound_speed_m_s,
         )
         self._frame_idx = 0
         self._rms_gain_ema = 1.0

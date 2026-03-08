@@ -64,6 +64,11 @@ def main() -> int:
     )
     parser.add_argument("--channel-map", default="", help="Comma-separated channel map, e.g. 0,1,2,3")
     parser.add_argument("--monitor-source", choices=["processed", "raw_mixed"], default="processed")
+    parser.add_argument(
+        "--localization-backend",
+        choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy"],
+        default="tiny_dp_ipd",
+    )
     args = parser.parse_args()
 
     payload = {
@@ -73,6 +78,7 @@ def main() -> int:
         "sample_rate_hz": args.sample_rate_hz,
         "monitor_source": args.monitor_source,
         "mic_array_profile": args.mic_array_profile,
+        "localization_backend": args.localization_backend,
         "channel_map": [int(v) for v in args.channel_map.split(",") if v.strip()] if args.channel_map else None,
         "separation_mode": "mock",
     }

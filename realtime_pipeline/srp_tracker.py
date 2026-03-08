@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from beamforming.localization_bridge import normalize_doa_list
-from localization.algo import SRPPHATLocalization
+
+from .localization_backends import build_localization_backend
 
 
 class SRPPeakTracker:
@@ -28,9 +29,15 @@ class SRPPeakTracker:
         hold_frames: int = 8,
         max_step_deg: float = 12.0,
         score_decay: float = 0.9,
+        backend: str = "srp_phat_legacy",
+        grid_size: int = 72,
+        min_peak_separation_deg: float = 15.0,
+        small_aperture_bias: bool = True,
+        sound_speed_m_s: float = 343.0,
     ):
         self._fs = int(fs)
         self._window_samples = max(1, int(window_ms * fs / 1000))
+        self._hop_samples = self._window_samples
         self._frames: deque[np.ndarray] = deque()
         self._total = 0
         self._frame_idx = 0
@@ -47,14 +54,19 @@ class SRPPeakTracker:
         overlap_eff = float(overlap)
         if int(nfft_eff * overlap_eff) >= nfft_eff:
             overlap_eff = float((nfft_eff - 1) / nfft_eff)
-
-        self._localizer = SRPPHATLocalization(
+        self._backend_name = str(backend)
+        self._backend = build_localization_backend(
+            self._backend_name,
             mic_pos=np.asarray(mic_pos, dtype=float),
             fs=fs,
             nfft=nfft_eff,
             overlap=overlap_eff,
             freq_range=freq_range,
             max_sources=max_sources,
+            sound_speed_m_s=sound_speed_m_s,
+            grid_size=grid_size,
+            min_separation_deg=min_peak_separation_deg,
+            small_aperture_bias=small_aperture_bias,
         )
         self._max_sources = int(max_sources)
 
@@ -110,25 +122,27 @@ class SRPPeakTracker:
                 self._frames[0] = left[:, extra:]
                 self._total -= extra
 
-        min_needed = max(2, int(getattr(self._localizer, "nfft", 2)))
+        min_needed = max(32, getattr(self._backend, "nfft", 32) if hasattr(self._backend, "nfft") else 32)
         if self._total < min_needed:
-            return [], None, {"raw_peaks_deg": [], "tracked_peaks_deg": [], "held_tracks": 0}
+            return [], None, {"backend": self._backend_name, "raw_peaks_deg": [], "tracked_peaks_deg": [], "held_tracks": 0}
 
         audio = np.concatenate(list(self._frames), axis=1)
-        doas_rad, p_theta, _ = self._localizer.process(audio)
-        doas_deg = [float(np.degrees(a) % 360.0) for a in doas_rad]
-        peaks = normalize_doa_list(doas_deg, max_targets=len(doas_deg) if doas_deg else None)
-
-        scores: list[float] | None = None
-        if peaks and p_theta is not None and len(p_theta) > 0:
-            bins = np.asarray(p_theta, dtype=float)
-            n = bins.shape[0]
-            scores = [float(bins[int(round((d % 360.0) / 360.0 * (n - 1)))]) for d in peaks]
+        backend_result = self._backend.process(audio)
+        peaks = normalize_doa_list(list(backend_result.peaks_deg), max_targets=len(backend_result.peaks_deg) if backend_result.peaks_deg else None)
+        scores = list(backend_result.peak_scores)
         if not self._prior_enabled:
             self._frame_idx += 1
-            return peaks, scores, {"raw_peaks_deg": list(peaks), "tracked_peaks_deg": list(peaks), "held_tracks": 0}
+            return peaks, scores, {
+                "backend": self._backend_name,
+                "raw_peaks_deg": list(peaks),
+                "raw_peak_scores": list(scores),
+                "tracked_peaks_deg": list(peaks),
+                "tracked_peak_scores": list(scores),
+                "held_tracks": 0,
+                **dict(backend_result.debug),
+            }
 
-        raw_scores = list(scores) if scores is not None else [1.0] * len(peaks)
+        raw_scores = list(scores) if scores else [1.0] * len(peaks)
         used_tracks: set[int] = set()
         next_tracks: list[_TrackedPeak] = []
         matched_raw: set[int] = set()
@@ -189,13 +203,14 @@ class SRPPeakTracker:
         tracked_scores = [float(track.score) for track in self._tracks] if self._tracks else None
 
         return tracked_peaks, tracked_scores, {
+            "backend": self._backend_name,
             "raw_peaks_deg": list(peaks),
             "raw_peak_scores": list(raw_scores),
             "tracked_peaks_deg": tracked_peaks,
             "tracked_peak_scores": [] if tracked_scores is None else list(tracked_scores),
             "held_tracks": int(held_tracks),
+            **dict(backend_result.debug),
         }
-
 
 @dataclass
 class _TrackedPeak:

@@ -15,6 +15,7 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.background_noise_gain == 0.15
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
+    assert req.localization_backend == "tiny_dp_ipd"
     assert req.processing_mode == "specific_speaker_enhancement"
     assert req.monitor_source == "processed"
     assert req.sample_rate_hz == 48000
