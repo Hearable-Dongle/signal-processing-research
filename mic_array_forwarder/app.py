@@ -13,6 +13,7 @@ from .models import (
     ClearFocusMessage,
     ErrorMessage,
     SCHEMA_VERSION,
+    SetMonitorSourceMessage,
     SelectSpeakerMessage,
     SessionStartRequest,
     SessionStartResponse,
@@ -76,7 +77,9 @@ def get_raw_mix_wav(session_id: str) -> Response:
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
-def _parse_client_message(raw: dict) -> SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | StopSessionMessage:
+def _parse_client_message(
+    raw: dict,
+) -> SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | SetMonitorSourceMessage | StopSessionMessage:
     msg_type = raw.get("type")
     if msg_type == "select_speaker":
         return SelectSpeakerMessage.model_validate(raw)
@@ -84,6 +87,8 @@ def _parse_client_message(raw: dict) -> SelectSpeakerMessage | AdjustSpeakerGain
         return AdjustSpeakerGainMessage.model_validate(raw)
     if msg_type == "clear_focus":
         return ClearFocusMessage.model_validate(raw)
+    if msg_type == "set_monitor_source":
+        return SetMonitorSourceMessage.model_validate(raw)
     if msg_type == "stop_session":
         return StopSessionMessage.model_validate(raw)
     raise ValueError(f"Unsupported message type: {msg_type}")
@@ -121,6 +126,8 @@ async def ws_session(websocket: WebSocket, session_id: str) -> None:
                     session.adjust_speaker_gain(msg.speaker_id, msg.delta_db_step)
                 elif isinstance(msg, ClearFocusMessage):
                     session.clear_focus()
+                elif isinstance(msg, SetMonitorSourceMessage):
+                    session.set_monitor_source(msg.monitor_source)
                 elif isinstance(msg, StopSessionMessage):
                     session.stop()
 

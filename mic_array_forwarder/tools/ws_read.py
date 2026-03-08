@@ -57,6 +57,7 @@ def main() -> int:
     parser.add_argument("--audio-device-query", default="ReSpeaker", help="Substring to match input device")
     parser.add_argument("--channel-count", type=int, default=4)
     parser.add_argument("--sample-rate-hz", type=int, default=16000)
+    parser.add_argument("--monitor-source", choices=["processed", "raw_mixed"], default="processed")
     args = parser.parse_args()
 
     payload = {
@@ -64,6 +65,7 @@ def main() -> int:
         "audio_device_query": args.audio_device_query,
         "channel_count": args.channel_count,
         "sample_rate_hz": args.sample_rate_hz,
+        "monitor_source": args.monitor_source,
         "separation_mode": "mock",
     }
 

@@ -13,6 +13,7 @@ class SessionStartRequest(BaseModel):
     audio_device_query: str | None = None
     channel_count: int = 4
     sample_rate_hz: int = 16000
+    monitor_source: Literal["processed", "raw_mixed"] = "processed"
     background_noise_audio_path: str | None = None
     background_noise_gain: float = 0.15
     focus_ratio: float = 2.0
@@ -118,9 +119,17 @@ class ClearFocusMessage(BaseModel):
     type: Literal["clear_focus"] = "clear_focus"
 
 
+class SetMonitorSourceMessage(BaseModel):
+    schema_version: Literal["v1"] = SCHEMA_VERSION
+    type: Literal["set_monitor_source"] = "set_monitor_source"
+    monitor_source: Literal["processed", "raw_mixed"]
+
+
 class StopSessionMessage(BaseModel):
     schema_version: Literal["v1"] = SCHEMA_VERSION
     type: Literal["stop_session"] = "stop_session"
 
 
-ClientMessage = SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | StopSessionMessage
+ClientMessage = (
+    SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | SetMonitorSourceMessage | StopSessionMessage
+)

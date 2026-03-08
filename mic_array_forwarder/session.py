@@ -107,6 +107,8 @@ class DemoSession:
         self._ground_truth_focus_direction_deg: float | None = None
         self._raw_mix_mono: np.ndarray | None = None
         self._raw_mix_sample_rate_hz: int = 16000
+        self._monitor_source = str(req.monitor_source)
+        self._raw_frame_q: deque[np.ndarray] = deque(maxlen=256)
 
     @property
     def status(self) -> str:
@@ -211,6 +213,10 @@ class DemoSession:
             self._lock_timeline.append({"timestamp_ms": _now_ms(), "event": "cleared", "speaker_id": ""})
         self._apply_focus_control()
 
+    def set_monitor_source(self, source: str) -> None:
+        with self._lock:
+            self._monitor_source = str(source)
+
     def _next_audio_timestamp_ms(self) -> float:
         with self._lock:
             ts = float(self._audio_frame_idx * 10)
@@ -218,7 +224,14 @@ class DemoSession:
             return ts
 
     def _on_audio_chunk(self, frame_mono: np.ndarray) -> None:
-        payload = encode_audio_chunk(self._next_audio_timestamp_ms(), frame_mono)
+        with self._lock:
+            source = str(self._monitor_source)
+            raw_frame = self._raw_frame_q.popleft() if self._raw_frame_q else None
+        if source == "raw_mixed" and raw_frame is not None:
+            frame = raw_frame
+        else:
+            frame = frame_mono
+        payload = encode_audio_chunk(self._next_audio_timestamp_ms(), frame)
         with self._lock:
             self._audio_seq += 1
             self._audio_chunks.append((self._audio_seq, payload))
@@ -441,6 +454,9 @@ class DemoSession:
                     frame = mic_audio[start:end, :]
                     if frame.shape[0] < frame_samples:
                         frame = np.pad(frame, ((0, frame_samples - frame.shape[0]), (0, 0)))
+                    raw_mono = np.mean(frame, axis=1).astype(np.float32, copy=False)
+                    with self._lock:
+                        self._raw_frame_q.append(raw_mono)
                     yield frame.astype(np.float32, copy=False)
                     next_deadline += frame_period_s
                     sleep_s = next_deadline - time.perf_counter()

@@ -67,6 +67,12 @@ Read live mic array messages in a terminal:
 python -m mic_array_forwarder.tools.ws_read --audio-device-query "ReSpeaker"
 ```
 
+Monitor output source:
+
+```bash
+python -m mic_array_forwarder.tools.ws_read --monitor-source raw_mixed
+```
+
 Start the frontend in another terminal:
 
 ```bash

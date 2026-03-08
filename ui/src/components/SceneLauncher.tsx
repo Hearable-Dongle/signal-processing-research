@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { ProcessingMode } from "../types/contracts";
+import type { MonitorSource, ProcessingMode } from "../types/contracts";
 
 export type InputSource = "simulation" | "respeaker_live";
 
@@ -10,6 +10,7 @@ export type SessionLaunchConfig = {
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
   audioDeviceQuery: string;
+  monitorSource: MonitorSource;
 };
 
 type Props = {
@@ -27,6 +28,8 @@ type Props = {
   onLatencyMsChange: (latencyMs: number) => void;
   processingMode: ProcessingMode;
   onProcessingModeChange: (mode: ProcessingMode) => void;
+  monitorSource: MonitorSource;
+  onMonitorSourceChange: (source: MonitorSource) => void;
 };
 
 export function SceneLauncher({
@@ -44,6 +47,8 @@ export function SceneLauncher({
   onLatencyMsChange,
   processingMode,
   onProcessingModeChange,
+  monitorSource,
+  onMonitorSourceChange,
 }: Props) {
   const [inputSource, setInputSource] = useState<InputSource>("simulation");
   const [scenePath, setScenePath] = useState(defaultScenePath);
@@ -137,6 +142,17 @@ export function SceneLauncher({
         <option value="beamform_from_ground_truth">Beamform from ground truth</option>
       </select>
 
+      <label htmlFor="monitor-source">Monitor output</label>
+      <select
+        id="monitor-source"
+        aria-label="Monitor output"
+        value={monitorSource}
+        onChange={(e) => onMonitorSourceChange(e.target.value as MonitorSource)}
+      >
+        <option value="processed">Processed (UI output)</option>
+        <option value="raw_mixed">Raw mixed input</option>
+      </select>
+
       <div className="actions">
         <button
           onClick={() =>
@@ -146,6 +162,7 @@ export function SceneLauncher({
               backgroundNoisePath,
               backgroundNoiseGain,
               audioDeviceQuery,
+              monitorSource,
             })
           }
           disabled={status === "running" || status === "starting"}

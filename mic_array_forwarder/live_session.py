@@ -111,6 +111,7 @@ class LiveDemoSession:
         self._processed_frames = 0
         self._last_tracker_debug: dict[str, Any] = {}
         self._last_device_name = ""
+        self._monitor_source = str(req.monitor_source)
 
     @property
     def status(self) -> str:
@@ -199,6 +200,10 @@ class LiveDemoSession:
         with self._lock:
             self._selected_speaker_id = None
 
+    def set_monitor_source(self, source: str) -> None:
+        with self._lock:
+            self._monitor_source = str(source)
+
     def _next_audio_timestamp_ms(self) -> float:
         with self._lock:
             ts = float(self._audio_frame_idx * 10)
@@ -226,8 +231,14 @@ class LiveDemoSession:
                 dropped = self._raw_mix_parts.popleft()
                 self._raw_mix_samples -= int(dropped.shape[0])
 
-    def _publish_audio_chunk(self, frame_mono: np.ndarray) -> None:
-        payload = encode_audio_chunk(self._next_audio_timestamp_ms(), frame_mono)
+    def _publish_audio_chunk(self, processed: np.ndarray, raw_mixed: np.ndarray) -> None:
+        with self._lock:
+            source = str(self._monitor_source)
+        if source == "raw_mixed":
+            frame = raw_mixed
+        else:
+            frame = processed
+        payload = encode_audio_chunk(self._next_audio_timestamp_ms(), frame)
         with self._lock:
             self._audio_seq += 1
             self._audio_chunks.append((self._audio_seq, payload))
@@ -458,7 +469,7 @@ class LiveDemoSession:
                     self._last_tracker_debug = dict(tracker_debug)
                     items = self._build_speaker_items(peaks, scores)
                     output = self._render_output(frame_mc, items)
-                    self._publish_audio_chunk(output)
+                    self._publish_audio_chunk(output, raw_mono)
                     self._processing_ms_total += (time.perf_counter() - t0) * 1000.0
                     self._processed_frames += 1
 

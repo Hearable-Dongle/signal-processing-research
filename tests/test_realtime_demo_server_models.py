@@ -16,6 +16,7 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
     assert req.processing_mode == "specific_speaker_enhancement"
+    assert req.monitor_source == "processed"
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,

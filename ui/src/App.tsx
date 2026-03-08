@@ -12,6 +12,7 @@ import {
   SCHEMA_VERSION,
   type GroundTruthSpeaker,
   type MetricsMessage,
+  type MonitorSource,
   type ProcessingMode,
   type ServerMessage,
   type Speaker,
@@ -114,6 +115,7 @@ export default function App() {
   const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
   const [isOutputPlaybackPaused, setIsOutputPlaybackPaused] = useState(false);
   const [processingMode, setProcessingMode] = useState<ProcessingMode>(DEFAULT_PROCESSING_MODE);
+  const [monitorSource, setMonitorSource] = useState<MonitorSource>("processed");
   const [activePlaybackSource, setActivePlaybackSource] = useState<PlaybackSource | null>(null);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
@@ -191,8 +193,16 @@ export default function App() {
   );
 
   async function startSession(config: SessionLaunchConfig): Promise<void> {
-    const { inputSource, scenePath, backgroundNoisePath, backgroundNoiseGain, audioDeviceQuery } = config;
+    const {
+      inputSource,
+      scenePath,
+      backgroundNoisePath,
+      backgroundNoiseGain,
+      audioDeviceQuery,
+      monitorSource: nextMonitorSource,
+    } = config;
     setStatus("starting");
+    setMonitorSource(nextMonitorSource);
     capturedAudioRef.current = [];
     totalSamplesRef.current = 0;
     rawMixedTotalSamplesRef.current = 0;
@@ -207,6 +217,7 @@ export default function App() {
         scene_config_path: scenePath,
         separation_mode: "mock",
         processing_mode: processingMode,
+        monitor_source: nextMonitorSource,
         background_noise_audio_path: backgroundNoisePath,
         background_noise_gain: backgroundNoiseGain,
         audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
@@ -318,6 +329,17 @@ export default function App() {
     }
   }
 
+  function onMonitorSourceChange(nextSource: MonitorSource): void {
+    setMonitorSource(nextSource);
+    if (status === "running") {
+      ws.send({
+        schema_version: SCHEMA_VERSION,
+        type: "set_monitor_source",
+        monitor_source: nextSource,
+      });
+    }
+  }
+
   async function toggleOutputPlayback(source: PlaybackSource): Promise<void> {
     const player = outputPlaybackRef.current;
     if (activePlaybackSource === source && player) {
@@ -401,6 +423,8 @@ export default function App() {
           onLatencyMsChange={onLatencyMsChange}
           processingMode={processingMode}
           onProcessingModeChange={onProcessingModeChange}
+          monitorSource={monitorSource}
+          onMonitorSourceChange={onMonitorSourceChange}
         />
         <SpeakerStage
           speakers={speakers}
