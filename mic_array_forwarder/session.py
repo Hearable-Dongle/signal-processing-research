@@ -45,6 +45,20 @@ def _normalize_angle_deg(v: float) -> float:
     return float(v % 360.0)
 
 
+def _wav_bytes_from_mono_float32(raw: np.ndarray, sample_rate_hz: int) -> bytes:
+    if raw.size == 0:
+        return b""
+    clipped = np.clip(raw, -1.0, 1.0)
+    pcm16 = (clipped * 32767.0).astype(np.int16, copy=False)
+    buf = BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate_hz)
+        wav.writeframes(pcm16.tobytes())
+    return buf.getvalue()
+
+
 def _ground_truth_from_scene(scene_cfg: SimulationConfig) -> list[dict[str, float | int]]:
     mic_center = scene_cfg.microphone_array.mic_center
     out: list[dict[str, float | int]] = []
@@ -106,6 +120,7 @@ class DemoSession:
         self._ground_truth_speakers: list[dict[str, float | int]] = []
         self._ground_truth_focus_direction_deg: float | None = None
         self._raw_mix_mono: np.ndarray | None = None
+        self._raw_multichannel: np.ndarray | None = None
         self._raw_mix_sample_rate_hz: int = 16000
         self._monitor_source = str(req.monitor_source)
         self._raw_frame_q: deque[np.ndarray] = deque(maxlen=256)
@@ -165,17 +180,30 @@ class DemoSession:
         with self._lock:
             raw = None if self._raw_mix_mono is None else self._raw_mix_mono.copy()
             sample_rate_hz = int(self._raw_mix_sample_rate_hz)
-        if raw is None or raw.size == 0:
+        if raw is None:
             return b""
-        clipped = np.clip(raw, -1.0, 1.0)
-        pcm16 = (clipped * 32767.0).astype(np.int16, copy=False)
-        buf = BytesIO()
-        with wave.open(buf, "wb") as wav:
-            wav.setnchannels(1)
-            wav.setsampwidth(2)
-            wav.setframerate(sample_rate_hz)
-            wav.writeframes(pcm16.tobytes())
-        return buf.getvalue()
+        return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
+
+    def get_raw_channel_count(self) -> int:
+        with self._lock:
+            if self._raw_multichannel is None:
+                return 0
+            return int(self._raw_multichannel.shape[1])
+
+    def get_raw_sample_rate_hz(self) -> int:
+        with self._lock:
+            return int(self._raw_mix_sample_rate_hz)
+
+    def get_raw_channel_wav_bytes(self, channel_index: int) -> bytes:
+        with self._lock:
+            raw = None if self._raw_multichannel is None else self._raw_multichannel.copy()
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
+        if raw is None or raw.ndim != 2:
+            return b""
+        idx = int(channel_index)
+        if idx < 0 or idx >= raw.shape[1]:
+            return b""
+        return _wav_bytes_from_mono_float32(raw[:, idx], sample_rate_hz)
 
     def select_speaker(self, speaker_id: int) -> None:
         if self.req.processing_mode != "specific_speaker_enhancement":
@@ -417,6 +445,7 @@ class DemoSession:
             )
             mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
             with self._lock:
+                self._raw_multichannel = mic_audio.astype(np.float32, copy=True)
                 self._raw_mix_mono = np.mean(mic_audio, axis=1).astype(np.float32, copy=False)
                 self._raw_mix_sample_rate_hz = int(sim_cfg.audio.fs)
                 self._ground_truth_speakers = _ground_truth_from_scene(sim_cfg)

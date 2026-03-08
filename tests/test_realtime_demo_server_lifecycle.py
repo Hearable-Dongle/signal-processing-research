@@ -92,3 +92,42 @@ def test_raw_mix_wav_endpoint_available_after_start() -> None:
     assert wav_resp.content[:4] == b"RIFF"
 
     _cleanup()
+
+
+def test_raw_channel_endpoints_available_after_start() -> None:
+    _cleanup()
+    resp = client.post(
+        "/api/session/start",
+        json={
+            "scene_config_path": "simulation/simulations/configs/library_scene/library_k1_scene00.json",
+            "separation_mode": "mock",
+            "slow_chunk_ms": 200,
+        },
+    )
+    assert resp.status_code == 200
+    sid = resp.json()["session_id"]
+
+    manifest = None
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        candidate = client.get(f"/api/session/{sid}/raw-channels")
+        if candidate.status_code == 200:
+            manifest = candidate
+            break
+        time.sleep(0.05)
+
+    assert manifest is not None
+    payload = manifest.json()
+    assert payload["session_id"] == sid
+    assert payload["channel_count"] >= 1
+    assert len(payload["channels"]) == payload["channel_count"]
+
+    first = client.get(f"/api/session/{sid}/raw-channel/0.wav")
+    assert first.status_code == 200
+    assert first.headers["content-type"].startswith("audio/wav")
+    assert first.content[:4] == b"RIFF"
+
+    missing = client.get(f"/api/session/{sid}/raw-channel/999.wav")
+    assert missing.status_code == 404
+
+    _cleanup()

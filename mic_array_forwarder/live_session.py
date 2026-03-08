@@ -5,9 +5,7 @@ import queue
 import threading
 import time
 import uuid
-import wave
 from collections import deque
-from io import BytesIO
 from typing import Any
 
 import numpy as np
@@ -21,6 +19,7 @@ from mic_array_forwarder.models import (
     SpeakerStateItem,
     SpeakerStateMessage,
 )
+from mic_array_forwarder.session import _wav_bytes_from_mono_float32
 from mic_array_forwarder.ws_codec import encode_audio_chunk
 from realtime_pipeline.contracts import SpeakerGainDirection
 from realtime_pipeline.fast_path import delay_and_sum_frame
@@ -117,7 +116,7 @@ class LiveDemoSession:
         self._events: deque[tuple[int, dict[str, Any]]] = deque(maxlen=256)
         self._event_seq = 0
         self._raw_mix_parts: deque[np.ndarray] = deque(maxlen=4500)
-        self._raw_mix_samples = 0
+        self._raw_multichannel_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._raw_mix_sample_rate_hz = int(req.sample_rate_hz)
         self._speaker_tracks: dict[int, SpeakerGainDirection] = {}
         self._next_speaker_id = 1
@@ -197,15 +196,25 @@ class LiveDemoSession:
                 return b""
             raw = np.concatenate(list(self._raw_mix_parts), axis=0)
             sample_rate_hz = int(self._raw_mix_sample_rate_hz)
-        clipped = np.clip(raw, -1.0, 1.0)
-        pcm16 = (clipped * 32767.0).astype(np.int16, copy=False)
-        buf = BytesIO()
-        with wave.open(buf, "wb") as wav:
-            wav.setnchannels(1)
-            wav.setsampwidth(2)
-            wav.setframerate(sample_rate_hz)
-            wav.writeframes(pcm16.tobytes())
-        return buf.getvalue()
+        return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
+
+    def get_raw_channel_count(self) -> int:
+        return int(self.req.channel_count)
+
+    def get_raw_sample_rate_hz(self) -> int:
+        with self._lock:
+            return int(self._raw_mix_sample_rate_hz)
+
+    def get_raw_channel_wav_bytes(self, channel_index: int) -> bytes:
+        idx = int(channel_index)
+        with self._lock:
+            if not self._raw_multichannel_parts:
+                return b""
+            raw = np.concatenate(list(self._raw_multichannel_parts), axis=0)
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
+        if raw.ndim != 2 or idx < 0 or idx >= raw.shape[1]:
+            return b""
+        return _wav_bytes_from_mono_float32(raw[:, idx], sample_rate_hz)
 
     def select_speaker(self, speaker_id: int) -> None:
         if self.req.processing_mode != "specific_speaker_enhancement":
@@ -252,14 +261,10 @@ class LiveDemoSession:
             self._event_seq += 1
             self._events.append((self._event_seq, msg))
 
-    def _append_raw_mix(self, frame_mono: np.ndarray) -> None:
+    def _append_raw_audio(self, frame_mc: np.ndarray, frame_mono: np.ndarray) -> None:
         with self._lock:
+            self._raw_multichannel_parts.append(frame_mc.copy())
             self._raw_mix_parts.append(frame_mono.copy())
-            self._raw_mix_samples += int(frame_mono.shape[0])
-            limit = int(self._raw_mix_sample_rate_hz * 45)
-            while self._raw_mix_parts and self._raw_mix_samples > limit:
-                dropped = self._raw_mix_parts.popleft()
-                self._raw_mix_samples -= int(dropped.shape[0])
 
     def _publish_audio_chunk(self, processed: np.ndarray, raw_mixed: np.ndarray) -> None:
         with self._lock:
@@ -502,7 +507,7 @@ class LiveDemoSession:
                     if self._channel_map is not None:
                         frame_mc = frame_mc[:, self._channel_map]
                     raw_mono = np.mean(frame_mc, axis=1).astype(np.float32, copy=False)
-                    self._append_raw_mix(raw_mono)
+                    self._append_raw_audio(frame_mc, raw_mono)
                     peaks, scores, tracker_debug = tracker.update(frame_mc)
                     rms_by_channel = np.sqrt(np.mean(np.square(frame_mc), axis=0)).astype(np.float32, copy=False)
                     debug = dict(tracker_debug)

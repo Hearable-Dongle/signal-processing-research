@@ -12,6 +12,8 @@ from .models import (
     AdjustSpeakerGainMessage,
     ClearFocusMessage,
     ErrorMessage,
+    RawChannelDescriptor,
+    RawChannelsResponse,
     SCHEMA_VERSION,
     SetMonitorSourceMessage,
     SelectSpeakerMessage,
@@ -91,6 +93,32 @@ def get_raw_mix_wav(session_id: str) -> Response:
     wav_bytes = session.get_raw_mix_wav_bytes()
     if not wav_bytes:
         raise HTTPException(status_code=404, detail="raw mixed audio not available yet")
+    return Response(content=wav_bytes, media_type="audio/wav")
+
+
+@app.get("/api/session/{session_id}/raw-channels", response_model=RawChannelsResponse)
+def get_raw_channels(session_id: str) -> RawChannelsResponse:
+    session = manager.get_session(session_id)
+    channel_count = session.get_raw_channel_count()
+    if channel_count <= 0:
+        raise HTTPException(status_code=404, detail="raw channel audio not available yet")
+    return RawChannelsResponse(
+        session_id=session_id,
+        sample_rate_hz=session.get_raw_sample_rate_hz(),
+        channel_count=channel_count,
+        channels=[
+            RawChannelDescriptor(channel_index=index, filename=f"channel_{index:03d}.wav")
+            for index in range(channel_count)
+        ],
+    )
+
+
+@app.get("/api/session/{session_id}/raw-channel/{channel_index}.wav")
+def get_raw_channel_wav(session_id: str, channel_index: int) -> Response:
+    session = manager.get_session(session_id)
+    wav_bytes = session.get_raw_channel_wav_bytes(channel_index)
+    if not wav_bytes:
+        raise HTTPException(status_code=404, detail=f"raw channel {channel_index} not available")
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
