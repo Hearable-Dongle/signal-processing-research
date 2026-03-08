@@ -39,5 +39,9 @@ class SessionManager:
         session.stop()
         return session
 
+    def get_active_session(self) -> SessionHandle | None:
+        with self._lock:
+            return self._session
+
 
 manager = SessionManager()

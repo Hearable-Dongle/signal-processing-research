@@ -339,6 +339,10 @@ class LiveDemoSession:
         ).model_dump()
         msg["device_name"] = self._last_device_name
         msg["input_source"] = self.req.input_source
+        msg["channel_count"] = int(self.req.channel_count)
+        msg["sample_rate_hz"] = int(self.req.sample_rate_hz)
+        with self._lock:
+            msg["monitor_source"] = str(self._monitor_source)
         msg["tracker_debug"] = dict(self._last_tracker_debug)
         with self._lock:
             self._metrics_state = msg
@@ -466,7 +470,11 @@ class LiveDemoSession:
                     raw_mono = np.mean(frame_mc, axis=1).astype(np.float32, copy=False)
                     self._append_raw_mix(raw_mono)
                     peaks, scores, tracker_debug = tracker.update(frame_mc)
-                    self._last_tracker_debug = dict(tracker_debug)
+                    rms_by_channel = np.sqrt(np.mean(np.square(frame_mc), axis=0)).astype(np.float32, copy=False)
+                    debug = dict(tracker_debug)
+                    debug["last_frame_shape"] = [int(frame_mc.shape[0]), int(frame_mc.shape[1])]
+                    debug["rms_by_channel"] = [float(v) for v in rms_by_channel]
+                    self._last_tracker_debug = debug
                     items = self._build_speaker_items(peaks, scores)
                     output = self._render_output(frame_mc, items)
                     self._publish_audio_chunk(output, raw_mono)

@@ -57,6 +57,23 @@ def status_session(session_id: str) -> SessionStatusResponse:
     return manager.get_session(session_id).get_status()
 
 
+@app.get("/api/session/active")
+def active_session() -> dict[str, str | None]:
+    sess = manager.get_active_session()
+    if sess is None:
+        return {"session_id": None, "status": None}
+    return {"session_id": sess.session_id, "status": sess.status}
+
+
+@app.post("/api/session/active/stop", response_model=SessionStopResponse)
+def stop_active_session() -> SessionStopResponse:
+    sess = manager.get_active_session()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="No active session")
+    sess.stop()
+    return SessionStopResponse(session_id=sess.session_id, status="stopped")
+
+
 @app.post("/api/session/{session_id}/stop", response_model=SessionStopResponse)
 def stop_session(session_id: str) -> SessionStopResponse:
     session = manager.stop_session(session_id)

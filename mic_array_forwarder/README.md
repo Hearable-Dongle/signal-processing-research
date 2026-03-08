@@ -73,6 +73,26 @@ Monitor output source:
 python -m mic_array_forwarder.tools.ws_read --monitor-source raw_mixed
 ```
 
+Play live audio directly from the backend stream:
+
+```bash
+python -m mic_array_forwarder.tools.ws_play --monitor-source raw_mixed
+```
+
+The player prints per-channel RMS + frame shape in the metrics logs so you can verify all 4 channels are captured.
+
+Save a WAV while monitoring:
+
+```bash
+python -m mic_array_forwarder.tools.ws_play --monitor-source raw_mixed --wav-out /tmp/mic_monitor.wav
+```
+
+Stop the currently running session:
+
+```bash
+python -m mic_array_forwarder.tools.ws_stop
+```
+
 Start the frontend in another terminal:
 
 ```bash
