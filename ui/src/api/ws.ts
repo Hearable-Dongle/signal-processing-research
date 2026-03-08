@@ -1,5 +1,7 @@
 import type { ClientMessage, ServerMessage } from "../types/contracts";
 
+const WS_BASE_URL = (import.meta.env.VITE_WS_BASE_URL ?? "").replace(/\/$/, "");
+
 export type WsHandlers = {
   onServerMessage: (msg: ServerMessage) => void;
   onAudioChunk: (chunk: ArrayBuffer) => void;
@@ -19,7 +21,7 @@ export class DemoWsClient {
       this.ws.close();
     }
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsUrl = `${proto}://${window.location.hostname}:8000/ws/session/${sessionId}`;
+    const wsUrl = WS_BASE_URL ? `${WS_BASE_URL}/ws/session/${sessionId}` : `${proto}://${window.location.host}/ws/session/${sessionId}`;
     this.ws = new WebSocket(wsUrl);
     this.ws.binaryType = "arraybuffer";
 

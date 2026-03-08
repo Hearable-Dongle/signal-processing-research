@@ -27,4 +27,6 @@ test("renders waveform timeline with playhead and time labels", () => {
   expect(screen.getAllByText("Raw mixed input").length).toBeGreaterThan(0);
   expect(screen.getByRole("button", { name: "Play Beamformed output" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Play Raw mixed input" })).toBeInTheDocument();
+  expect(screen.getByTestId("Beamformed output-trace")).toBeInTheDocument();
+  expect(screen.getByTestId("Raw mixed input-trace")).toBeInTheDocument();
 });

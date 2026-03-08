@@ -27,6 +27,7 @@ const DEFAULT_LATENCY_MS = 220;
 const WAVEFORM_BINS = 800;
 const DEFAULT_PROCESSING_MODE: ProcessingMode = "specific_speaker_enhancement";
 type PlaybackSource = "beamformed_output" | "raw_mixed_input";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
 const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
   play_state: "buffering",
@@ -99,6 +100,10 @@ function parsePcm16MonoWav(data: ArrayBuffer): { sampleRateHz: number; samples: 
   return { sampleRateHz, samples };
 }
 
+function apiUrl(path: string): string {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
 export default function App() {
   const [status, setStatus] = useState("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -112,6 +117,7 @@ export default function App() {
   const [waveformBins, setWaveformBins] = useState<number[]>([]);
   const [rawWaveformBins, setRawWaveformBins] = useState<number[]>([]);
   const [playheadMs, setPlayheadMs] = useState(0);
+  const [metricsExpanded, setMetricsExpanded] = useState(true);
   const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
   const [isOutputPlaybackPaused, setIsOutputPlaybackPaused] = useState(false);
   const [processingMode, setProcessingMode] = useState<ProcessingMode>(DEFAULT_PROCESSING_MODE);
@@ -216,25 +222,31 @@ export default function App() {
     setWaveformBins([]);
     setRawWaveformBins([]);
     setPlayheadMs(0);
-    const resp = await fetch("http://localhost:8000/api/session/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input_source: inputSource,
-        scene_config_path: scenePath,
-        separation_mode: "mock",
-        processing_mode: processingMode,
-        monitor_source: nextMonitorSource,
-        sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
-        background_noise_audio_path: backgroundNoisePath,
-        background_noise_gain: backgroundNoiseGain,
-        audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
-        channel_map:
-          inputSource === "respeaker_live" && channelMap.trim()
-            ? channelMap.split(",").map((v) => Number(v.trim())).filter((v) => Number.isFinite(v))
-            : undefined,
-      }),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(apiUrl("/api/session/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input_source: inputSource,
+          scene_config_path: scenePath,
+          separation_mode: "mock",
+          processing_mode: processingMode,
+          monitor_source: nextMonitorSource,
+          sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
+          background_noise_audio_path: backgroundNoisePath,
+          background_noise_gain: backgroundNoiseGain,
+          audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
+          channel_map:
+            inputSource === "respeaker_live" && channelMap.trim()
+              ? channelMap.split(",").map((v) => Number(v.trim())).filter((v) => Number.isFinite(v))
+              : undefined,
+        }),
+      });
+    } catch {
+      setStatus("error (network)");
+      return;
+    }
     if (!resp.ok) {
       setStatus(`error (${resp.status})`);
       return;
@@ -245,7 +257,7 @@ export default function App() {
       void (async () => {
         try {
           for (let i = 0; i < 30; i += 1) {
-            const rawResp = await fetch(`http://localhost:8000/api/session/${payload.session_id}/raw-mix-wav`);
+            const rawResp = await fetch(apiUrl(`/api/session/${payload.session_id}/raw-mix-wav`));
             if (rawResp.ok && typeof rawResp.arrayBuffer === "function") {
               const parsed = parsePcm16MonoWav(await rawResp.arrayBuffer());
             if (parsed) {
@@ -274,7 +286,7 @@ export default function App() {
 
   async function stopSession(): Promise<void> {
     if (sessionId) {
-      await fetch(`http://localhost:8000/api/session/${sessionId}/stop`, { method: "POST" });
+      await fetch(apiUrl(`/api/session/${sessionId}/stop`), { method: "POST" });
     }
     resetLocalSessionState("stopped");
   }
@@ -285,7 +297,7 @@ export default function App() {
     resetLocalSessionState("stopped");
     if (sid) {
       try {
-        await fetch(`http://localhost:8000/api/session/${sid}/stop`, { method: "POST" });
+        await fetch(apiUrl(`/api/session/${sid}/stop`), { method: "POST" });
       } catch {
         // Local teardown is authoritative for kill; backend stop is best effort.
       }
@@ -294,7 +306,7 @@ export default function App() {
 
   async function stopActiveSession(): Promise<void> {
     try {
-      await fetch("http://localhost:8000/api/session/active/stop", { method: "POST" });
+      await fetch(apiUrl("/api/session/active/stop"), { method: "POST" });
     } catch {
       // Best-effort stop for any externally started session.
     }
@@ -386,7 +398,7 @@ export default function App() {
       if (!sessionId || activeInputSource !== "simulation") {
         return;
       }
-      const resp = await fetch(`http://localhost:8000/api/session/${sessionId}/raw-mix-wav`);
+      const resp = await fetch(apiUrl(`/api/session/${sessionId}/raw-mix-wav`));
       if (!resp.ok) {
         return;
       }
@@ -430,7 +442,7 @@ export default function App() {
   return (
     <main className="app-shell">
       <h1>Realtime Speaker UI Demo</h1>
-      <div className="layout">
+      <div className={`layout ${metricsExpanded ? "" : "metrics-collapsed"}`.trim()}>
         <SceneLauncher
           status={status}
           defaultScenePath={DEFAULT_SCENE}
@@ -457,7 +469,12 @@ export default function App() {
           selectedSpeakerId={processingMode === "specific_speaker_enhancement" ? selectedSpeakerId : null}
           onSpeakerTap={selectSpeaker}
         />
-        <MetricsPanel metrics={metrics} playback={playbackStats} />
+        <MetricsPanel
+          metrics={metrics}
+          playback={playbackStats}
+          expanded={metricsExpanded}
+          onToggleExpanded={() => setMetricsExpanded((prev) => !prev)}
+        />
       </div>
 
       <WaveformTimeline

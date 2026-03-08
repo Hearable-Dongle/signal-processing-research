@@ -67,6 +67,7 @@ test("speaker interaction emits select and adjust messages", async () => {
 
   render(<App />);
 
+  await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
   await user.click(screen.getByRole("button", { name: "Start" }));
   await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
 
@@ -112,7 +113,7 @@ test("live mode start sends the ReSpeaker session config", async () => {
 
   render(<App />);
 
-  await user.selectOptions(screen.getByLabelText("Input source"), "respeaker_live");
+  await user.click(screen.getByRole("button", { name: "ReSpeaker Live Direct capture from the local USB microphone array." }));
   await user.clear(screen.getByLabelText("Audio device query"));
   await user.type(screen.getByLabelText("Audio device query"), "USB Mic");
   await user.click(screen.getByRole("button", { name: "Start" }));
