@@ -43,13 +43,7 @@ export default function App() {
           defaultProcessingMode={DEFAULT_PROCESSING_MODE}
         />
       ) : (
-        <DataCollectionPage
-          defaultScenePath={DEFAULT_SCENE}
-          defaultBackgroundNoisePath={DEFAULT_BACKGROUND_NOISE}
-          defaultBackgroundNoiseGain={DEFAULT_BACKGROUND_NOISE_GAIN}
-          defaultProcessingMode={DEFAULT_PROCESSING_MODE}
-          defaultMonitorSource="processed"
-        />
+        <DataCollectionPage />
       )}
     </>
   );

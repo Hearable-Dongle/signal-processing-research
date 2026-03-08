@@ -195,11 +195,14 @@ test("data collection exports raw channels for a captured set", async () => {
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "Data Collection" }));
-  await user.click(screen.getByRole("button", { name: "Add Scene" }));
-  await user.click(screen.getByRole("button", { name: "Start Recording" }));
-  await user.click(await screen.findByRole("button", { name: "Stop Recording" }));
+  expect(screen.getByLabelText("Collection id")).toBeInTheDocument();
+  expect(screen.getByLabelText("Title")).toBeInTheDocument();
+  expect(screen.getByLabelText("Notes")).toBeInTheDocument();
+  expect(screen.getByLabelText("Device")).toHaveValue("ReSpeaker");
+  await user.click(screen.getByRole("button", { name: "Record" }));
+  await user.click(await screen.findByRole("button", { name: "Stop" }));
 
-  expect(await screen.findByText(/Saved recording from scene-001/i)).toBeInTheDocument();
+  expect(await screen.findByText(/Saved recording with 2 raw channels/i)).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Export Set" }));
 
   expect(createObjectUrl).toHaveBeenCalled();

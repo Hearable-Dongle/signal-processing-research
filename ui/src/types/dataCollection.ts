@@ -1,26 +1,3 @@
-import type { MonitorSource, ProcessingMode } from "./contracts";
-
-export type InputSource = "simulation" | "respeaker_live";
-
-export type SceneSessionConfig = {
-  inputSource: InputSource;
-  scenePath: string;
-  backgroundNoisePath: string;
-  backgroundNoiseGain: number;
-  audioDeviceQuery: string;
-  monitorSource: MonitorSource;
-  sampleRateHz: number;
-  channelMap: string;
-  processingMode: ProcessingMode;
-};
-
-export type SceneDefinition = {
-  sceneId: string;
-  title: string;
-  description: string;
-  sessionConfig: SceneSessionConfig;
-};
-
 export type RawChannelFile = {
   channelIndex: number;
   filename: string;
@@ -36,12 +13,11 @@ export type RecordingStatus = "capturing" | "ready" | "incomplete" | "failed";
 
 export type RecordingEntry = {
   recordingId: string;
-  sceneId: string;
-  sceneSnapshot: SceneDefinition;
   sessionId: string;
   startedAtIso: string;
   stoppedAtIso: string;
   status: RecordingStatus;
+  deviceName: string;
   error?: string;
   artifacts?: RecordingArtifactManifest;
 };
@@ -51,7 +27,7 @@ export type DataCollectionSet = {
   title: string;
   notes: string;
   createdAtIso: string;
-  scenes: SceneDefinition[];
+  deviceName: string;
   recordings: RecordingEntry[];
 };
 
