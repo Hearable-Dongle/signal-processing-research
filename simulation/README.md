@@ -26,3 +26,5 @@ python -m simulation.create_restaurant_scene
 python -m simulation.create_library_scene
 ```
 Configs are output to `simulation/simulations/configs/`.
+
+For conversation-style scenes with frame-level activity truth, overlap intervals, noise metadata, and preset environments, use [sim/realistic_conversations/README.md](/home/mkeller/mkeller/signal-processing-research/sim/realistic_conversations/README.md).
