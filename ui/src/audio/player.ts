@@ -1,7 +1,7 @@
 import { PlaybackQueueConsumer, type ConsumerStats } from "./consumer";
 
 const HEADER_BYTES = 16;
-const SAMPLE_RATE = 16000;
+const DEFAULT_SAMPLE_RATE = 16000;
 const MAGIC = "RTA1";
 const VERSION = 1;
 
@@ -48,12 +48,17 @@ export class RealtimeAudioPlayer {
   private packetId = 0;
   private parseErrors = 0;
   private drainTimerId: number | null = null;
+  private sampleRateHz = DEFAULT_SAMPLE_RATE;
 
-  async start(): Promise<void> {
-    if (this.ctx) {
+  async start(sampleRateHz: number = DEFAULT_SAMPLE_RATE): Promise<void> {
+    if (this.ctx && this.sampleRateHz === sampleRateHz) {
       return;
     }
-    this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    if (this.ctx && this.sampleRateHz !== sampleRateHz) {
+      this.stop();
+    }
+    this.sampleRateHz = sampleRateHz;
+    this.ctx = new AudioContext({ sampleRate: this.sampleRateHz });
     await this.ctx.resume();
     this.packetId = 0;
     this.parseErrors = 0;
@@ -92,7 +97,7 @@ export class RealtimeAudioPlayer {
     const mono = new Float32Array(samples.length);
     mono.set(samples);
 
-    const buffer = this.ctx.createBuffer(1, mono.length, SAMPLE_RATE);
+    const buffer = this.ctx.createBuffer(1, mono.length, this.sampleRateHz);
     buffer.copyToChannel(mono, 0);
 
     this.packetId += 1;

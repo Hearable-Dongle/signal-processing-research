@@ -1,4 +1,4 @@
-from realtime_demo_server.models import (
+from mic_array_forwarder.models import (
     AdjustSpeakerGainMessage,
     MetricsMessage,
     SCHEMA_VERSION,
@@ -16,6 +16,8 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
     assert req.processing_mode == "specific_speaker_enhancement"
+    assert req.monitor_source == "processed"
+    assert req.sample_rate_hz == 48000
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,

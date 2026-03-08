@@ -100,3 +100,31 @@ test("speaker interaction emits select and adjust messages", async () => {
   expect(closeSpy).toHaveBeenCalled();
   expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[0]).includes("/stop"))).toBe(true);
 });
+
+test("live mode start sends the ReSpeaker session config", async () => {
+  const user = userEvent.setup();
+  (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
+  (globalThis as unknown as { AudioContext: typeof AudioContext }).AudioContext = MockAudioContext as unknown as typeof AudioContext;
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ session_id: "live123" }),
+  } as Response);
+
+  render(<App />);
+
+  await user.selectOptions(screen.getByLabelText("Input source"), "respeaker_live");
+  await user.clear(screen.getByLabelText("Audio device query"));
+  await user.type(screen.getByLabelText("Audio device query"), "USB Mic");
+  await user.click(screen.getByRole("button", { name: "Start" }));
+
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+  const startCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+    String(c[0]).includes("/api/session/start")
+  );
+  expect(startCall).toBeTruthy();
+  const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+  expect(body.input_source).toBe("respeaker_live");
+  expect(body.audio_device_query).toBe("USB Mic");
+  expect(body.sample_rate_hz).toBe(48000);
+  expect(body.channel_map).toEqual([0, 1, 2, 3]);
+});

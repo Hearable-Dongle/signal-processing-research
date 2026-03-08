@@ -1,22 +1,38 @@
 import { useState } from "react";
 
-import type { ProcessingMode } from "../types/contracts";
+import type { MonitorSource, ProcessingMode } from "../types/contracts";
+
+export type InputSource = "simulation" | "respeaker_live";
+
+export type SessionLaunchConfig = {
+  inputSource: InputSource;
+  scenePath: string;
+  backgroundNoisePath: string;
+  backgroundNoiseGain: number;
+  audioDeviceQuery: string;
+  monitorSource: MonitorSource;
+  sampleRateHz: number;
+  channelMap: string;
+};
 
 type Props = {
   status: string;
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
   defaultBackgroundNoiseGain: number;
-  onStart: (scenePath: string, backgroundNoisePath: string, backgroundNoiseGain: number) => void;
+  onStart: (config: SessionLaunchConfig) => void;
   onStop: () => void;
   onKillRun: () => void;
   canKillRun: boolean;
+  onStopActiveSession: () => void;
   onDownloadWav: () => void;
   canDownloadWav: boolean;
   latencyMs: number;
   onLatencyMsChange: (latencyMs: number) => void;
   processingMode: ProcessingMode;
   onProcessingModeChange: (mode: ProcessingMode) => void;
+  monitorSource: MonitorSource;
+  onMonitorSourceChange: (source: MonitorSource) => void;
 };
 
 export function SceneLauncher({
@@ -28,16 +44,23 @@ export function SceneLauncher({
   onStop,
   onKillRun,
   canKillRun,
+  onStopActiveSession,
   onDownloadWav,
   canDownloadWav,
   latencyMs,
   onLatencyMsChange,
   processingMode,
   onProcessingModeChange,
+  monitorSource,
+  onMonitorSourceChange,
 }: Props) {
+  const [inputSource, setInputSource] = useState<InputSource>("simulation");
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
+  const [audioDeviceQuery, setAudioDeviceQuery] = useState("ReSpeaker");
+  const [sampleRateHz, setSampleRateHz] = useState(48000);
+  const [channelMap, setChannelMap] = useState("0,1,2,3");
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
@@ -47,18 +70,57 @@ export function SceneLauncher({
   return (
     <section className="panel">
       <h2>Scene Launcher</h2>
+      <label htmlFor="input-source">Input source</label>
+      <select
+        id="input-source"
+        value={inputSource}
+        disabled={status === "running" || status === "starting"}
+        onChange={(e) => setInputSource(e.target.value as InputSource)}
+      >
+        <option value="simulation">Simulation</option>
+        <option value="respeaker_live">ReSpeaker live</option>
+      </select>
       <label htmlFor="scene">Scene config path</label>
       <input
         id="scene"
         value={scenePath}
         onChange={(e) => setScenePath(e.target.value)}
+        disabled={inputSource !== "simulation"}
         placeholder="simulation/simulations/configs/library_scene/library_k1_scene00.json"
+      />
+      <label htmlFor="audio-device-query">Audio device query</label>
+      <input
+        id="audio-device-query"
+        value={audioDeviceQuery}
+        onChange={(e) => setAudioDeviceQuery(e.target.value)}
+        disabled={inputSource !== "respeaker_live"}
+        placeholder="ReSpeaker"
+      />
+      <label htmlFor="channel-map">Channel map (optional)</label>
+      <input
+        id="channel-map"
+        value={channelMap}
+        onChange={(e) => setChannelMap(e.target.value)}
+        disabled={inputSource !== "respeaker_live"}
+        placeholder="0,1,2,3"
+      />
+      <label htmlFor="sample-rate-hz">Sample rate (Hz)</label>
+      <input
+        id="sample-rate-hz"
+        type="number"
+        min={8000}
+        max={96000}
+        step={1000}
+        value={sampleRateHz}
+        onChange={(e) => setSampleRateHz(Math.max(8000, Math.min(96000, Number(e.target.value))))}
+        disabled={inputSource !== "respeaker_live"}
       />
       <label htmlFor="background-noise">Background noise audio path</label>
       <input
         id="background-noise"
         value={backgroundNoisePath}
         onChange={(e) => setBackgroundNoisePath(e.target.value)}
+        disabled={inputSource !== "simulation"}
         placeholder="wham_noise/tr/01dc0215_0.22439_01fc0207_-0.22439sp12.wav"
       />
       <label htmlFor="background-noise-gain">Background noise gain</label>
@@ -70,6 +132,7 @@ export function SceneLauncher({
         step={0.05}
         value={backgroundNoiseGain}
         onChange={(e) => setBackgroundNoiseGain(Math.max(0, Math.min(2, Number(e.target.value))))}
+        disabled={inputSource !== "simulation"}
       />
 
       <label htmlFor="latency-range">Playback latency (ms)</label>
@@ -104,9 +167,31 @@ export function SceneLauncher({
         <option value="beamform_from_ground_truth">Beamform from ground truth</option>
       </select>
 
+      <label htmlFor="monitor-source">Monitor output</label>
+      <select
+        id="monitor-source"
+        aria-label="Monitor output"
+        value={monitorSource}
+        onChange={(e) => onMonitorSourceChange(e.target.value as MonitorSource)}
+      >
+        <option value="processed">Processed (UI output)</option>
+        <option value="raw_mixed">Raw mixed input</option>
+      </select>
+
       <div className="actions">
         <button
-          onClick={() => onStart(scenePath, backgroundNoisePath, backgroundNoiseGain)}
+          onClick={() =>
+            onStart({
+              inputSource,
+              scenePath,
+              backgroundNoisePath,
+              backgroundNoiseGain,
+              audioDeviceQuery,
+              monitorSource,
+              sampleRateHz,
+              channelMap,
+            })
+          }
           disabled={status === "running" || status === "starting"}
         >
           Start
@@ -117,6 +202,7 @@ export function SceneLauncher({
         <button onClick={onKillRun} disabled={!canKillRun}>
           Kill Current Run
         </button>
+        <button onClick={onStopActiveSession}>Stop Active Session</button>
         <button onClick={onDownloadWav} disabled={!canDownloadWav}>
           Download WAV
         </button>

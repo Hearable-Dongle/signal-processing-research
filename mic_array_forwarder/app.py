@@ -13,6 +13,7 @@ from .models import (
     ClearFocusMessage,
     ErrorMessage,
     SCHEMA_VERSION,
+    SetMonitorSourceMessage,
     SelectSpeakerMessage,
     SessionStartRequest,
     SessionStartResponse,
@@ -43,9 +44,10 @@ def healthz() -> dict[str, str]:
 
 @app.post("/api/session/start", response_model=SessionStartResponse)
 def start_session(req: SessionStartRequest) -> SessionStartResponse:
-    scene_path = Path(req.scene_config_path)
-    if not scene_path.exists():
-        raise HTTPException(status_code=400, detail=f"scene_config_path does not exist: {scene_path}")
+    if req.input_source == "simulation":
+        scene_path = Path(req.scene_config_path)
+        if not scene_path.exists():
+            raise HTTPException(status_code=400, detail=f"scene_config_path does not exist: {scene_path}")
     session = manager.start_session(req)
     return SessionStartResponse(session_id=session.session_id, status=session.status, config_echo=req)
 
@@ -53,6 +55,23 @@ def start_session(req: SessionStartRequest) -> SessionStartResponse:
 @app.get("/api/session/{session_id}/status", response_model=SessionStatusResponse)
 def status_session(session_id: str) -> SessionStatusResponse:
     return manager.get_session(session_id).get_status()
+
+
+@app.get("/api/session/active")
+def active_session() -> dict[str, str | None]:
+    sess = manager.get_active_session()
+    if sess is None:
+        return {"session_id": None, "status": None}
+    return {"session_id": sess.session_id, "status": sess.status}
+
+
+@app.post("/api/session/active/stop", response_model=SessionStopResponse)
+def stop_active_session() -> SessionStopResponse:
+    sess = manager.get_active_session()
+    if sess is None:
+        raise HTTPException(status_code=404, detail="No active session")
+    sess.stop()
+    return SessionStopResponse(session_id=sess.session_id, status="stopped")
 
 
 @app.post("/api/session/{session_id}/stop", response_model=SessionStopResponse)
@@ -75,7 +94,9 @@ def get_raw_mix_wav(session_id: str) -> Response:
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
-def _parse_client_message(raw: dict) -> SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | StopSessionMessage:
+def _parse_client_message(
+    raw: dict,
+) -> SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | SetMonitorSourceMessage | StopSessionMessage:
     msg_type = raw.get("type")
     if msg_type == "select_speaker":
         return SelectSpeakerMessage.model_validate(raw)
@@ -83,6 +104,8 @@ def _parse_client_message(raw: dict) -> SelectSpeakerMessage | AdjustSpeakerGain
         return AdjustSpeakerGainMessage.model_validate(raw)
     if msg_type == "clear_focus":
         return ClearFocusMessage.model_validate(raw)
+    if msg_type == "set_monitor_source":
+        return SetMonitorSourceMessage.model_validate(raw)
     if msg_type == "stop_session":
         return StopSessionMessage.model_validate(raw)
     raise ValueError(f"Unsupported message type: {msg_type}")
@@ -120,6 +143,8 @@ async def ws_session(websocket: WebSocket, session_id: str) -> None:
                     session.adjust_speaker_gain(msg.speaker_id, msg.delta_db_step)
                 elif isinstance(msg, ClearFocusMessage):
                     session.clear_focus()
+                elif isinstance(msg, SetMonitorSourceMessage):
+                    session.set_monitor_source(msg.monitor_source)
                 elif isinstance(msg, StopSessionMessage):
                     session.stop()
 
