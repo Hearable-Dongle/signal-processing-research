@@ -1,3 +1,4 @@
+import { BeamformerViz } from "./BeamformerViz";
 import { speakerColor } from "../utils/color";
 import type { GroundTruthSpeaker, ProcessingMode, Speaker } from "../types/contracts";
 
@@ -26,37 +27,45 @@ export function SpeakerStage({ speakers, groundTruth, processingMode, selectedSp
     <section className="panel speaker-stage">
       <h2>Speaker Stage</h2>
       {showTrackedRoom && (
-        <div className="room" data-testid="speaker-stage">
-          <div className="mic-center" />
-          {(processingMode === "localize_and_beamform" ? activeSpeakers : speakers).map((speaker) => {
-            const { x, y } = polarToXY(speaker.direction_degrees);
-            const selected = selectedSpeakerId === speaker.speaker_id;
-            if (processingMode === "specific_speaker_enhancement") {
+        <>
+          <div className="room" data-testid="speaker-stage">
+            <div className="mic-center" />
+            {(processingMode === "localize_and_beamform" ? activeSpeakers : speakers).map((speaker) => {
+              const { x, y } = polarToXY(speaker.direction_degrees);
+              const selected = selectedSpeakerId === speaker.speaker_id;
+              if (processingMode === "specific_speaker_enhancement") {
+                return (
+                  <button
+                    key={speaker.speaker_id}
+                    className={`speaker-dot ${selected ? "selected" : ""} ${speaker.active ? "" : "inactive"}`}
+                    data-testid={`speaker-${speaker.speaker_id}`}
+                    aria-label={`speaker-${speaker.speaker_id}`}
+                    onClick={() => onSpeakerTap(speaker.speaker_id)}
+                    onTouchStart={() => onSpeakerTap(speaker.speaker_id)}
+                    style={{ left: `${x}%`, top: `${y}%`, backgroundColor: speakerColor(speaker.speaker_id) }}
+                    title={`Weight ${speaker.gain_weight.toFixed(2)}`}
+                  >
+                    {speaker.speaker_id}
+                  </button>
+                );
+              }
               return (
-                <button
+                <div
                   key={speaker.speaker_id}
-                  className={`speaker-dot ${selected ? "selected" : ""} ${speaker.active ? "" : "inactive"}`}
-                  data-testid={`speaker-${speaker.speaker_id}`}
-                  aria-label={`speaker-${speaker.speaker_id}`}
-                  onClick={() => onSpeakerTap(speaker.speaker_id)}
-                  onTouchStart={() => onSpeakerTap(speaker.speaker_id)}
+                  className="speaker-dot speaker-dot-passive"
+                  data-testid={`active-speaker-${speaker.speaker_id}`}
                   style={{ left: `${x}%`, top: `${y}%`, backgroundColor: speakerColor(speaker.speaker_id) }}
-                >
-                  {speaker.speaker_id}
-                </button>
+                  title={`${speaker.direction_degrees.toFixed(1)}° / weight ${speaker.gain_weight.toFixed(2)}`}
+                />
               );
-            }
-            return (
-              <div
-                key={speaker.speaker_id}
-                className="speaker-dot speaker-dot-passive"
-                data-testid={`active-speaker-${speaker.speaker_id}`}
-                style={{ left: `${x}%`, top: `${y}%`, backgroundColor: speakerColor(speaker.speaker_id) }}
-                title={`${speaker.direction_degrees.toFixed(1)}°`}
-              />
-            );
-          })}
-        </div>
+            })}
+          </div>
+          <BeamformerViz
+            speakers={speakers}
+            processingMode={processingMode}
+            selectedSpeakerId={processingMode === "specific_speaker_enhancement" ? selectedSpeakerId : null}
+          />
+        </>
       )}
       {showGroundTruthBlock && (
         <div className="ground-truth-block">

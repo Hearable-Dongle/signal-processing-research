@@ -64,23 +64,13 @@ function WaveformTrack({
     if (!smoothed.length) {
       return "M 0 50 L 100 50";
     }
-    const n = smoothed.length;
-    const top = smoothed
+    return smoothed
       .map((v, i) => {
-        const x = (i / Math.max(1, n - 1)) * 100;
-        const y = 50 - v * 42;
-        return `${x} ${y}`;
+        const x = (i / Math.max(1, smoothed.length - 1)) * 100;
+        const y = 50 - v * 40;
+        return `${i === 0 ? "M" : "L"} ${x} ${y}`;
       })
-      .join(" L ");
-    const bottom = smoothed
-      .map((v, i) => {
-        const idx = n - 1 - i;
-        const x = (idx / Math.max(1, n - 1)) * 100;
-        const y = 50 + smoothed[idx] * 42;
-        return `${x} ${y}`;
-      })
-      .join(" L ");
-    return `M ${top} L ${bottom} Z`;
+      .join(" ");
   }, [smoothed]);
 
   const playheadPct = durationMs > 0 ? Math.max(0, Math.min(100, (playheadMs / durationMs) * 100)) : 0;
@@ -90,7 +80,7 @@ function WaveformTrack({
       <div className="waveform-track-title">{label}</div>
       <div className="waveform-svg-wrap">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="waveform-svg">
-          <path d={envelopePath} className="waveform-envelope" />
+          <path d={envelopePath} className="waveform-trace" data-testid={`${label}-trace`} />
           <line x1={0} y1={50} x2={100} y2={50} className="waveform-midline" />
           <line x1={playheadPct} y1={0} x2={playheadPct} y2={100} className="waveform-playhead" />
         </svg>
