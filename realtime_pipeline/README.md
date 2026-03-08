@@ -31,6 +31,7 @@ Integration/orchestration layer for real-time multi-speaker spatial processing.
 - `separation_backends.py`: separation backend protocol + implementations + resolver.
 - `orchestrator.py`: `RealtimeSpeakerPipeline` lifecycle.
 - `simulation_runner.py`: simulation E2E runner + CLI.
+- `robustness_validate.py`: baseline-vs-robust validation across localization, grouping, direction assignment, and full pipeline.
 - `sanity_checks.py`: compile/import/mock-E2E validation report generator.
 
 ## Backend Strategy
@@ -91,6 +92,21 @@ Outputs:
 - `fast_stage_avg_ms`: SRP, beamforming, output safety, sink, slow-queue enqueue
 - `slow_stage_avg_ms`: separation, identity grouping, direction assignment, speaker-map publish
 
+Robust tracking controls are enabled by default in this path:
+- SRP peak smoothing, hysteresis, hold, and confidence gating
+- identity continuity bonus, anti-switch margin, and weak-evidence carry-forward
+- direction-assignment transition penalties, low-confidence hold, stale decay
+- slow-path speaker-map hold/decay to avoid abrupt weak-evidence remaps
+
+Disable them for ablation:
+
+```bash
+python -m realtime_pipeline.simulation_runner \
+  --scene-config simulation/simulations/configs/library_scene/library_k2_scene00.json \
+  --out-dir realtime_pipeline/output/sim_run_baseline \
+  --disable-robust-mode
+```
+
 ### Runtime focus/boost control
 
 `RealtimeSpeakerPipeline` now supports atomic runtime control updates:
@@ -150,6 +166,23 @@ Outputs:
 - per-scene `selection_trace.csv`
 - per-scene `enhanced_fast_path.wav`
 
+### 8) Robustness benchmark by speaker-count bucket
+
+Runs baseline vs robust comparisons for localization, speaker grouping, direction assignment, and the full realtime pipeline. Outputs are timestamped and bucketed by `1`, `2`, and `3+` active speakers.
+
+```bash
+PYTHONPATH=. python -m realtime_pipeline.robustness_validate \
+  --scenes-per-bucket 1 \
+  --synthetic-scenes-per-bucket 2
+```
+
+Outputs:
+- `realtime_pipeline/output/robustness_validation/<run_id>/summary.json`
+- `realtime_pipeline/output/robustness_validation/<run_id>/per_scene_metrics.csv`
+- `realtime_pipeline/output/robustness_validation/<run_id>/summary_by_bucket.csv`
+- stage folders for `localization`, `grouping`, `direction_assignment`, `pipeline`
+- per-scene CSV traces and `.png` comparison plots
+
 Catchup/adaptation metrics in per-scene summaries:
 - `startup_lock_ms`: time to first lock from direction bootstrap
 - `reacquire_catchup_ms_median`: median re-lock latency after timeout-based reacquire
@@ -182,6 +215,6 @@ Catchup/adaptation metrics in per-scene summaries:
 5. Add structured logs/metrics export (per-thread timings, drop counts, mapping update lag).
 6. Add real-backend smoke test target that can be toggled in CI when dependencies are present.
 7. Add configurable beamforming mode switch (delay-sum vs existing weighted beamforming stack).
-8. Harden SRP peak confidence extraction and peak filtering heuristics.
+8. Add progress logging and resumability to the robustness benchmark runner.
 9. Add end-to-end artifact index (`manifest.json`) for generated outputs.
 10. Document recommended environment setup for `multispeaker_separation` backend restoration.

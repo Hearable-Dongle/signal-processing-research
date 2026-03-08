@@ -71,11 +71,20 @@ def update_speaker_states(
 ) -> tuple[dict[int, SpeakerDirectionState], dict]:
     snap_debug: dict[int, dict] = {}
     skipped_low_confidence: list[int] = []
+    held_low_confidence: list[int] = []
+    blocked_transitions: list[int] = []
+    updated_ids: set[int] = set()
 
     # Update from current observations.
     for sid, (raw_doa, conf) in aggregated_obs.items():
         if conf < cfg.min_confidence_for_update:
             skipped_low_confidence.append(int(sid))
+            if sid in states:
+                st = states[sid]
+                st.confidence = float(np.clip(st.confidence * cfg.hold_confidence_decay, 0.0, 1.0))
+                st.hold_count += 1
+                st.last_raw_direction_deg = float(raw_doa)
+                held_low_confidence.append(int(sid))
             continue
 
         snapped_doa, snapped = snap_to_srp_peak(
@@ -92,17 +101,38 @@ def update_speaker_states(
                 confidence=conf,
                 last_update_ms=timestamp_ms,
                 updates=1,
+                last_observed_ms=timestamp_ms,
+                last_raw_direction_deg=float(raw_doa),
             )
+            updated_ids.add(int(sid))
         else:
             st = states[sid]
             diff = circular_diff_deg(snapped_doa, st.direction_deg)
+            if abs(diff) > cfg.transition_penalty_deg and conf < cfg.min_confidence_for_switch:
+                st.confidence = float(np.clip(st.confidence * cfg.hold_confidence_decay, 0.0, 1.0))
+                st.hold_count += 1
+                st.last_raw_direction_deg = float(raw_doa)
+                st.last_observed_ms = timestamp_ms
+                blocked_transitions.append(int(sid))
+                snap_debug[sid] = {
+                    "raw_doa": float(raw_doa),
+                    "snapped_doa": float(snapped_doa),
+                    "snapped": bool(snapped),
+                    "blocked_transition": True,
+                }
+                continue
             max_jump = cfg.max_angular_jump_deg_per_chunk
             if max_jump is not None:
                 diff = float(np.clip(diff, -abs(max_jump), abs(max_jump)))
             st.direction_deg = normalize_angle_deg(st.direction_deg + cfg.doa_ema_alpha * diff)
             st.confidence = float(np.clip((1.0 - cfg.doa_ema_alpha) * st.confidence + cfg.doa_ema_alpha * conf, 0.0, 1.0))
             st.last_update_ms = timestamp_ms
+            st.last_observed_ms = timestamp_ms
             st.updates += 1
+            st.hold_count = 0
+            st.stale_updates = 0
+            st.last_raw_direction_deg = float(raw_doa)
+            updated_ids.add(int(sid))
 
         snap_debug[sid] = {
             "raw_doa": float(raw_doa),
@@ -110,11 +140,19 @@ def update_speaker_states(
             "snapped": bool(snapped),
         }
 
+    for sid, st in states.items():
+        if sid in updated_ids:
+            continue
+        age_ms = float(timestamp_ms - st.last_update_ms)
+        if age_ms > cfg.speaker_stale_timeout_ms:
+            st.confidence = float(np.clip(st.confidence * cfg.stale_confidence_decay, 0.0, 1.0))
+            st.stale_updates += 1
+
     # Forget old states.
     forget_ids = [
         sid
         for sid, st in states.items()
-        if (timestamp_ms - st.last_update_ms) > cfg.speaker_forget_timeout_ms
+        if (timestamp_ms - st.last_update_ms) > cfg.speaker_forget_timeout_ms or st.confidence < cfg.min_persist_confidence
     ]
     for sid in forget_ids:
         del states[sid]
@@ -128,6 +166,8 @@ def update_speaker_states(
     debug = {
         "snap": snap_debug,
         "skipped_low_confidence_speakers": skipped_low_confidence,
+        "held_low_confidence_speakers": held_low_confidence,
+        "blocked_transition_speakers": blocked_transitions,
         "forgotten_speakers": forget_ids,
         "stale_speakers": stale_ids,
     }

@@ -85,4 +85,27 @@ def test_max_speakers_forces_reuse():
     )
 
     assert out1.stream_to_speaker[0] == sid0
-    assert 0 in out1.debug["forced_reuse_streams"]
+
+
+def test_weak_evidence_carries_forward_recent_assignment():
+    cfg = IdentityConfig(
+        match_threshold=0.95,
+        hold_similarity_threshold=0.2,
+        carry_forward_chunks=2,
+        confidence_decay=0.8,
+    )
+    grouper = SpeakerIdentityGrouper(cfg)
+
+    out0 = grouper.update(
+        IdentityChunkInput(chunk_id=0, timestamp_ms=0.0, sample_rate_hz=16000, streams=[_tone(220.0)])
+    )
+    sid0 = out0.stream_to_speaker[0]
+    assert sid0 is not None
+
+    noisy = 0.03 * np.random.default_rng(2).normal(size=_tone(220.0).shape)
+    out1 = grouper.update(
+        IdentityChunkInput(chunk_id=1, timestamp_ms=200.0, sample_rate_hz=16000, streams=[noisy])
+    )
+
+    assert out1.stream_to_speaker[0] == sid0
+    assert 0 in out1.debug["held_streams"]

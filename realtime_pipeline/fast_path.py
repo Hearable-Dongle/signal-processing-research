@@ -318,6 +318,14 @@ class FastPathWorker(threading.Thread):
             overlap=config.srp_overlap,
             freq_range=(config.srp_freq_min_hz, config.srp_freq_max_hz),
             max_sources=config.srp_max_sources,
+            prior_enabled=config.srp_prior_enabled,
+            min_score=config.srp_peak_min_score,
+            ema_alpha=config.srp_peak_ema_alpha,
+            hysteresis_margin=config.srp_peak_hysteresis_margin,
+            match_tolerance_deg=config.srp_peak_match_tolerance_deg,
+            hold_frames=config.srp_peak_hold_frames,
+            max_step_deg=config.srp_peak_max_step_deg,
+            score_decay=config.srp_peak_score_decay,
         )
         self._frame_idx = 0
         self._rms_gain_ema = 1.0
@@ -394,12 +402,14 @@ class FastPathWorker(threading.Thread):
 
                     now_ms = 1000.0 * (self._frame_idx * frame_samples) / self._cfg.sample_rate_hz
                     t0 = perf_counter()
-                    peaks, scores = self._tracker.update(x)
+                    peaks, scores, tracker_debug = self._tracker.update(x)
                     self._state.publish_srp_snapshot(
                         SRPPeakSnapshot(
                             timestamp_ms=now_ms,
                             peaks_deg=tuple(float(v) for v in peaks),
                             peak_scores=None if scores is None else tuple(float(v) for v in scores),
+                            raw_peaks_deg=tuple(float(v) for v in tracker_debug.get("raw_peaks_deg", [])),
+                            raw_peak_scores=tuple(float(v) for v in tracker_debug.get("raw_peak_scores", [])) if tracker_debug.get("raw_peak_scores") else None,
                         )
                     )
                     srp_ms += (perf_counter() - t0) * 1000.0

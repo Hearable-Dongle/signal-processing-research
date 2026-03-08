@@ -1,0 +1,106 @@
+SUN MAR 8 MORNING PLAN
+
+Status
+- Overnight jobs are complete.
+- No overnight validation processes are still running.
+- The only Python process you showed is the long-lived `uvicorn` server for `realtime_demo_server`.
+
+Overnight root
+- `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night`
+
+What finished
+- Localization full benchmark
+  - Log: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/localization_benchmark.log`
+  - Result: `Done. Success: 2800, Errors: 0`
+  - Output root: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/localization_benchmark/20260307_215110`
+- Robustness validation
+  - Log: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/robustness_validation.log`
+  - Output root: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/robustness_validation`
+- Focus sanity check
+  - Log: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/focus_sanity.log`
+  - Output root: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/focus_sanity`
+- Speaker identity grouping validation
+  - Log: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/speaker_identity_grouping.log`
+  - Output root: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/speaker_identity_grouping`
+  - Note: this was rerun in `speaker_identity_grouping/speaker-identity-grouping-env`
+- Direction assignment validation
+  - Log: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/direction_assignment.log`
+  - Output root: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/direction_assignment`
+- Full pytest suite
+  - Log: `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/pytest_full.log`
+  - Result: `42 passed, 2 warnings in 23.90s`
+
+Review order
+
+1. Cross-stage robustness summary first
+- Open:
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/robustness_validation/summary.json`
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/robustness_validation/summary_by_bucket.csv`
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/robustness_validation/delta_summary_by_bucket.csv`
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/robustness_validation/showcases.json`
+- Goal:
+  - identify where robust mode helped
+  - identify where it regressed
+  - choose the showcase scenes to inspect manually
+
+2. Direction assignment next
+- Open:
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/direction_assignment/summary.json`
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/direction_assignment/per_scene_metrics.csv`
+- Then inspect a few per-scene folders for plots/audio.
+
+3. Localization benchmark
+- Open:
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/localization_benchmark/20260307_215110/README_summary.md`
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/localization_benchmark/20260307_215110/summary_by_method.csv`
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/localization_benchmark/20260307_215110/summary_by_k.csv`
+
+4. Speaker grouping
+- Open:
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/speaker_identity_grouping/summary.json`
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/speaker_identity_grouping/per_mixture_summary.csv`
+
+5. End-to-end focus sanity
+- Open:
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/focus_sanity/summary.json`
+  - `/home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/results/focus_sanity/per_scene_metrics.json`
+
+Major things to look for by subsystem
+
+Localization
+- `mae_deg_matched` by method and by `k`
+- whether the chosen localization backend degrades sharply at `3+`
+- whether the robust tracking behavior in `robustness_validation/localization` improves jitter/continuity even when MAE is mixed
+
+Speaker grouping
+- `switch_rate`
+- `majority_vote_accuracy`
+- `speaker_count_ratio`
+- whether continuity priors improved persistence or made IDs sticky in the wrong way
+
+Direction assignment
+- `prior_on_mae_deg` vs `prior_off_mae_deg`
+- `track_jump_rate`
+- `mismatch_rate`
+- in per-scene outputs, compare baseline/robust plots and audio bundles
+
+Pipeline / end-to-end
+- `map_churn_deg`
+- end-to-end `mae_deg`
+- focus lock / reacquire behavior in focus sanity
+- raw vs enhanced audio quality in showcase scenes
+
+Useful quick commands
+```bash
+tail -n 20 /home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/pytest_full.log
+tail -n 20 /home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/localization_benchmark.log
+tail -n 20 /home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/robustness_validation.log
+tail -n 20 /home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/speaker_identity_grouping.log
+tail -n 20 /home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/direction_assignment.log
+tail -n 20 /home/mkeller/mkeller/signal-processing-research/overnight_runs/20260307_sat_night/logs/focus_sanity.log
+```
+
+Decision points after review
+- If robustness validation shows stable wins only in direction assignment, retune grouping and localization priors before changing defaults.
+- If grouping is the main regression source, prioritize continuity/anti-switch tuning there before more pipeline work.
+- If pipeline churn improves but MAE worsens, loosen hold/staleness parameters rather than removing smoothing entirely.

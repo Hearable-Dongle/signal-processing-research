@@ -35,6 +35,8 @@ def run_simulation_pipeline(
     output_normalization_enabled: bool = True,
     output_allow_amplification: bool = False,
     write_raw_mix_output: bool = True,
+    robust_mode: bool = True,
+    capture_trace: bool = False,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -51,13 +53,53 @@ def run_simulation_pipeline(
         beamforming_mode=str(beamforming_mode),
         output_normalization_enabled=bool(output_normalization_enabled),
         output_allow_amplification=bool(output_allow_amplification),
+        srp_prior_enabled=bool(robust_mode),
+        identity_continuity_bonus=0.12 if robust_mode else 0.0,
+        identity_switch_penalty=0.2 if robust_mode else 0.0,
+        identity_hold_similarity_threshold=0.45 if robust_mode else 1.1,
+        identity_carry_forward_chunks=3 if robust_mode else 0,
+        identity_confidence_decay=0.85 if robust_mode else 0.0,
+        direction_transition_penalty_deg=35.0 if robust_mode else 180.0,
+        direction_min_confidence_for_switch=0.55 if robust_mode else 0.0,
+        direction_hold_confidence_decay=0.9 if robust_mode else 1.0,
+        direction_stale_confidence_decay=0.96 if robust_mode else 1.0,
+        direction_min_persist_confidence=0.05 if robust_mode else 0.0,
+        speaker_map_min_confidence_for_refresh=0.2 if robust_mode else 0.0,
+        speaker_map_hold_ms=800.0 if robust_mode else 0.0,
+        speaker_map_confidence_decay=0.9 if robust_mode else 1.0,
+        speaker_map_activity_decay=0.92 if robust_mode else 1.0,
     )
     frame_samples = int(cfg.sample_rate_hz * cfg.fast_frame_ms / 1000)
 
     enhanced_parts: list[np.ndarray] = []
+    speaker_map_trace: list[dict] = []
+    pipe_holder: dict[str, RealtimeSpeakerPipeline] = {}
 
     def _sink(x: np.ndarray) -> None:
         enhanced_parts.append(np.asarray(x, dtype=np.float32).reshape(-1))
+        if not capture_trace:
+            return
+        pipe = pipe_holder.get("pipe")
+        if pipe is None:
+            return
+        snapshot = pipe.shared_state.get_speaker_map_snapshot()
+        speaker_map_trace.append(
+            {
+                "frame_index": len(enhanced_parts) - 1,
+                "speakers": [
+                    {
+                        "speaker_id": int(v.speaker_id),
+                        "direction_degrees": float(v.direction_degrees),
+                        "gain_weight": float(v.gain_weight),
+                        "confidence": float(v.confidence),
+                        "active": bool(v.active),
+                        "activity_confidence": float(v.activity_confidence),
+                        "updated_at_ms": float(v.updated_at_ms),
+                    }
+                    for v in snapshot.values()
+                ],
+            }
+        )
 
     if use_mock_separation:
         sep = MockSeparationBackend(n_streams=cfg.max_speakers_hint)
@@ -75,6 +117,7 @@ def run_simulation_pipeline(
         frame_sink=_sink,
         separation_backend=sep,
     )
+    pipe_holder["pipe"] = pipe
     pipe.run_blocking()
 
     enhanced = np.concatenate(enhanced_parts)[: mic_audio.shape[0]] if enhanced_parts else np.zeros(mic_audio.shape[0], dtype=np.float32)
@@ -130,7 +173,10 @@ def run_simulation_pipeline(
         "output_normalization_enabled": bool(cfg.output_normalization_enabled),
         "output_allow_amplification": bool(cfg.output_allow_amplification),
         "speaker_map_final": speaker_map_rows,
+        "robust_mode": bool(robust_mode),
     }
+    if capture_trace:
+        summary["speaker_map_trace"] = speaker_map_trace
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
@@ -147,6 +193,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--beamforming-mode", choices=["mvdr_fd", "gsc_fd", "delay_sum"], default="mvdr_fd")
     p.add_argument("--disable-output-normalization", action="store_true")
     p.add_argument("--allow-output-amplification", action="store_true")
+    p.add_argument("--disable-robust-mode", action="store_true")
     return p
 
 
@@ -166,6 +213,7 @@ def main() -> None:
         beamforming_mode=args.beamforming_mode,
         output_normalization_enabled=not args.disable_output_normalization,
         output_allow_amplification=bool(args.allow_output_amplification),
+        robust_mode=not bool(args.disable_robust_mode),
     )
     print(json.dumps(summary, indent=2))
 

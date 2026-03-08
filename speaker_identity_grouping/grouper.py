@@ -28,10 +28,14 @@ class SpeakerIdentityGrouper:
             raise ValueError("match_threshold must be within [-1.0, 1.0]")
         self._speakers: dict[int, SpeakerState] = {}
         self._next_speaker_id: int = 0
+        self._prev_stream_to_speaker: dict[int, int | None] = {}
+        self._prev_stream_confidence: dict[int, float] = {}
 
     def reset(self) -> None:
         self._speakers.clear()
         self._next_speaker_id = 0
+        self._prev_stream_to_speaker.clear()
+        self._prev_stream_confidence.clear()
 
     def get_state(self) -> dict[int, SpeakerState]:
         return {sid: replace(state) for sid, state in self._speakers.items()}
@@ -64,6 +68,8 @@ class SpeakerIdentityGrouper:
 
         matched_stream_to_speaker: dict[int, int] = {}
         matched_stream_conf: dict[int, float] = {}
+        held_streams: list[int] = []
+        blocked_switch_streams: list[int] = []
 
         if active_obs:
             stream_ids = [obs.stream_index for obs in active_obs]
@@ -73,18 +79,31 @@ class SpeakerIdentityGrouper:
             if known_ids:
                 centroids = np.stack([self._speakers[sid].centroid for sid in known_ids], axis=0)
                 sim = embeddings @ centroids.T
+                adjusted = sim.copy()
+                for row_idx, sidx in enumerate(stream_ids):
+                    prev_sid = self._prev_stream_to_speaker.get(sidx)
+                    if prev_sid in known_ids:
+                        adjusted[row_idx, known_ids.index(prev_sid)] += cfg.continuity_bonus
 
-                rows, cols = linear_sum_assignment(1.0 - sim)
+                rows, cols = linear_sum_assignment(1.0 - adjusted)
                 assigned_streams = set()
 
                 for r, c in zip(rows.tolist(), cols.tolist()):
                     score = float(np.clip(sim[r, c], -1.0, 1.0))
+                    adjusted_score = float(adjusted[r, c])
                     if score >= cfg.match_threshold:
                         sidx = stream_ids[r]
                         sid = known_ids[c]
+                        prev_sid = self._prev_stream_to_speaker.get(sidx)
+                        if prev_sid in known_ids and sid != prev_sid:
+                            prev_idx = known_ids.index(prev_sid)
+                            prev_score = float(adjusted[r, prev_idx])
+                            if adjusted_score < prev_score + cfg.switch_penalty:
+                                blocked_switch_streams.append(sidx)
+                                continue
                         matched_stream_to_speaker[sidx] = sid
                         matched_stream_conf[sidx] = score
-                        self._update_speaker(sid, embeddings[r], input_chunk.chunk_id, input_chunk.timestamp_ms)
+                        self._update_speaker(sid, embeddings[r], input_chunk.chunk_id, input_chunk.timestamp_ms, score)
                         assigned_streams.add(sidx)
 
                 unmatched = [r for r, sidx in enumerate(stream_ids) if sidx not in assigned_streams]
@@ -94,9 +113,22 @@ class SpeakerIdentityGrouper:
             for r in unmatched:
                 sidx = stream_ids[r]
                 emb = embeddings[r]
+                prev_sid = self._prev_stream_to_speaker.get(sidx)
+                prev_conf = float(self._prev_stream_confidence.get(sidx, 0.0))
+
+                if prev_sid in self._speakers:
+                    prev_score = float(np.clip(emb @ self._speakers[prev_sid].centroid.T, -1.0, 1.0))
+                    age = input_chunk.chunk_id - self._speakers[prev_sid].last_seen_chunk
+                    support = max(prev_score, prev_conf)
+                    if age <= cfg.carry_forward_chunks and support >= cfg.hold_similarity_threshold:
+                        matched_stream_to_speaker[sidx] = prev_sid
+                        matched_stream_conf[sidx] = float(np.clip(support * cfg.confidence_decay, 0.0, 1.0))
+                        self._touch_speaker(prev_sid, input_chunk.chunk_id, input_chunk.timestamp_ms, matched_stream_conf[sidx])
+                        held_streams.append(sidx)
+                        continue
 
                 if len(self._speakers) < cfg.max_speakers:
-                    sid = self._register_new_speaker(emb, input_chunk.chunk_id, input_chunk.timestamp_ms)
+                    sid = self._register_new_speaker(emb, input_chunk.chunk_id, input_chunk.timestamp_ms, cfg.new_speaker_confidence)
                     new_speakers.append(sid)
                     matched_stream_to_speaker[sidx] = sid
                     matched_stream_conf[sidx] = float(cfg.new_speaker_confidence)
@@ -110,7 +142,7 @@ class SpeakerIdentityGrouper:
                     score = float(np.clip(sims[c], -1.0, 1.0))
                     matched_stream_to_speaker[sidx] = sid
                     matched_stream_conf[sidx] = max(0.0, score)
-                    self._update_speaker(sid, emb, input_chunk.chunk_id, input_chunk.timestamp_ms)
+                    self._update_speaker(sid, emb, input_chunk.chunk_id, input_chunk.timestamp_ms, score)
                     forced_reuse_streams.append(sidx)
 
         for sidx, sid in matched_stream_to_speaker.items():
@@ -119,6 +151,8 @@ class SpeakerIdentityGrouper:
 
         active_speakers = sorted({sid for sid in stream_to_speaker.values() if sid is not None})
 
+        self._prev_stream_to_speaker = dict(stream_to_speaker)
+        self._prev_stream_confidence = dict(per_stream_confidence)
         return IdentityChunkOutput(
             chunk_id=input_chunk.chunk_id,
             timestamp_ms=input_chunk.timestamp_ms,
@@ -132,6 +166,8 @@ class SpeakerIdentityGrouper:
                 "num_active_streams": len(active_obs),
                 "num_registry_speakers": len(self._speakers),
                 "forced_reuse_streams": forced_reuse_streams,
+                "held_streams": held_streams,
+                "blocked_switch_streams": blocked_switch_streams,
             },
         )
 
@@ -146,7 +182,7 @@ class SpeakerIdentityGrouper:
 
         return retired
 
-    def _register_new_speaker(self, embedding: np.ndarray, chunk_id: int, timestamp_ms: float) -> int:
+    def _register_new_speaker(self, embedding: np.ndarray, chunk_id: int, timestamp_ms: float, confidence: float) -> int:
         sid = self._next_speaker_id
         self._next_speaker_id += 1
 
@@ -156,10 +192,11 @@ class SpeakerIdentityGrouper:
             sample_count=1,
             last_seen_chunk=chunk_id,
             last_seen_timestamp_ms=timestamp_ms,
+            last_confidence=float(confidence),
         )
         return sid
 
-    def _update_speaker(self, speaker_id: int, embedding: np.ndarray, chunk_id: int, timestamp_ms: float) -> None:
+    def _update_speaker(self, speaker_id: int, embedding: np.ndarray, chunk_id: int, timestamp_ms: float, confidence: float) -> None:
         cfg = self.config
         state = self._speakers[speaker_id]
         centroid = (1.0 - cfg.ema_alpha) * state.centroid + cfg.ema_alpha * embedding
@@ -171,6 +208,20 @@ class SpeakerIdentityGrouper:
             sample_count=state.sample_count + 1,
             last_seen_chunk=chunk_id,
             last_seen_timestamp_ms=timestamp_ms,
+            last_confidence=float(confidence),
+            hold_count=0,
+        )
+
+    def _touch_speaker(self, speaker_id: int, chunk_id: int, timestamp_ms: float, confidence: float) -> None:
+        state = self._speakers[speaker_id]
+        self._speakers[speaker_id] = SpeakerState(
+            speaker_id=speaker_id,
+            centroid=state.centroid,
+            sample_count=state.sample_count,
+            last_seen_chunk=chunk_id,
+            last_seen_timestamp_ms=timestamp_ms,
+            last_confidence=float(confidence),
+            hold_count=state.hold_count + 1,
         )
 
     def _extract_embedding(self, audio: np.ndarray) -> np.ndarray | None:
