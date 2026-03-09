@@ -431,11 +431,11 @@ class LiveDemoSession:
             tracker = SRPPeakTracker(
                 mic_pos=self._mic_geometry_xyz.T,
                 fs=sample_rate_hz,
-                window_ms=160,
+                window_ms=80 if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else 160,
                 nfft=512,
                 overlap=0.5,
-                freq_range=(200, 3000),
-                max_sources=max(1, min(int(self.req.max_speakers_hint), channel_count)),
+                freq_range=(300, 3000) if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else (200, 3000),
+                max_sources=1 if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else max(1, min(int(self.req.max_speakers_hint), channel_count)),
                 prior_enabled=True,
                 min_score=0.03,
                 ema_alpha=0.35,
@@ -450,6 +450,7 @@ class LiveDemoSession:
                 small_aperture_bias=True,
                 tracking_mode=str(self.req.tracking_mode),
                 max_tracks=max(1, min(int(self.req.max_speakers_hint), 3)),
+                single_source_motion_filter_enabled=True,
             )
 
             def callback(indata: np.ndarray, _frames: int, _time_info: Any, status: Any) -> None:
