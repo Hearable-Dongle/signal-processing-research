@@ -1,6 +1,7 @@
-from realtime_demo_server.models import (
+from mic_array_forwarder.models import (
     AdjustSpeakerGainMessage,
     MetricsMessage,
+    RawChannelsResponse,
     SCHEMA_VERSION,
     SelectSpeakerMessage,
     SessionStartRequest,
@@ -15,7 +16,13 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.background_noise_gain == 0.15
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
+    assert req.localization_backend == "tiny_dp_ipd"
+    assert req.tracking_mode == "multi_peak_v2"
     assert req.processing_mode == "specific_speaker_enhancement"
+    assert req.monitor_source == "processed"
+    assert req.sample_rate_hz == 48000
+    req2 = SessionStartRequest(localization_backend="music_1src")
+    assert req2.localization_backend == "music_1src"
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,
@@ -52,3 +59,19 @@ def test_adjust_message_allows_only_unit_steps() -> None:
 def test_select_message_schema() -> None:
     msg = SelectSpeakerMessage(schema_version="v1", type="select_speaker", speaker_id=3)
     assert msg.schema_version == "v1"
+
+
+def test_raw_channels_response_schema() -> None:
+    resp = RawChannelsResponse.model_validate(
+        {
+            "session_id": "abc123",
+            "sample_rate_hz": 16000,
+            "channel_count": 2,
+            "channels": [
+                {"channel_index": 0, "filename": "channel_000.wav"},
+                {"channel_index": 1, "filename": "channel_001.wav"},
+            ],
+        }
+    )
+    assert resp.channel_count == 2
+    assert resp.channels[1].filename == "channel_001.wav"

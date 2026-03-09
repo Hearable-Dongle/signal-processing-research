@@ -3,9 +3,9 @@ import time
 
 from fastapi.testclient import TestClient
 
-from realtime_demo_server.app import app
-from realtime_demo_server.manager import manager
-from realtime_demo_server.ws_codec import decode_audio_chunk
+from mic_array_forwarder.app import app
+from mic_array_forwarder.manager import manager
+from mic_array_forwarder.ws_codec import decode_audio_chunk
 
 
 client = TestClient(app)

@@ -36,10 +36,13 @@ test("speaker tap opens popover", async () => {
 
   expect(screen.getByTestId("ground-truth-stage")).toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();
+  expect(screen.getByTestId("beamformer-viz")).toBeInTheDocument();
+  expect(screen.getByTestId("beam-weight-4")).toHaveTextContent("Weight 1.00");
 
   await user.click(screen.getByTestId("speaker-4"));
 
   expect(screen.getByRole("dialog", { name: "speaker-4-control" })).toBeInTheDocument();
+  expect(screen.getByTestId("beam-node-4")).toBeInTheDocument();
 });
 
 test("localize and beamform shows active speakers only without numbered speaker buttons", () => {
@@ -74,6 +77,8 @@ test("localize and beamform shows active speakers only without numbered speaker 
   expect(screen.getByTestId("active-speaker-1")).toBeInTheDocument();
   expect(screen.queryByTestId("active-speaker-2")).not.toBeInTheDocument();
   expect(screen.queryByTestId("speaker-1")).not.toBeInTheDocument();
+  expect(screen.getByTestId("beam-weight-1")).toBeInTheDocument();
+  expect(screen.queryByTestId("beam-weight-2")).not.toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-stage")).toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();
 });
@@ -99,6 +104,7 @@ test("beamform from ground truth shows ground truth only", () => {
   );
 
   expect(screen.queryByTestId("speaker-stage")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("beamformer-viz")).not.toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-stage")).toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();
 });

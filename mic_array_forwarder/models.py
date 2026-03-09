@@ -8,7 +8,14 @@ SCHEMA_VERSION = "v1"
 
 
 class SessionStartRequest(BaseModel):
-    scene_config_path: str
+    scene_config_path: str = ""
+    input_source: Literal["simulation", "respeaker_live"] = "simulation"
+    audio_device_query: str | None = None
+    channel_count: int = 4
+    sample_rate_hz: int = 48000
+    monitor_source: Literal["processed", "raw_mixed"] = "processed"
+    mic_array_profile: Literal["respeaker_v3_0457", "respeaker_cross_0640"] = "respeaker_v3_0457"
+    channel_map: list[int] | None = None
     background_noise_audio_path: str | None = None
     background_noise_gain: float = 0.15
     focus_ratio: float = 2.0
@@ -16,6 +23,8 @@ class SessionStartRequest(BaseModel):
     max_speakers_hint: int = 4
     separation_mode: Literal["auto", "mock"] = "auto"
     beamforming_mode: Literal["mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
+    localization_backend: Literal["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"] = "tiny_dp_ipd"
+    tracking_mode: Literal["legacy", "multi_peak_v2"] = "multi_peak_v2"
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
     processing_mode: Literal[
@@ -44,6 +53,18 @@ class SessionStatusResponse(BaseModel):
 class SessionStopResponse(BaseModel):
     session_id: str
     status: Literal["stopped"]
+
+
+class RawChannelDescriptor(BaseModel):
+    channel_index: int
+    filename: str
+
+
+class RawChannelsResponse(BaseModel):
+    session_id: str
+    sample_rate_hz: int
+    channel_count: int
+    channels: list[RawChannelDescriptor]
 
 
 class SpeakerStateItem(BaseModel):
@@ -114,9 +135,17 @@ class ClearFocusMessage(BaseModel):
     type: Literal["clear_focus"] = "clear_focus"
 
 
+class SetMonitorSourceMessage(BaseModel):
+    schema_version: Literal["v1"] = SCHEMA_VERSION
+    type: Literal["set_monitor_source"] = "set_monitor_source"
+    monitor_source: Literal["processed", "raw_mixed"]
+
+
 class StopSessionMessage(BaseModel):
     schema_version: Literal["v1"] = SCHEMA_VERSION
     type: Literal["stop_session"] = "stop_session"
 
 
-ClientMessage = SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | StopSessionMessage
+ClientMessage = (
+    SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | SetMonitorSourceMessage | StopSessionMessage
+)

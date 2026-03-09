@@ -55,6 +55,10 @@ class MockAudioContext {
   }
 }
 
+beforeEach(() => {
+  MockWebSocket.instances = [];
+});
+
 test("speaker interaction emits select and adjust messages", async () => {
   const user = userEvent.setup();
   (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
@@ -67,6 +71,7 @@ test("speaker interaction emits select and adjust messages", async () => {
 
   render(<App />);
 
+  await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
   await user.click(screen.getByRole("button", { name: "Start" }));
   await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
 
@@ -99,4 +104,108 @@ test("speaker interaction emits select and adjust messages", async () => {
   await user.click(screen.getByRole("button", { name: "Kill Current Run" }));
   expect(closeSpy).toHaveBeenCalled();
   expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[0]).includes("/stop"))).toBe(true);
+});
+
+test("live mode start sends the ReSpeaker session config", async () => {
+  const user = userEvent.setup();
+  (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
+  (globalThis as unknown as { AudioContext: typeof AudioContext }).AudioContext = MockAudioContext as unknown as typeof AudioContext;
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ session_id: "live123" }),
+  } as Response);
+
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "ReSpeaker Live Direct capture from the local USB microphone array." }));
+  await user.clear(screen.getByLabelText("Audio device query"));
+  await user.type(screen.getByLabelText("Audio device query"), "USB Mic");
+  await user.click(screen.getByRole("button", { name: "Start" }));
+
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+  const startCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+    String(c[0]).includes("/api/session/start")
+  );
+  expect(startCall).toBeTruthy();
+  const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+  expect(body.input_source).toBe("respeaker_live");
+  expect(body.audio_device_query).toBe("USB Mic");
+  expect(body.sample_rate_hz).toBe(48000);
+  expect(body.channel_map).toEqual([0, 1, 2, 3]);
+});
+
+test("data collection exports raw channels for a captured set", async () => {
+  const user = userEvent.setup();
+  Object.defineProperty(URL, "createObjectURL", {
+    value: URL.createObjectURL ?? vi.fn(),
+    writable: true,
+    configurable: true,
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    value: URL.revokeObjectURL ?? vi.fn(),
+    writable: true,
+    configurable: true,
+  });
+  const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test");
+  const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+  const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/session/start")) {
+      return {
+        ok: true,
+        json: async () => ({ session_id: "record123" }),
+      } as Response;
+    }
+    if (url.includes("/api/session/record123/stop")) {
+      return {
+        ok: true,
+        json: async () => ({ status: "stopped" }),
+      } as Response;
+    }
+    if (url.includes("/api/session/record123/raw-channels")) {
+      return {
+        ok: true,
+        json: async () => ({
+          session_id: "record123",
+          sample_rate_hz: 16000,
+          channel_count: 2,
+          channels: [
+            { channel_index: 0, filename: "channel_000.wav" },
+            { channel_index: 1, filename: "channel_001.wav" },
+          ],
+        }),
+      } as Response;
+    }
+    if (url.includes("/api/session/record123/raw-channel/0.wav")) {
+      return {
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([82, 73, 70, 70]).buffer,
+      } as Response;
+    }
+    if (url.includes("/api/session/record123/raw-channel/1.wav")) {
+      return {
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([87, 65, 86, 69]).buffer,
+      } as Response;
+    }
+    throw new Error(`Unexpected fetch ${url} ${String(init?.method ?? "GET")}`);
+  }) as ReturnType<typeof vi.fn>;
+
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Data Collection" }));
+  expect(screen.getByLabelText("Collection id")).toBeInTheDocument();
+  expect(screen.getByLabelText("Title")).toBeInTheDocument();
+  expect(screen.getByLabelText("Notes")).toBeInTheDocument();
+  expect(screen.getByLabelText("Device")).toHaveValue("ReSpeaker");
+  await user.click(screen.getByRole("button", { name: "Record" }));
+  await user.click(await screen.findByRole("button", { name: "Stop" }));
+
+  expect(await screen.findByText(/Saved recording with 2 raw channels/i)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Export Set" }));
+
+  expect(createObjectUrl).toHaveBeenCalled();
+  expect(anchorClick).toHaveBeenCalled();
+  expect(revokeObjectUrl).toHaveBeenCalled();
 });

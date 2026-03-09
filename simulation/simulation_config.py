@@ -17,6 +17,7 @@ class MicrophoneArray:
     mic_center: List[float]
     mic_radius: float
     mic_count: int
+    mic_positions: List[List[float]] | None = None
 
 
 @dataclass
@@ -59,6 +60,7 @@ class SimulationConfig:
             mic_center=data["microphone_array"]["mic_center"],
             mic_radius=data["microphone_array"]["mic_radius"],
             mic_count=data["microphone_array"]["mic_count"],
+            mic_positions=data["microphone_array"].get("mic_positions"),
         )
 
         sources = [
@@ -120,6 +122,7 @@ class SimulationConfig:
                 "mic_center": self.microphone_array.mic_center,
                 "mic_radius": self.microphone_array.mic_radius,
                 "mic_count": self.microphone_array.mic_count,
+                "mic_positions": self.microphone_array.mic_positions,
             },
             "audio": {
                 "sources": [

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 
 import { SceneLauncher } from "./SceneLauncher";
 
-test("latency controls invoke callback", async () => {
+test("mode picker gates launcher settings and latency controls invoke callback", async () => {
   const user = userEvent.setup();
   const onLatency = vi.fn();
   const onKill = vi.fn();
@@ -19,14 +19,23 @@ test("latency controls invoke callback", async () => {
       onStop={() => undefined}
       onKillRun={onKill}
       canKillRun={true}
+      onStopActiveSession={() => undefined}
       onDownloadWav={() => undefined}
       canDownloadWav={false}
       latencyMs={180}
       onLatencyMsChange={onLatency}
       processingMode="specific_speaker_enhancement"
       onProcessingModeChange={onProcessingModeChange}
+      monitorSource="processed"
+      onMonitorSourceChange={() => undefined}
     />
   );
+
+  expect(screen.queryByLabelText("Scene config path")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Audio device query")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Kill Current Run" })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
 
   const slider = screen.getByLabelText("Playback latency (ms)");
   await user.clear(screen.getByLabelText("Playback latency number"));
@@ -40,4 +49,38 @@ test("latency controls invoke callback", async () => {
 
   await user.selectOptions(screen.getByLabelText("Beamforming mode"), "beamform_from_ground_truth");
   expect(onProcessingModeChange).toHaveBeenCalledWith("beamform_from_ground_truth");
+});
+
+test("live mode reveals only ReSpeaker-specific settings", async () => {
+  const user = userEvent.setup();
+
+  render(
+    <SceneLauncher
+      status="idle"
+      defaultScenePath="x.json"
+      defaultBackgroundNoisePath="noise.wav"
+      defaultBackgroundNoiseGain={0.15}
+      onStart={() => undefined}
+      onStop={() => undefined}
+      onKillRun={() => undefined}
+      canKillRun={true}
+      onStopActiveSession={() => undefined}
+      onDownloadWav={() => undefined}
+      canDownloadWav={false}
+      latencyMs={180}
+      onLatencyMsChange={() => undefined}
+      processingMode="specific_speaker_enhancement"
+      onProcessingModeChange={() => undefined}
+      monitorSource="processed"
+      onMonitorSourceChange={() => undefined}
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "ReSpeaker Live Direct capture from the local USB microphone array." }));
+
+  expect(screen.getByLabelText("Audio device query")).toBeInTheDocument();
+  expect(screen.getByLabelText("Channel map (optional)")).toBeInTheDocument();
+  expect(screen.getByLabelText("Sample rate (Hz)")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Scene config path")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Background noise audio path")).not.toBeInTheDocument();
 });

@@ -5,6 +5,8 @@ export type ProcessingMode =
   | "localize_and_beamform"
   | "beamform_from_ground_truth";
 
+export type MonitorSource = "processed" | "raw_mixed";
+
 export type Speaker = {
   speaker_id: number;
   direction_degrees: number;
@@ -75,6 +77,12 @@ export type ClearFocusMessage = {
   type: "clear_focus";
 };
 
+export type SetMonitorSourceMessage = {
+  schema_version: "v1";
+  type: "set_monitor_source";
+  monitor_source: MonitorSource;
+};
+
 export type StopSessionMessage = {
   schema_version: "v1";
   type: "stop_session";
@@ -84,4 +92,5 @@ export type ClientMessage =
   | SelectSpeakerMessage
   | AdjustSpeakerGainMessage
   | ClearFocusMessage
+  | SetMonitorSourceMessage
   | StopSessionMessage;
