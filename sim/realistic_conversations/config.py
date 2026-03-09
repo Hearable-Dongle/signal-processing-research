@@ -146,6 +146,32 @@ def _cafe() -> ConversationScenarioConfig:
     )
 
 
+def _restaurant_meeting() -> ConversationScenarioConfig:
+    return ConversationScenarioConfig(
+        preset="restaurant_meeting",
+        room=RoomSpec(dimensions_m=[8.0, 6.4, 3.1], absorption=0.19),
+        mic_array=MicArraySpec(mic_center_m=[4.0, 3.2, 1.45], mic_radius_m=0.10, mic_count=4),
+        turn_taking=TurnTakingSpec(
+            min_speakers=2,
+            max_speakers=5,
+            utterance_sec_range=[1.6, 4.8],
+            pause_sec_range=[0.18, 0.95],
+            overlap_sec_range=[0.08, 0.22],
+            overlap_probability=0.12,
+            interruption_probability=0.04,
+            persistence_probability=0.68,
+            backchannel_probability=0.05,
+            backchannel_sec_range=[0.18, 0.42],
+        ),
+        noise=NoiseSpec(
+            base_snr_db_range=[1.5, 8.0],
+            transient_count_range=[1, 4],
+            ambience_layers=["distant_chatter", "dishwasher", "hvac"],
+            transient_types=["dish_clink", "cough", "door_click"],
+        ),
+    )
+
+
 def _moving_speaker() -> ConversationScenarioConfig:
     return ConversationScenarioConfig(
         preset="moving_speaker",
@@ -188,6 +214,7 @@ PRESET_BUILDERS = {
     "quiet_room": _quiet_room,
     "office": _office,
     "cafe": _cafe,
+    "restaurant_meeting": _restaurant_meeting,
     "moving_speaker": _moving_speaker,
     "noisy_home": _noisy_home,
 }

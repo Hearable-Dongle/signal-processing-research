@@ -96,3 +96,15 @@ def test_evaluate_scene_summary(tmp_path: Path) -> None:
     metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
     moving = [speaker for speaker in metadata["speakers"] if speaker["moving"]]
     assert len(moving) == 1
+
+
+def test_restaurant_meeting_preset_matches_requested_style() -> None:
+    cfg = build_preset("restaurant_meeting")
+
+    assert cfg.turn_taking.min_speakers == 2
+    assert cfg.turn_taking.max_speakers == 5
+    assert cfg.turn_taking.overlap_probability <= 0.15
+    assert cfg.turn_taking.interruption_probability <= 0.05
+    assert cfg.turn_taking.backchannel_probability <= 0.06
+    assert cfg.noise.base_snr_db_range[1] <= 8.0
+    assert "distant_chatter" in cfg.noise.ambience_layers

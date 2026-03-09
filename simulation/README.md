@@ -14,6 +14,7 @@ pip install -r beamforming/requirements.txt
 - `simulation_config.py`: Configuration loader/saver (JSON).
 - `simulator.py`: Core simulation engine using `pyroomacoustics`.
 - `create_restaurant_scene.py`: Dataset generator for restaurant environments.
+- `create_restaurant_meeting_scene.py`: Conversation-style restaurant meeting generator with limited overlap and stronger background noise.
 - `create_library_scene.py`: Dataset generator for library environments.
 
 ## Execution
@@ -21,6 +22,9 @@ Run scripts from the project root:
 ```bash
 # Generate restaurant configs
 python -m simulation.create_restaurant_scene
+
+# Generate restaurant meeting configs
+python -m simulation.create_restaurant_meeting_scene
 
 # Generate library configs
 python -m simulation.create_library_scene

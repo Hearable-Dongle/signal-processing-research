@@ -7,6 +7,7 @@ This module generates multi-speaker conversational scenes for mic-array denoisin
 - `quiet_room`
 - `office`
 - `cafe`
+- `restaurant_meeting`
 - `moving_speaker`
 - `noisy_home`
 

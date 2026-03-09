@@ -486,9 +486,10 @@ def generate_scenario(
     manifest_path: str | Path | None = None,
     export_audio: bool = True,
     scene_name: str | None = None,
+    config_override: ConversationScenarioConfig | None = None,
 ) -> GenerationResult:
     rng = np.random.default_rng(seed)
-    cfg = build_preset(preset)
+    cfg = config_override if config_override is not None else build_preset(preset)
     if duration_sec is not None:
         cfg.render.duration_sec = float(duration_sec)
     if sample_rate is not None:
@@ -610,7 +611,7 @@ def generate_dataset(
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate realistic conversational mic-array simulations")
-    parser.add_argument("--preset", choices=["quiet_room", "office", "cafe", "moving_speaker", "noisy_home"], default="quiet_room")
+    parser.add_argument("--preset", choices=["quiet_room", "office", "cafe", "restaurant_meeting", "moving_speaker", "noisy_home"], default="quiet_room")
     parser.add_argument("--out-dir", default="sim/output/realistic_conversations")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--num-scenes", type=int, default=1)
