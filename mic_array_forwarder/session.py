@@ -466,6 +466,13 @@ class DemoSession:
                 fast_frame_ms=10,
                 slow_chunk_ms=int(self.req.slow_chunk_ms),
                 max_speakers_hint=max(int(self.req.max_speakers_hint), len(list(iter_target_source_indices(sim_cfg))), 1),
+                convtasnet_model_name=str(self.req.convtasnet_model_name),
+                convtasnet_model_sample_rate_hz=int(self.req.convtasnet_model_sample_rate_hz),
+                convtasnet_input_sample_rate_hz=int(self.req.convtasnet_input_sample_rate_hz),
+                convtasnet_resample_mode=str(self.req.convtasnet_resample_mode),
+                convtasnet_expected_num_sources=(
+                    None if self.req.convtasnet_expected_num_sources is None else int(self.req.convtasnet_expected_num_sources)
+                ),
                 beamforming_mode=str(self.req.beamforming_mode),
                 localization_backend=str(self.req.localization_backend),
                 tracking_mode=str(self.req.tracking_mode),

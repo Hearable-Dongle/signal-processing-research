@@ -37,6 +37,10 @@ class DirectionAssignmentConfig:
     min_persist_confidence: float = 0.05
     max_angular_jump_deg_per_chunk: float | None = 30.0
     low_speaker_transition_bypass_count: int = 1
+    history_window_chunks: int = 4
+    prediction_alpha: float = 0.35
+    history_switch_penalty_deg: float = 12.0
+    max_angular_velocity_deg_per_chunk: float = 18.0
 
     # Speaker lifecycle
     speaker_stale_timeout_ms: float = 2000.0

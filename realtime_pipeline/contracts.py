@@ -86,6 +86,10 @@ class PipelineConfig:
     # Asteroid backend defaults
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
     convtasnet_device: str = "cpu"
+    convtasnet_model_sample_rate_hz: int = 16000
+    convtasnet_input_sample_rate_hz: int = 16000
+    convtasnet_resample_mode: str = "polyphase"
+    convtasnet_expected_num_sources: int | None = None
     direction_focus_gain_db: float = 0.0
     direction_non_focus_attenuation_db: float = -14.0
     max_user_boost_db: float = 12.0

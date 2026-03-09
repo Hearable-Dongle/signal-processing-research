@@ -1,0 +1,76 @@
+Restaurant meeting simulation set and first localization results
+
+What changed:
+- Added a `restaurant_meeting` conversation preset tuned for low overlap, minimal interruptions/backchannels, and stronger restaurant-style background noise.
+- Added `simulation/create_restaurant_meeting_scene.py` to generate `restaurant_meeting_k{k}_scene{i:02d}.json` configs under `simulation/simulations/configs/restaurant_meeting_scene/`.
+- The wrapper reuses the realistic-conversations scheduler/rendering path, enforces requested speaker count `k=2..5`, rejects scenes with too much overlap, and keeps generated segment assets under a separate asset root.
+
+Dataset behavior:
+- Speaker counts: `k=2..5`
+- Turn taking is mostly single-speaker with short phrase-end overlaps only.
+- Background noise is intentionally stronger than the older restaurant configs.
+- If a requested high-`k` scene would be too short to realize all speakers under the low-overlap rules, the generator floors the effective duration upward.
+
+Validation:
+- `PYTHONPATH=. pytest -q tests/test_realistic_conversations.py tests/test_restaurant_meeting_scene_generator.py`
+- Result: `5 passed`
+- CLI smoke generation with `k=2` and `k=5` succeeded and produced valid configs plus scene assets/metadata.
+
+Representative localization results on generated `restaurant_meeting` scenes:
+- Evaluated one generated scene each for `k=2,3,4,5` with `SRP-PHAT`, `GMDA`, and `SSZ`.
+- Conversation realism metrics for the sample scenes:
+  - `k=2`: overlap ratio `0.0033`, mean frame SNR `-15.28 dB`
+  - `k=5`: overlap ratio `0.0`, mean frame SNR `-22.36 dB`
+
+Per-scene localization:
+- `restaurant_meeting_k2_scene00`
+  - `SRP-PHAT`: MAE `21.00 deg`
+  - `GMDA`: MAE `26.75 deg`
+  - `SSZ`: MAE `1.00 deg`
+- `restaurant_meeting_k3_scene00`
+  - `SRP-PHAT`: MAE `45.00 deg`
+  - `GMDA`: MAE `61.17 deg`
+  - `SSZ`: MAE `59.83 deg`
+- `restaurant_meeting_k4_scene00`
+  - `SRP-PHAT`: MAE `28.00 deg`
+  - `GMDA`: MAE `16.83 deg`, `1` miss
+  - `SSZ`: MAE `13.00 deg`
+- `restaurant_meeting_k5_scene00`
+  - `SRP-PHAT`: MAE `8.00 deg`, `1` miss
+  - `GMDA`: MAE `54.00 deg`
+  - `SSZ`: MAE `29.90 deg`
+
+Method-level summary over the `k=2..5` sample:
+- `SRP-PHAT`: mean MAE `25.50 deg`, total misses `1`, mean runtime `0.80 s`, mean `RTF 0.067`
+- `GMDA`: mean MAE `39.69 deg`, total misses `1`, mean runtime `2.77 s`, mean `RTF 0.231`
+- `SSZ`: mean MAE `25.93 deg`, total misses `0`, mean runtime `1.05 s`, mean `RTF 0.087`
+
+Realtime pipeline notes:
+- The realistic meeting scenes are materially heavier for the realtime pipeline because each speaker/noise track is rendered as sparse segment assets, so the same baseline/robust pipeline sweep is slower than on the older static scenes.
+- One representative baseline pipeline run completed on `restaurant_meeting_k2_scene00`:
+  - speaker-map MAE `66.80 deg`
+  - mismatch rate `1.00`
+  - map churn `0.23 deg`
+  - fast-path RTF `8.27`
+- Higher-`k` pipeline runs did not complete in time during this pass, so the current evidence is:
+  - offline localization methods still work on the new scenes
+  - the realtime pipeline path degrades badly and is substantially slower on the segmented meeting-style configs
+
+Current takeaway:
+- The new meeting scenes are meaningfully harder and more realistic than the older always-on static-source restaurant scenes.
+- Offline localization quality is mixed by `k`, with `SSZ` strongest on `k=2` and `k=4`, and `SRP-PHAT` relatively better on the sampled `k=5` scene.
+- The current realtime pipeline does not transfer cleanly to these segmented meeting scenes yet; it needs dedicated optimization/tuning if this dataset is going to be a primary validation target.
+
+Separator/grouping + direction-assignment follow-up using oracle localization:
+- Re-ran the meeting-scene separator comparison with estimated localization removed from the loop.
+- The evaluator now feeds oracle per-chunk DOAs from `frame_ground_truth.json` directly into direction tracking, so the remaining metrics reflect separator quality, grouping stability, and speaker-to-direction assignment only.
+- On `restaurant_meeting_k2_scene00`:
+  - `Libri2Mix 8k`: mismatch `0.0448`, MAE `8.06 deg`, grouping switch rate `0.0909`, stability `0.769`, slow RTF `0.277`
+  - `Libri3Mix 8k`: mismatch `0.0706`, MAE `12.71 deg`, grouping switch rate `0.3125`, stability `0.778`, slow RTF `0.267`
+- On `restaurant_meeting_k3_scene00`:
+  - `Libri2Mix 8k`: mismatch `0.7381`, MAE `85.14 deg`, grouping switch rate `0.75`, stability `0.571`, slow RTF `0.258`
+  - `Libri3Mix 8k`: mismatch `0.2391`, MAE `26.61 deg`, grouping switch rate `0.4`, stability `0.667`, slow RTF `0.272`
+- Interpretation:
+  - `Libri2Mix 8k` is better on the sampled `k=2` scene.
+  - `Libri3Mix 8k` is substantially better on the sampled `k=3` scene and is the stronger general separator choice for the meeting-style setup overall.
+  - Decision for the current branch: standardize on `JorisCos/ConvTasNet_Libri3Mix_sepnoisy_8k` as the default separator for this workflow.

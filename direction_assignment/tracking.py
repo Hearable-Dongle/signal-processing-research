@@ -104,14 +104,24 @@ def update_speaker_states(
                 updates=1,
                 last_observed_ms=timestamp_ms,
                 last_raw_direction_deg=float(raw_doa),
+                velocity_deg_per_chunk=0.0,
+                recent_direction_history_deg=(float(snapped_doa),),
             )
             updated_ids.add(int(sid))
         else:
             st = states[sid]
+            predicted_velocity = float(np.clip(st.velocity_deg_per_chunk, -abs(cfg.max_angular_velocity_deg_per_chunk), abs(cfg.max_angular_velocity_deg_per_chunk)))
+            predicted_doa = normalize_angle_deg(st.direction_deg + predicted_velocity)
             diff = circular_diff_deg(snapped_doa, st.direction_deg)
+            predicted_diff = circular_diff_deg(snapped_doa, predicted_doa)
+            transition_bypass = bool(
+                allow_transition_bypass
+                and st.updates < 2
+                and len(st.recent_direction_history_deg) < 2
+            )
             if (
-                not allow_transition_bypass
-                and abs(diff) > cfg.transition_penalty_deg
+                not transition_bypass
+                and abs(predicted_diff) > (cfg.transition_penalty_deg + cfg.history_switch_penalty_deg)
                 and conf < cfg.min_confidence_for_switch
             ):
                 st.confidence = float(np.clip(st.confidence * cfg.hold_confidence_decay, 0.0, 1.0))
@@ -123,12 +133,18 @@ def update_speaker_states(
                     "raw_doa": float(raw_doa),
                     "snapped_doa": float(snapped_doa),
                     "snapped": bool(snapped),
+                    "predicted_doa": float(predicted_doa),
                     "blocked_transition": True,
                 }
                 continue
+            blended_target = normalize_angle_deg(
+                predicted_doa + (1.0 - cfg.prediction_alpha) * circular_diff_deg(snapped_doa, predicted_doa)
+            )
+            diff = circular_diff_deg(blended_target, st.direction_deg)
             max_jump = cfg.max_angular_jump_deg_per_chunk
             if max_jump is not None:
                 diff = float(np.clip(diff, -abs(max_jump), abs(max_jump)))
+            prev_direction = float(st.direction_deg)
             st.direction_deg = normalize_angle_deg(st.direction_deg + cfg.doa_ema_alpha * diff)
             st.confidence = float(np.clip((1.0 - cfg.doa_ema_alpha) * st.confidence + cfg.doa_ema_alpha * conf, 0.0, 1.0))
             st.last_update_ms = timestamp_ms
@@ -137,12 +153,25 @@ def update_speaker_states(
             st.hold_count = 0
             st.stale_updates = 0
             st.last_raw_direction_deg = float(raw_doa)
+            observed_velocity = circular_diff_deg(st.direction_deg, prev_direction)
+            st.velocity_deg_per_chunk = float(
+                np.clip(
+                    (cfg.prediction_alpha * predicted_velocity) + ((1.0 - cfg.prediction_alpha) * observed_velocity),
+                    -abs(cfg.max_angular_velocity_deg_per_chunk),
+                    abs(cfg.max_angular_velocity_deg_per_chunk),
+                )
+            )
+            hist = list(st.recent_direction_history_deg)
+            hist.append(float(st.direction_deg))
+            st.recent_direction_history_deg = tuple(hist[-max(1, int(cfg.history_window_chunks)) :])
             updated_ids.add(int(sid))
 
         snap_debug[sid] = {
             "raw_doa": float(raw_doa),
             "snapped_doa": float(snapped_doa),
             "snapped": bool(snapped),
+            "predicted_doa": float(states[sid].direction_deg if sid in states else snapped_doa),
+            "velocity_deg_per_chunk": float(states[sid].velocity_deg_per_chunk if sid in states else 0.0),
         }
 
     for sid, st in states.items():

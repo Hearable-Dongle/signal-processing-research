@@ -39,6 +39,10 @@ def run_simulation_pipeline(
     capture_trace: bool = False,
     localization_backend: str = "tiny_dp_ipd",
     tracking_mode: str = "multi_peak_v2",
+    convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k",
+    convtasnet_model_sample_rate_hz: int = 16000,
+    convtasnet_input_sample_rate_hz: int = 16000,
+    convtasnet_expected_num_sources: int | None = None,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -51,6 +55,10 @@ def run_simulation_pipeline(
         sample_rate_hz=sim_cfg.audio.fs,
         fast_frame_ms=frame_ms,
         slow_chunk_ms=200,
+        convtasnet_model_name=str(convtasnet_model_name),
+        convtasnet_model_sample_rate_hz=int(convtasnet_model_sample_rate_hz),
+        convtasnet_input_sample_rate_hz=int(convtasnet_input_sample_rate_hz),
+        convtasnet_expected_num_sources=None if convtasnet_expected_num_sources is None else int(convtasnet_expected_num_sources),
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
@@ -204,6 +212,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--disable-robust-mode", action="store_true")
     p.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"], default="tiny_dp_ipd")
     p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
+    p.add_argument("--convtasnet-model-name", default="JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k")
+    p.add_argument("--convtasnet-model-sample-rate-hz", type=int, default=16000)
+    p.add_argument("--convtasnet-input-sample-rate-hz", type=int, default=16000)
+    p.add_argument("--convtasnet-expected-num-sources", type=int, default=None)
     return p
 
 
@@ -226,6 +238,12 @@ def main() -> None:
         robust_mode=not bool(args.disable_robust_mode),
         localization_backend=str(args.localization_backend),
         tracking_mode=str(args.tracking_mode),
+        convtasnet_model_name=str(args.convtasnet_model_name),
+        convtasnet_model_sample_rate_hz=int(args.convtasnet_model_sample_rate_hz),
+        convtasnet_input_sample_rate_hz=int(args.convtasnet_input_sample_rate_hz),
+        convtasnet_expected_num_sources=(
+            None if args.convtasnet_expected_num_sources is None else int(args.convtasnet_expected_num_sources)
+        ),
     )
     print(json.dumps(summary, indent=2))
 
