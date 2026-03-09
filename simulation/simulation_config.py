@@ -29,7 +29,10 @@ class SimulationSource:
 
     def get_absolute_path(self) -> Path:
         """Returns the absolute path to the audio file."""
-        return LIBRIMIX_PATH / self.audio_path
+        path = Path(self.audio_path)
+        if path.is_absolute():
+            return path
+        return LIBRIMIX_PATH / path
 
 
 @dataclass
