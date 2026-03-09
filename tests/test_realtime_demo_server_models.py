@@ -21,6 +21,8 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.processing_mode == "specific_speaker_enhancement"
     assert req.monitor_source == "processed"
     assert req.sample_rate_hz == 48000
+    req2 = SessionStartRequest(localization_backend="music_1src")
+    assert req2.localization_backend == "music_1src"
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,

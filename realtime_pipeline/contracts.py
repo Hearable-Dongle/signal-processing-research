@@ -35,7 +35,7 @@ class PipelineConfig:
     sample_rate_hz: int = 16000
     fast_frame_ms: int = 10
     slow_chunk_ms: int = 200
-    localization_backend: str = "tiny_dp_ipd"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy
+    localization_backend: str = "tiny_dp_ipd"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy, music_1src, gcc_tdoa_1src
     tracking_mode: str = "multi_peak_v2"  # one of: legacy, multi_peak_v2
     localization_window_ms: int = 160
     localization_hop_ms: int = 50
@@ -55,6 +55,13 @@ class PipelineConfig:
     localization_track_confidence_decay: float = 0.88
     localization_velocity_alpha: float = 0.35
     localization_angle_alpha: float = 0.30
+    single_source_mode_enabled: bool = False
+    single_source_window_ms: int = 80
+    single_source_hop_ms: int = 20
+    single_source_freq_min_hz: int = 300
+    single_source_freq_max_hz: int = 3000
+    single_source_grid_size: int = 72
+    single_source_motion_filter_enabled: bool = True
     srp_window_ms: int = 40
     srp_nfft: int = 512
     srp_overlap: float = 0.5

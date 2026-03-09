@@ -154,6 +154,27 @@ def _angular_bin_distance(a_idx: int, b_idx: int, n_bins: int) -> int:
     return int(min(diff, int(n_bins) - diff))
 
 
+def _mic_delays(mic_pos: np.ndarray, angle_deg: float, sound_speed_m_s: float) -> np.ndarray:
+    theta = np.deg2rad(float(angle_deg))
+    direction = np.array([np.cos(theta), np.sin(theta), 0.0], dtype=np.float64)
+    tau = (np.asarray(mic_pos, dtype=np.float64).T @ direction) / float(sound_speed_m_s)
+    tau -= np.mean(tau)
+    return tau
+
+
+def _steering_vector(mic_pos: np.ndarray, freq_hz: float, angle_deg: float, sound_speed_m_s: float) -> np.ndarray:
+    tau = _mic_delays(mic_pos, angle_deg, sound_speed_m_s)
+    return np.exp(-1j * 2.0 * np.pi * float(freq_hz) * tau)
+
+
+def _resolve_primary_peak(spec: np.ndarray, angles: np.ndarray) -> tuple[list[float], list[float]]:
+    arr = _normalize_spectrum(spec)
+    idx = _dominant_peak_idx(arr)
+    if idx is None:
+        return [], []
+    return [float(angles[idx])], [float(arr[idx])]
+
+
 @dataclass(frozen=True, slots=True)
 class LocalizationBackendResult:
     peaks_deg: list[float]
@@ -621,6 +642,192 @@ class TinyDPIPDBackend(LocalizationBackendBase):
         )
 
 
+class Music1SrcBackend(LocalizationBackendBase):
+    def process(self, audio: np.ndarray) -> LocalizationBackendResult:
+        roi = _stft_roi(audio, self.fs, self.nfft, self.overlap, self.freq_range)
+        if roi is None:
+            return LocalizationBackendResult(peaks_deg=[], peak_scores=[], score_spectrum=None, debug={"backend": "music_1src", "reason": "empty_roi"})
+        freqs, zxx_roi = roi
+        active_mask = _speech_frame_mask(zxx_roi)
+        if active_mask.size == 0 or not np.any(active_mask):
+            active_mask = np.ones(zxx_roi.shape[2], dtype=bool)
+        z_active = zxx_roi[:, :, active_mask]
+        angles = _grid_angles_deg(self.grid_size)
+        spectrum = np.zeros(self.grid_size, dtype=np.float64)
+        cov_conds: list[float] = []
+        eig_ratios: list[float] = []
+        band_weight = _band_weight(freqs, self.small_aperture_bias)
+        n_mics = self.mic_pos.shape[1]
+        eye = np.eye(n_mics, dtype=np.complex128)
+        for f_idx, freq_hz in enumerate(freqs):
+            snapshots = z_active[:, f_idx, :]
+            if snapshots.size == 0:
+                continue
+            cov = (snapshots @ np.conj(snapshots.T)) / max(1, snapshots.shape[1])
+            load = 1e-3 * np.trace(cov).real / max(1, n_mics)
+            cov = cov + load * eye
+            evals, evecs = np.linalg.eigh(cov)
+            order = np.argsort(evals)
+            evals = np.real(evals[order])
+            evecs = evecs[:, order]
+            noise_subspace = evecs[:, :-1]
+            cov_conds.append(float((np.max(evals) + 1e-12) / (np.min(evals) + 1e-12)))
+            eig_ratios.append(float((evals[-1] + 1e-12) / (np.sum(evals[:-1]) / max(1, len(evals) - 1) + 1e-12)))
+            for a_idx, angle_deg in enumerate(angles):
+                steer = _steering_vector(self.mic_pos, float(freq_hz), float(angle_deg), self.sound_speed_m_s)
+                denom = np.conj(steer).T @ noise_subspace @ np.conj(noise_subspace).T @ steer
+                denom_v = float(np.abs(denom))
+                spectrum[a_idx] += float(band_weight[f_idx]) / max(1e-8, denom_v)
+        spectrum = _normalize_spectrum(spectrum)
+        peaks_deg, peak_scores = _resolve_primary_peak(spectrum, angles)
+        return LocalizationBackendResult(
+            peaks_deg=peaks_deg,
+            peak_scores=peak_scores,
+            score_spectrum=np.asarray(spectrum, dtype=np.float64),
+            debug={
+                "backend": "music_1src",
+                "music_spectrum": [float(v) for v in spectrum],
+                "cov_condition_number": float(np.mean(cov_conds)) if cov_conds else 0.0,
+                "dominant_eigenvalue_ratio": float(np.mean(eig_ratios)) if eig_ratios else 0.0,
+                "active_frames": int(np.sum(active_mask)),
+            },
+        )
+
+
+class GCCTDOA1SrcBackend(LocalizationBackendBase):
+    def _score_angle(
+        self,
+        angle_deg: float,
+        *,
+        curves: list[np.ndarray],
+        valid_pairs: list[tuple[int, int]],
+        weights: np.ndarray,
+        max_lags_interp: list[int],
+        interp_factor: int,
+    ) -> float:
+        tau = _mic_delays(self.mic_pos, angle_deg, self.sound_speed_m_s)
+        total = 0.0
+        for p_idx, (i, j) in enumerate(valid_pairs):
+            pred = float((tau[j] - tau[i]) * self.fs * interp_factor)
+            max_lag_interp = int(max_lags_interp[p_idx])
+            pred = float(np.clip(pred, -max_lag_interp, max_lag_interp))
+            base = pred + max_lag_interp
+            lo = int(np.floor(base))
+            hi = int(np.ceil(base))
+            curve = curves[p_idx]
+            lo = int(np.clip(lo, 0, curve.size - 1))
+            hi = int(np.clip(hi, 0, curve.size - 1))
+            frac = float(base - np.floor(base))
+            sample = ((1.0 - frac) * float(curve[lo])) + (frac * float(curve[hi]))
+            total += float(weights[p_idx]) * max(0.0, sample)
+        return float(total)
+
+    def process(self, audio: np.ndarray) -> LocalizationBackendResult:
+        audio = np.asarray(audio, dtype=np.float64)
+        if audio.ndim != 2 or audio.shape[0] != self.mic_pos.shape[1]:
+            return LocalizationBackendResult(peaks_deg=[], peak_scores=[], score_spectrum=None, debug={"backend": "gcc_tdoa_1src", "reason": "bad_audio_shape"})
+        if audio.shape[1] < max(16, self.nfft // 4):
+            return LocalizationBackendResult(peaks_deg=[], peak_scores=[], score_spectrum=None, debug={"backend": "gcc_tdoa_1src", "reason": "audio_too_short"})
+        pairs = _pair_indices(self.mic_pos.shape[1])
+        interp_factor = 2
+        pair_tdoas_samples: list[float] = []
+        pair_confidences: list[float] = []
+        valid_confidences: list[float] = []
+        valid_pairs: list[tuple[int, int]] = []
+        gcc_curves: list[np.ndarray] = []
+        max_lags_interp: list[int] = []
+        for i, j in pairs:
+            xi = audio[i]
+            xj = audio[j]
+            Xi = np.fft.rfft(xi)
+            Xj = np.fft.rfft(xj)
+            cps = Xi * np.conj(Xj)
+            cps /= np.maximum(np.abs(cps), 1e-10)
+            if cps.size == 0:
+                pair_tdoas_samples.append(0.0)
+                pair_confidences.append(0.0)
+                continue
+            gcc = np.fft.irfft(cps, n=int(xi.size * interp_factor))
+            diff = self.mic_pos[:, j] - self.mic_pos[:, i]
+            max_lag = float(np.linalg.norm(diff) * self.fs / self.sound_speed_m_s)
+            max_lag_interp = max(1, int(np.ceil(max_lag * interp_factor)) + 1)
+            gcc = np.concatenate((gcc[-max_lag_interp:], gcc[: max_lag_interp + 1]))
+            abs_gcc = np.abs(gcc)
+            peak_idx = int(np.argmax(abs_gcc))
+            peak_val = float(abs_gcc[peak_idx])
+            sorted_abs = np.sort(abs_gcc)
+            sidelobe = float(sorted_abs[-2]) if sorted_abs.size > 1 else 0.0
+            confidence = peak_val / max(1e-6, sidelobe + 1e-6)
+            lag_interp = peak_idx - max_lag_interp
+            lag = lag_interp / float(interp_factor)
+            pair_tdoas_samples.append(float(lag))
+            pair_confidences.append(float(confidence))
+            if confidence < 1.03:
+                continue
+            valid_pairs.append((i, j))
+            valid_confidences.append(float(confidence))
+            gcc_curves.append(np.asarray(abs_gcc, dtype=np.float64))
+            max_lags_interp.append(int(max_lag_interp))
+
+        angles = _grid_angles_deg(self.grid_size)
+        spectrum = np.zeros(self.grid_size, dtype=np.float64)
+        if len(valid_pairs) >= 2:
+            weights = np.asarray(valid_confidences, dtype=np.float64)
+            if np.sum(weights) <= 0.0:
+                weights = np.ones(len(valid_pairs), dtype=np.float64)
+            weights /= np.sum(weights)
+            for a_idx, angle_deg in enumerate(angles):
+                spectrum[a_idx] = self._score_angle(
+                    float(angle_deg),
+                    curves=gcc_curves,
+                    valid_pairs=valid_pairs,
+                    weights=weights,
+                    max_lags_interp=max_lags_interp,
+                    interp_factor=interp_factor,
+                )
+        spectrum = _normalize_spectrum(spectrum)
+        reliable_pair_count = len(valid_pairs)
+        if reliable_pair_count >= 2 and float(np.max(spectrum)) > 0.0:
+            coarse_idx = int(np.argmax(spectrum))
+            coarse_angle = float(angles[coarse_idx])
+            fine_angles = np.arange(coarse_angle - 10.0, coarse_angle + 10.0001, 1.0, dtype=np.float64)
+            fine_scores = np.asarray(
+                [
+                    self._score_angle(
+                        float(a % 360.0),
+                        curves=gcc_curves,
+                        valid_pairs=valid_pairs,
+                        weights=weights,
+                        max_lags_interp=max_lags_interp,
+                        interp_factor=interp_factor,
+                    )
+                    for a in fine_angles
+                ],
+                dtype=np.float64,
+            )
+            fine_scores = _normalize_spectrum(fine_scores)
+            best_fine_idx = int(np.argmax(fine_scores))
+            peaks_deg = [float(fine_angles[best_fine_idx] % 360.0)]
+            peak_scores = [float(fine_scores[best_fine_idx])]
+        else:
+            peaks_deg = []
+            peak_scores = []
+        solve_residual = float(1.0 - np.max(spectrum)) if np.max(spectrum) > 0 else 1.0
+        return LocalizationBackendResult(
+            peaks_deg=peaks_deg,
+            peak_scores=peak_scores,
+            score_spectrum=np.asarray(spectrum, dtype=np.float64),
+            debug={
+                "backend": "gcc_tdoa_1src",
+                "pair_tdoas_samples": [float(v) for v in pair_tdoas_samples],
+                "pair_confidences": [float(v) for v in pair_confidences],
+                "reliable_pair_count": reliable_pair_count,
+                "solve_residual": solve_residual,
+                "score_spectrum": [float(v) for v in spectrum],
+            },
+        )
+
+
 def build_localization_backend(
     backend: str,
     *,
@@ -654,4 +861,8 @@ def build_localization_backend(
         return WeightedSRPDPBackend(**common)
     if name == "tiny_dp_ipd":
         return TinyDPIPDBackend(**common)
+    if name == "music_1src":
+        return Music1SrcBackend(**common)
+    if name == "gcc_tdoa_1src":
+        return GCCTDOA1SrcBackend(**common)
     raise ValueError(f"Unsupported localization backend: {backend}")

@@ -8,7 +8,7 @@ from scipy.optimize import linear_sum_assignment
 
 from beamforming.localization_bridge import normalize_doa_list
 
-from .localization_backends import build_localization_backend
+from .localization_backends import _normalize_spectrum, build_localization_backend
 
 
 def _angular_diff_deg(a: float, b: float) -> float:
@@ -77,6 +77,7 @@ class SRPPeakTracker:
         angle_alpha: float = 0.30,
         min_relative_peak_score: float = 0.28,
         min_peak_contrast: float = 0.08,
+        single_source_motion_filter_enabled: bool = True,
     ):
         self._fs = int(fs)
         self._window_samples = max(1, int(window_ms * fs / 1000))
@@ -92,6 +93,7 @@ class SRPPeakTracker:
         self._max_step_deg = float(max(0.1, max_step_deg))
         self._score_decay = float(np.clip(score_decay, 0.0, 1.0))
         self._tracking_mode = str(tracking_mode)
+        self._single_source_motion_filter_enabled = bool(single_source_motion_filter_enabled)
         nfft_eff = max(32, min(int(nfft), self._window_samples))
         overlap_eff = float(overlap)
         if int(nfft_eff * overlap_eff) >= nfft_eff:
@@ -142,6 +144,65 @@ class SRPPeakTracker:
             small_aperture_bias=small_aperture_bias,
         )
         self._max_sources = int(max_sources)
+        self._single_source_backends = {"music_1src", "gcc_tdoa_1src"}
+        self._single_state_x: np.ndarray | None = None
+        self._single_state_p: np.ndarray | None = None
+
+    def _unwrap_measurement(self, meas_deg: float, ref_deg: float) -> float:
+        return float(ref_deg + _angular_diff_deg(meas_deg, ref_deg))
+
+    def _single_source_predict_update(self, peaks: list[float], scores: list[float] | None, extra_debug: dict) -> tuple[list[float], list[float] | None, dict]:
+        dt = self._update_interval_s
+        F = np.array([[1.0, dt], [0.0, 1.0]], dtype=np.float64)
+        H = np.array([[1.0, 0.0]], dtype=np.float64)
+        q_angle = 6.0
+        q_vel = 40.0
+        Q = np.array([[q_angle * dt * dt, 0.0], [0.0, q_vel * dt]], dtype=np.float64)
+        if self._single_state_x is None:
+            init_angle = float(peaks[0]) if peaks else 0.0
+            self._single_state_x = np.array([init_angle, 0.0], dtype=np.float64)
+            self._single_state_p = np.diag([100.0, 1000.0]).astype(np.float64)
+        assert self._single_state_p is not None
+        x_pred = F @ self._single_state_x
+        p_pred = F @ self._single_state_p @ F.T + Q
+        gate = "predict_only"
+        measurement_used = False
+        filtered_score = float(scores[0]) if scores else 0.0
+        if peaks and self._single_source_motion_filter_enabled:
+            meas = self._unwrap_measurement(float(peaks[0]), float(x_pred[0]))
+            score = float(scores[0]) if scores else 0.5
+            score = float(np.clip(score, 0.0, 1.0))
+            R = np.array([[max(4.0, 180.0 * (1.0 - score) + 6.0)]], dtype=np.float64)
+            y = np.array([[meas]], dtype=np.float64) - (H @ x_pred.reshape(-1, 1))
+            S = H @ p_pred @ H.T + R
+            K = p_pred @ H.T @ np.linalg.inv(S)
+            x_upd = x_pred.reshape(-1, 1) + K @ y
+            p_upd = (np.eye(2) - K @ H) @ p_pred
+            self._single_state_x = x_upd.reshape(-1)
+            self._single_state_p = p_upd
+            measurement_used = True
+            gate = "update"
+        else:
+            self._single_state_x = x_pred
+            self._single_state_p = p_pred
+            filtered_score = max(0.0, filtered_score * 0.9)
+        filtered_angle = float(self._single_state_x[0] % 360.0)
+        filtered_vel = float(self._single_state_x[1])
+        self._frame_idx += 1
+        debug = {
+            "backend": self._backend_name,
+            "raw_peaks_deg": list(peaks),
+            "raw_peak_scores": [] if scores is None else list(scores),
+            "tracked_peaks_deg": [filtered_angle] if peaks or measurement_used else [],
+            "tracked_peak_scores": [filtered_score] if peaks or measurement_used else [],
+            "held_tracks": 0 if measurement_used else 1,
+            "single_source_filter_state": {"angle_deg": filtered_angle, "velocity_deg_per_s": filtered_vel},
+            "single_source_filter_mode": gate,
+            **extra_debug,
+        }
+        if not peaks and not measurement_used:
+            return [], None, debug
+        return [filtered_angle], [filtered_score], debug
 
     def _step_limit(self, prev_deg: float, next_deg: float) -> float:
         delta = _angular_diff_deg(next_deg, prev_deg)
@@ -509,6 +570,15 @@ class SRPPeakTracker:
             candidates = [PeakCandidate(angle_deg=float(a), score=float(s if i < len(legacy_scores) else 1.0), raw_score=float(s if i < len(legacy_scores) else 1.0)) for i, (a, s) in enumerate(zip(legacy_peaks, legacy_scores or [1.0] * len(legacy_peaks)))]
             extractor_debug["selected_peaks_deg"] = [float(c.angle_deg) for c in candidates]
         extra_debug = {**dict(backend_result.debug), **extractor_debug, "tracking_mode": self._tracking_mode}
+        if self._backend_name in self._single_source_backends:
+            if not legacy_peaks and backend_result.score_spectrum is not None:
+                spec = np.asarray(backend_result.score_spectrum, dtype=np.float64)
+                idx = _dominant_peak_idx(spec)
+                if idx is not None:
+                    ang = float(_grid_angles_deg(spec.size)[idx])
+                    legacy_peaks = [ang]
+                    legacy_scores = [float(_normalize_spectrum(spec)[idx])]
+            return self._single_source_predict_update(legacy_peaks[:1], legacy_scores[:1] if legacy_scores else None, extra_debug)
         if self._tracking_mode != "multi_peak_v2":
             return self._update_legacy_tracks(legacy_peaks, legacy_scores, extra_debug)
         return self._update_multi_peak_tracks(candidates, extra_debug)

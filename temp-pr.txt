@@ -1,8 +1,17 @@
-Realtime localization backend split, multi-peak tracking, and ReSpeaker score-map tuning
+Realtime localization backend split, multi-peak tracking, ReSpeaker score-map tuning, and single-source fast-path experiments
 
-- Added pluggable realtime localization backends with `srp_phat_legacy`, `weighted_srp_dp`, and `tiny_dp_ipd`.
+Backend split:
+- Added a pluggable realtime localization backend contract so the fast path and tracker can switch between:
+  - `srp_phat_legacy`: existing SRP-PHAT baseline
+  - `weighted_srp_dp`: weighted SRP / direct-path DSP backend
+  - `tiny_dp_ipd`: hybrid direct-path IPD + weighted SRP backend
+  - `music_1src`: single-source MUSIC experiment
+  - `gcc_tdoa_1src`: single-source GCC-PHAT / TDOA geometry backend
+- Added single-source config plumbing (`single_source_mode_enabled`, window/hop/freq/grid knobs, motion-filter flag) so the new 1-source modes can run without replacing the multi-speaker path globally.
+- Added a lightweight single-source motion filter in the tracker so `music_1src` / `gcc_tdoa_1src` do not have to go through the full multi-peak stack.
+
+Multi-speaker tracking and score-map work:
 - Added shared multi-peak extraction plus stronger causal track management for realtime DOA updates.
-- Added backend comparison tooling and new localization backend / tracker regression tests.
 - Added ReSpeaker-focused `tiny_dp_ipd` experiments:
   - frame-local direct-path accumulation
   - residual-map diagnostics
@@ -10,7 +19,7 @@ Realtime localization backend split, multi-peak tracking, and ReSpeaker score-ma
   - gated secondary promotion
   - 2-of-3 recurrence requirement for promoted secondary peaks
 
-Current measured outcome:
+Measured outcome on the noisy ReSpeaker `k=2` stress scenes:
 - `weighted_srp_dp + multi_peak_v2` improved versus the untuned multi-peak baseline:
   - library: MAE `29.56 -> 28.79`, mismatch `0.673 -> 0.660`
   - restaurant: MAE `56.85 -> 56.22`, mismatch `0.973 -> 0.970`
@@ -27,7 +36,29 @@ Current measured outcome:
   - library multi: mismatch `0.842 -> 0.824`, count error `0.376 -> 0.419`
   - restaurant stayed roughly flat after the recurrence gate
 
+Single-source backend findings:
+- On the `k=2` noisy stress scenes, the single-source methods behaved as expected: they could sometimes lock onto one plausible speaker, but they should not replace the multi-speaker path.
+- Initial `k=1` subset comparison over 6 true `k=1` scenes:
+  - `weighted_srp_dp`: mean `MAE 22.59 deg`, mismatch `0.202`, `RTF 1.059`
+  - original `gcc_tdoa_1src`: mean `MAE 26.96 deg`, mismatch `0.277`, `RTF 0.273`
+  - `music_1src`: too slow and inaccurate in the current implementation to be competitive
+- Tuned `gcc_tdoa_1src` kept the speed advantage while improving the `k=1` numbers:
+  - mean `MAE 26.96 -> 23.47 deg`
+  - mean mismatch `0.277 -> 0.251`
+  - mean `RTF 0.273 -> 0.690`
+- The tuned GCC backend is still slightly worse than `weighted_srp_dp` on raw accuracy, but it is the only practical realtime single-source option in this Python path:
+  - tuned `gcc_tdoa_1src`: mean `MAE 23.47 deg`, mismatch `0.251`, `RTF 0.690`
+  - `weighted_srp_dp`: mean `MAE 22.59 deg`, mismatch `0.202`, `RTF 1.059`
+
+GCC tuning details:
+- Kept the core estimator simple and causal.
+- Added pair-specific physical lag limits instead of a generic lag cap.
+- Added sub-grid angle refinement around the GCC coarse peak.
+- Added a stricter no-peak path when too few reliable pairs survive.
+- Rejected a more aggressive speech-band weighting pass because it hurt both geometry consistency and `k=1` accuracy.
+
 Bottom line:
 - shared backend/tracker infrastructure is in place and tested
-- `weighted_srp_dp` got a real improvement
-- `tiny_dp_ipd` now has the right diagnostics and control points, but library mismatch is still not where it needs to be
+- `weighted_srp_dp` got a real improvement on the ReSpeaker multi-speaker stress cases
+- `tiny_dp_ipd` now has better diagnostics and control points, but library mismatch is still not where it needs to be
+- `gcc_tdoa_1src` is now the best candidate for a practical low-latency single-speaker mode on RPi-class hardware

@@ -19,6 +19,23 @@ class _StubBackend:
         return LocalizationBackendResult(peaks_deg=[], peak_scores=[], score_spectrum=spec, debug={"backend": "stub"})
 
 
+class _StubSingleSourceBackend:
+    def __init__(self, peaks: list[float], scores: list[float]):
+        self._peaks = peaks
+        self._scores = scores
+        self.nfft = 64
+        self._idx = 0
+
+    def process(self, _audio: np.ndarray) -> LocalizationBackendResult:
+        idx = min(self._idx, len(self._peaks) - 1)
+        self._idx += 1
+        peak = float(self._peaks[idx])
+        score = float(self._scores[idx])
+        spec = np.zeros(72, dtype=np.float64)
+        spec[int(round(peak / 5.0)) % 72] = score
+        return LocalizationBackendResult(peaks_deg=[peak], peak_scores=[score], score_spectrum=spec, debug={"backend": "music_1src"})
+
+
 def _tracker(**overrides: float) -> SRPPeakTracker:
     mic_pos = mic_positions_xyz("respeaker_v3_0457").T
     tracker = SRPPeakTracker(
@@ -88,3 +105,30 @@ def test_multipeak_tracker_holds_then_retires_tracks() -> None:
     _ = tracker.update(frame)
     _peaks4, _scores4, debug4 = tracker.update(frame)
     assert debug4["retired_tracks"]
+
+
+def test_single_source_filter_smooths_jittery_measurements() -> None:
+    mic_pos = mic_positions_xyz("respeaker_v3_0457").T
+    tracker = SRPPeakTracker(
+        mic_pos=mic_pos,
+        fs=16000,
+        window_ms=20,
+        nfft=64,
+        overlap=0.5,
+        freq_range=(300, 2500),
+        max_sources=1,
+        backend="music_1src",
+        tracking_mode="legacy",
+        single_source_motion_filter_enabled=True,
+    )
+    tracker._backend = _StubSingleSourceBackend([40.0, 55.0, 35.0, 50.0], [0.9, 0.9, 0.9, 0.9])
+    frame = np.zeros((320, 4), dtype=np.float32)
+    raw = [40.0, 55.0, 35.0, 50.0]
+    filtered = []
+    for _ in raw:
+        peaks, _scores, debug = tracker.update(frame)
+        filtered.append(peaks[0])
+        assert debug["single_source_filter_mode"] == "update"
+    raw_span = max(raw) - min(raw)
+    filt_span = max(filtered) - min(filtered)
+    assert filt_span < raw_span

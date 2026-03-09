@@ -23,7 +23,7 @@ class SessionStartRequest(BaseModel):
     max_speakers_hint: int = 4
     separation_mode: Literal["auto", "mock"] = "auto"
     beamforming_mode: Literal["mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
-    localization_backend: Literal["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy"] = "tiny_dp_ipd"
+    localization_backend: Literal["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"] = "tiny_dp_ipd"
     tracking_mode: Literal["legacy", "multi_peak_v2"] = "multi_peak_v2"
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False

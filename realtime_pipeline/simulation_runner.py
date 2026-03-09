@@ -202,7 +202,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--disable-output-normalization", action="store_true")
     p.add_argument("--allow-output-amplification", action="store_true")
     p.add_argument("--disable-robust-mode", action="store_true")
-    p.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy"], default="tiny_dp_ipd")
+    p.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"], default="tiny_dp_ipd")
     p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
     return p
 

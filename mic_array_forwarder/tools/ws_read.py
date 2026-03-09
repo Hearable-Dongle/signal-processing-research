@@ -66,7 +66,7 @@ def main() -> int:
     parser.add_argument("--monitor-source", choices=["processed", "raw_mixed"], default="processed")
     parser.add_argument(
         "--localization-backend",
-        choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy"],
+        choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"],
         default="tiny_dp_ipd",
     )
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")

@@ -42,7 +42,7 @@ def test_localization_backends_detect_synthetic_far_field_source() -> None:
     mic_pos = mic_positions_xyz("respeaker_v3_0457").T
     audio = _simulate_far_field_signal(35.0, sr=sr, duration_s=0.32, mic_pos_xyz=mic_pos)
 
-    for backend_name in ["srp_phat_legacy", "weighted_srp_dp", "tiny_dp_ipd"]:
+    for backend_name in ["srp_phat_legacy", "weighted_srp_dp", "tiny_dp_ipd", "music_1src", "gcc_tdoa_1src"]:
         backend = build_localization_backend(
             backend_name,
             mic_pos=mic_pos,
@@ -62,7 +62,8 @@ def test_localization_backends_detect_synthetic_far_field_source() -> None:
             continue
         err = min(_angular_error_deg(35.0, peak) for peak in result.peaks_deg)
         flipped_err = min(_angular_error_deg(215.0, peak) for peak in result.peaks_deg)
-        assert min(err, flipped_err) <= 25.0
+        limit = 35.0 if backend_name == "gcc_tdoa_1src" else 25.0
+        assert min(err, flipped_err) <= limit
 
 
 def test_tiny_dp_ipd_preserves_two_source_structure() -> None:
@@ -177,3 +178,27 @@ def test_tiny_dp_ipd_requires_consistent_secondary_before_promotion() -> None:
     assert second.debug["secondary_gate_passed"] is False
     assert third.debug["secondary_gate_passed"] is True
     assert third.debug["secondary_consistency_hits"] >= 2
+
+
+def test_gcc_tdoa_1src_returns_no_peak_when_pairs_are_unreliable() -> None:
+    sr = 16000
+    mic_pos = mic_positions_xyz("respeaker_v3_0457").T
+    backend = build_localization_backend(
+        "gcc_tdoa_1src",
+        mic_pos=mic_pos,
+        fs=sr,
+        nfft=256,
+        overlap=0.5,
+        freq_range=(300, 2500),
+        max_sources=1,
+        grid_size=72,
+        min_separation_deg=15.0,
+        small_aperture_bias=True,
+    )
+
+    audio = np.zeros((mic_pos.shape[1], int(0.08 * sr)), dtype=np.float32)
+    result = backend.process(audio)
+
+    assert result.debug["backend"] == "gcc_tdoa_1src"
+    assert result.debug["reliable_pair_count"] == 0
+    assert result.peaks_deg == []
