@@ -39,6 +39,8 @@ class SlowPathWorker(threading.Thread):
         self._stop = stop_event
         self._chunk_id = 0
         self._chunk_samples = max(1, int(config.sample_rate_hz * config.slow_chunk_ms / 1000))
+        hop_ms = config.slow_chunk_ms if config.slow_chunk_hop_ms is None else int(config.slow_chunk_hop_ms)
+        self._chunk_hop_samples = max(1, int(config.sample_rate_hz * hop_ms / 1000))
         self._frame_samples = max(1, int(config.sample_rate_hz * config.fast_frame_ms / 1000))
 
         self._identity = SpeakerIdentityGrouper(
@@ -52,6 +54,7 @@ class SlowPathWorker(threading.Thread):
                 hold_similarity_threshold=config.identity_hold_similarity_threshold,
                 carry_forward_chunks=config.identity_carry_forward_chunks,
                 confidence_decay=config.identity_confidence_decay,
+                retire_after_chunks=config.identity_retire_after_chunks,
                 speaker_embedding_model=config.identity_speaker_embedding_model,
                 speaker_embedding_device=config.identity_speaker_embedding_device,
                 speaker_embedding_min_speech_ms=config.identity_speaker_embedding_min_speech_ms,
@@ -82,6 +85,7 @@ class SlowPathWorker(threading.Thread):
                 speaker_tracking_large_change_persist_chunks=config.direction_large_change_persist_chunks,
                 speaker_tracking_identity_hold_margin=config.direction_identity_hold_margin,
                 speaker_tracking_stable_confidence_threshold=config.direction_stable_confidence_threshold,
+                history_window_chunks=config.direction_history_window_chunks,
                 long_memory_enabled=config.direction_long_memory_enabled,
                 long_memory_window_ms=config.direction_long_memory_window_ms,
                 long_memory_min_observations=config.direction_long_memory_min_observations,
@@ -91,12 +95,14 @@ class SlowPathWorker(threading.Thread):
                 long_memory_relock_persist_chunks=config.direction_long_memory_relock_persist_chunks,
                 long_memory_decay=config.direction_long_memory_decay,
                 long_memory_stale_timeout_ms=config.direction_long_memory_stale_timeout_ms,
+                speaker_stale_timeout_ms=config.direction_speaker_stale_timeout_ms,
+                speaker_forget_timeout_ms=config.direction_speaker_forget_timeout_ms,
             ),
         )
         self._published_map: dict[int, SpeakerGainDirection] = {}
 
     def _process_chunk(self, raw_chunk_mc: np.ndarray) -> None:
-        ts_ms = 1000.0 * (self._chunk_id * self._chunk_samples) / self._cfg.sample_rate_hz
+        ts_ms = 1000.0 * (self._chunk_id * self._chunk_hop_samples) / self._cfg.sample_rate_hz
 
         with Timer() as t:
             separation_ms = 0.0
@@ -251,7 +257,7 @@ class SlowPathWorker(threading.Thread):
             while acc_samples >= self._chunk_samples:
                 chunk = np.concatenate(frames, axis=0)
                 raw_chunk = chunk[: self._chunk_samples, :]
-                residual = chunk[self._chunk_samples :, :]
+                residual = chunk[self._chunk_hop_samples :, :]
                 frames = [residual] if residual.size else []
                 acc_samples = residual.shape[0] if residual.size else 0
                 self._process_chunk(raw_chunk)
@@ -294,6 +300,10 @@ class SlowPathWorker(threading.Thread):
                 predicted_direction_deg=prev.predicted_direction_deg,
                 angular_velocity_deg_per_chunk=prev.angular_velocity_deg_per_chunk,
                 last_separator_stream_index=prev.last_separator_stream_index,
+                anchor_direction_deg=prev.anchor_direction_deg,
+                anchor_confidence=prev.anchor_confidence,
+                anchor_locked=prev.anchor_locked,
+                anchor_last_confirmed_ms=prev.anchor_last_confirmed_ms,
             )
 
         for sid, prev in self._published_map.items():
@@ -315,6 +325,10 @@ class SlowPathWorker(threading.Thread):
                 predicted_direction_deg=prev.predicted_direction_deg,
                 angular_velocity_deg_per_chunk=prev.angular_velocity_deg_per_chunk,
                 last_separator_stream_index=prev.last_separator_stream_index,
+                anchor_direction_deg=prev.anchor_direction_deg,
+                anchor_confidence=prev.anchor_confidence,
+                anchor_locked=prev.anchor_locked,
+                anchor_last_confirmed_ms=prev.anchor_last_confirmed_ms,
             )
 
         self._published_map = dict(out)
