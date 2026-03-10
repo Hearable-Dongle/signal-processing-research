@@ -72,7 +72,7 @@ test("speaker interaction emits select and adjust messages", async () => {
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
-  expect(screen.getByLabelText("Speaker stream mode")).toHaveValue("single_dominant_no_separator");
+  expect(screen.getByLabelText("Algorithm mode")).toHaveValue("single_dominant_no_separator");
   await user.click(screen.getByRole("button", { name: "Start" }));
   await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
 
@@ -80,9 +80,9 @@ test("speaker interaction emits select and adjust messages", async () => {
     String(c[0]).includes("/api/session/start")
   );
   expect(startCall).toBeTruthy();
-  expect(JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}")).separation_mode).toBe(
-    "single_dominant_no_separator"
-  );
+  const startBody = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+  expect(startBody.algorithm_mode).toBe("single_dominant_no_separator");
+  expect(startBody.processing_mode).toBe("specific_speaker_enhancement");
 
   const ws = MockWebSocket.instances[0];
   ws.onmessage?.({
@@ -141,10 +141,10 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.audio_device_query).toBe("USB Mic");
   expect(body.sample_rate_hz).toBe(48000);
   expect(body.channel_map).toEqual([0, 1, 2, 3]);
-  expect(body.separation_mode).toBe("single_dominant_no_separator");
+  expect(body.algorithm_mode).toBe("single_dominant_no_separator");
 });
 
-test("localize and beamform starts with the no-separator realtime strategy", async () => {
+test("simulation start sends algorithm mode plus ground-truth toggles", async () => {
   const user = userEvent.setup();
   (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
   (globalThis as unknown as { AudioContext: typeof AudioContext }).AudioContext = MockAudioContext as unknown as typeof AudioContext;
@@ -156,10 +156,9 @@ test("localize and beamform starts with the no-separator realtime strategy", asy
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
-  await user.selectOptions(screen.getByLabelText("Processing mode"), "localize_and_beamform");
-  expect(screen.getByLabelText("Speaker stream mode")).toBeDisabled();
-  expect(screen.getByText(/no-separator dominant-speaker path/i)).toBeInTheDocument();
-  expect(screen.getByText(/trades overlap handling for lower latency/i)).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("Algorithm mode"), "speaker_tracking_long_memory");
+  await user.click(screen.getByLabelText("Use ground truth location"));
+  await user.click(screen.getByLabelText("Use ground truth speaker sources"));
   await user.click(screen.getByRole("button", { name: "Start" }));
 
   await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
@@ -167,8 +166,10 @@ test("localize and beamform starts with the no-separator realtime strategy", asy
     String(c[0]).includes("/api/session/start")
   );
   const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
-  expect(body.processing_mode).toBe("localize_and_beamform");
-  expect(body.separation_mode).toBe("single_dominant_no_separator");
+  expect(body.algorithm_mode).toBe("speaker_tracking_long_memory");
+  expect(body.use_ground_truth_location).toBe(true);
+  expect(body.use_ground_truth_speaker_sources).toBe(true);
+  expect(body.processing_mode).toBe("specific_speaker_enhancement");
 });
 
 test("data collection exports raw channels for a captured set", async () => {

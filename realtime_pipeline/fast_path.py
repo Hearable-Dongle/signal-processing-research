@@ -307,6 +307,7 @@ class FastPathWorker(threading.Thread):
         slow_queue: "queue.Queue[np.ndarray | None]",
         mic_geometry_xyz: np.ndarray,
         stop_event: threading.Event,
+        srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
     ):
         super().__init__(name="FastPathWorker", daemon=True)
         self._cfg = config
@@ -371,6 +372,7 @@ class FastPathWorker(threading.Thread):
             mic_geometry_xyz=self._mic_geometry_xyz,
         )
         self._postfilter = _PostFilterState(frame_samples=frame_samples, cfg=config)
+        self._srp_override_provider = srp_override_provider
 
     def _smooth_speaker_items(self, speaker_map) -> list:
         alpha_doa = float(np.clip(self._cfg.doa_ema_alpha, 0.0, 1.0))
@@ -448,16 +450,21 @@ class FastPathWorker(threading.Thread):
 
                     now_ms = 1000.0 * (self._frame_idx * frame_samples) / self._cfg.sample_rate_hz
                     t0 = perf_counter()
-                    peaks, scores, tracker_debug = self._tracker.update(x)
-                    self._state.publish_srp_snapshot(
-                        SRPPeakSnapshot(
+                    override = None if self._srp_override_provider is None else self._srp_override_provider(self._frame_idx, now_ms)
+                    if override is None:
+                        peaks, scores, tracker_debug = self._tracker.update(x)
+                        snapshot = SRPPeakSnapshot(
                             timestamp_ms=now_ms,
                             peaks_deg=tuple(float(v) for v in peaks),
                             peak_scores=None if scores is None else tuple(float(v) for v in scores),
                             raw_peaks_deg=tuple(float(v) for v in tracker_debug.get("raw_peaks_deg", [])),
                             raw_peak_scores=tuple(float(v) for v in tracker_debug.get("raw_peak_scores", [])) if tracker_debug.get("raw_peak_scores") else None,
                         )
-                    )
+                    else:
+                        snapshot = override
+                        peaks = list(snapshot.peaks_deg)
+                        scores = None if snapshot.peak_scores is None else list(snapshot.peak_scores)
+                    self._state.publish_srp_snapshot(snapshot)
                     srp_ms += (perf_counter() - t0) * 1000.0
 
                     speaker_map = self._state.get_speaker_map_snapshot()

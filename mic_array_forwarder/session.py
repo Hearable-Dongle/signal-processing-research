@@ -14,13 +14,22 @@ from typing import Any
 import numpy as np
 
 from realtime_pipeline.catchup_metrics import compute_catchup_metrics
-from realtime_pipeline.contracts import PipelineConfig
+from realtime_pipeline.contracts import PipelineConfig, SRPPeakSnapshot
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
-from realtime_pipeline.separation_backends import DominantSpeakerPassthroughBackend, MockSeparationBackend, build_default_backend
+from realtime_pipeline.separation_backends import (
+    DominantSpeakerPassthroughBackend,
+    MockSeparationBackend,
+    OracleSourceSeparationBackend,
+    build_default_backend,
+)
 from simulation.simulation_config import SimulationConfig, SimulationSource
 from simulation.simulator import run_simulation
 from simulation.target_policy import iter_target_source_indices
 
+from .mode_presets import (
+    METHOD_LOCALIZATION_ONLY,
+    get_simulation_algorithm_preset,
+)
 from .models import (
     MetricsMessage,
     SCHEMA_VERSION,
@@ -68,6 +77,45 @@ def _ground_truth_from_scene(scene_cfg: SimulationConfig) -> list[dict[str, floa
         doa = _normalize_angle_deg(np.degrees(np.arctan2(dy, dx)))
         out.append({"source_id": int(idx), "direction_degrees": float(doa)})
     return out
+
+
+def _speech_source_indices(scene_cfg: SimulationConfig) -> list[int]:
+    return [int(idx) for idx in iter_target_source_indices(scene_cfg)]
+
+
+def _build_oracle_srp_provider(
+    *,
+    source_signals: list[np.ndarray],
+    speech_source_indices: list[int],
+    doa_by_source_idx: dict[int, float],
+    frame_samples: int,
+) -> Any:
+    def _provider(frame_idx: int, timestamp_ms: float) -> SRPPeakSnapshot:
+        start = int(frame_idx * frame_samples)
+        end = start + int(frame_samples)
+        peaks: list[tuple[float, float]] = []
+        for src_idx in speech_source_indices:
+            signal_arr = np.asarray(source_signals[src_idx], dtype=np.float32).reshape(-1)
+            chunk = signal_arr[start:end]
+            if chunk.shape[0] == 0:
+                continue
+            rms = float(np.sqrt(np.mean(np.square(chunk.astype(np.float64))) + 1e-12))
+            if rms < 1e-4:
+                continue
+            doa = doa_by_source_idx.get(int(src_idx))
+            if doa is None:
+                continue
+            peaks.append((float(doa), float(np.clip(rms / 0.05, 0.0, 1.0))))
+        peaks.sort(key=lambda item: item[1], reverse=True)
+        return SRPPeakSnapshot(
+            timestamp_ms=float(timestamp_ms),
+            peaks_deg=tuple(float(v[0]) for v in peaks),
+            peak_scores=tuple(float(v[1]) for v in peaks) if peaks else None,
+            raw_peaks_deg=tuple(float(v[0]) for v in peaks),
+            raw_peak_scores=tuple(float(v[1]) for v in peaks) if peaks else None,
+        )
+
+    return _provider
 
 
 def _inject_background_noise_source(
@@ -443,7 +491,10 @@ class DemoSession:
                 audio_path=self.req.background_noise_audio_path,
                 gain=self.req.background_noise_gain,
             )
-            mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
+            mic_audio, mic_pos, source_signals = run_simulation(sim_cfg)
+            algorithm = get_simulation_algorithm_preset(self.req.algorithm_mode)
+            speech_source_ids = _speech_source_indices(sim_cfg)
+            doa_by_source_idx = {int(item["source_id"]): float(item["direction_degrees"]) for item in _ground_truth_from_scene(sim_cfg)}
             with self._lock:
                 self._raw_multichannel = mic_audio.astype(np.float32, copy=True)
                 self._raw_mix_mono = np.mean(mic_audio, axis=1).astype(np.float32, copy=False)
@@ -478,10 +529,17 @@ class DemoSession:
                 beamforming_mode=str(self.req.beamforming_mode),
                 localization_backend=str(self.req.localization_backend),
                 tracking_mode=str(self.req.tracking_mode),
+                control_mode=str(algorithm.control_mode),
+                fast_path_reference_mode=str(algorithm.fast_path_reference_mode),
+                direction_long_memory_enabled=bool(algorithm.direction_long_memory_enabled),
+                direction_long_memory_window_ms=float(algorithm.direction_long_memory_window_ms),
                 output_normalization_enabled=bool(self.req.output_normalization_enabled),
                 output_allow_amplification=bool(self.req.output_allow_amplification),
             )
             frame_samples = max(1, int(cfg.sample_rate_hz * cfg.fast_frame_ms / 1000))
+            hop_ms = cfg.slow_chunk_ms if cfg.slow_chunk_hop_ms is None else int(cfg.slow_chunk_hop_ms)
+            chunk_samples = max(1, int(cfg.sample_rate_hz * cfg.slow_chunk_ms / 1000))
+            hop_samples = max(1, int(cfg.sample_rate_hz * hop_ms / 1000))
 
             def frame_iter():
                 total = mic_audio.shape[0]
@@ -503,16 +561,30 @@ class DemoSession:
                     if sleep_s > 0:
                         time.sleep(sleep_s)
 
+            use_gt_speaker_sources = bool(self.req.input_source == "simulation" and self.req.use_ground_truth_speaker_sources and algorithm.supports_ground_truth_speaker_sources)
+            use_gt_location = bool(self.req.input_source == "simulation" and self.req.use_ground_truth_location)
             separation_mode = str(self.req.separation_mode)
-            if self.req.processing_mode == "localize_and_beamform" and separation_mode == "auto":
-                separation_mode = "single_dominant_no_separator"
-
-            if separation_mode == "single_dominant_no_separator":
+            if use_gt_speaker_sources:
+                sep = OracleSourceSeparationBackend(
+                    source_signals=[source_signals[idx] for idx in speech_source_ids],
+                    chunk_samples=chunk_samples,
+                    hop_samples=hop_samples,
+                )
+            elif algorithm.use_single_dominant_no_separator:
                 sep = DominantSpeakerPassthroughBackend()
             elif separation_mode == "mock":
                 sep = MockSeparationBackend(n_streams=cfg.max_speakers_hint)
             else:
                 sep = build_default_backend(cfg)
+
+            srp_override_provider = None
+            if use_gt_location:
+                srp_override_provider = _build_oracle_srp_provider(
+                    source_signals=source_signals,
+                    speech_source_indices=speech_source_ids,
+                    doa_by_source_idx=doa_by_source_idx,
+                    frame_samples=frame_samples,
+                )
 
             mic_geometry_xyz = np.asarray(mic_pos, dtype=float)
             mic_geometry_xy = mic_geometry_xyz[:2, :].T
@@ -524,6 +596,7 @@ class DemoSession:
                 frame_iterator=frame_iter(),
                 frame_sink=self._on_audio_chunk,
                 separation_backend=sep,
+                srp_override_provider=srp_override_provider,
             )
 
             self._apply_focus_control()

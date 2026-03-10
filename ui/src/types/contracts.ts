@@ -1,6 +1,11 @@
 export const SCHEMA_VERSION = "v1" as const;
 
-export type SeparationMode = "auto" | "mock" | "single_dominant_no_separator";
+export type AlgorithmMode =
+  | "localization_only"
+  | "spatial_baseline"
+  | "speaker_tracking"
+  | "speaker_tracking_long_memory"
+  | "single_dominant_no_separator";
 
 export type ProcessingMode =
   | "specific_speaker_enhancement"

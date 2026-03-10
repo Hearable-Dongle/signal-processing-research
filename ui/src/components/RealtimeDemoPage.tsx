@@ -10,10 +10,10 @@ import { SpeakerStage } from "./SpeakerStage";
 import { WaveformTimeline } from "./WaveformTimeline";
 import {
   SCHEMA_VERSION,
+  type AlgorithmMode,
   type GroundTruthSpeaker,
   type MetricsMessage,
   type MonitorSource,
-  type ProcessingMode,
   type ServerMessage,
   type Speaker,
 } from "../types/contracts";
@@ -92,7 +92,7 @@ type Props = {
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
   defaultBackgroundNoiseGain: number;
-  defaultProcessingMode: ProcessingMode;
+  defaultAlgorithmMode: AlgorithmMode;
 };
 
 const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
@@ -111,7 +111,7 @@ export function RealtimeDemoPage({
   defaultScenePath,
   defaultBackgroundNoisePath,
   defaultBackgroundNoiseGain,
-  defaultProcessingMode,
+  defaultAlgorithmMode,
 }: Props) {
   const [status, setStatus] = useState("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -128,7 +128,7 @@ export function RealtimeDemoPage({
   const [metricsExpanded, setMetricsExpanded] = useState(true);
   const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
   const [isOutputPlaybackPaused, setIsOutputPlaybackPaused] = useState(false);
-  const [processingMode, setProcessingMode] = useState<ProcessingMode>(defaultProcessingMode);
+  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>(defaultAlgorithmMode);
   const [monitorSource, setMonitorSource] = useState<MonitorSource>("processed");
   const [activePlaybackSource, setActivePlaybackSource] = useState<PlaybackSource | null>(null);
   const [activeInputSource, setActiveInputSource] = useState<SessionLaunchConfig["inputSource"]>("simulation");
@@ -211,10 +211,12 @@ export function RealtimeDemoPage({
   async function startSession(config: SessionLaunchConfig): Promise<void> {
     const {
       inputSource,
+      algorithmMode: nextAlgorithmMode,
       scenePath,
       backgroundNoisePath,
       backgroundNoiseGain,
-      separationMode,
+      useGroundTruthLocation,
+      useGroundTruthSpeakerSources,
       audioDeviceQuery,
       monitorSource: nextMonitorSource,
       sampleRateHz,
@@ -223,6 +225,7 @@ export function RealtimeDemoPage({
     const playbackSampleRateHz = inputSource === "respeaker_live" ? sampleRateHz : DEFAULT_SAMPLE_RATE;
     setStatus("starting");
     setActiveInputSource(inputSource);
+    setAlgorithmMode(nextAlgorithmMode);
     setMonitorSource(nextMonitorSource);
     setAudioSampleRateHz(playbackSampleRateHz);
     capturedAudioRef.current = [];
@@ -237,14 +240,16 @@ export function RealtimeDemoPage({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          algorithm_mode: nextAlgorithmMode,
           input_source: inputSource,
           scene_config_path: scenePath,
-          separation_mode: separationMode,
-          processing_mode: processingMode,
+          processing_mode: "specific_speaker_enhancement",
           monitor_source: nextMonitorSource,
           sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
           background_noise_audio_path: backgroundNoisePath,
           background_noise_gain: backgroundNoiseGain,
+          use_ground_truth_location: inputSource === "simulation" ? useGroundTruthLocation : undefined,
+          use_ground_truth_speaker_sources: inputSource === "simulation" ? useGroundTruthSpeakerSources : undefined,
           audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
           channel_map:
             inputSource === "respeaker_live" && channelMap.trim()
@@ -328,17 +333,11 @@ export function RealtimeDemoPage({
   }
 
   function selectSpeaker(speakerId: number): void {
-    if (processingMode !== "specific_speaker_enhancement") {
-      return;
-    }
     setSelectedSpeakerId(speakerId);
     ws.send({ schema_version: SCHEMA_VERSION, type: "select_speaker", speaker_id: speakerId });
   }
 
   function adjustSpeakerGain(speakerId: number, step: 1 | -1): void {
-    if (processingMode !== "specific_speaker_enhancement") {
-      return;
-    }
     setGainBySpeaker((prev) => {
       const current = prev[speakerId] ?? 0;
       const next = Math.max(-12, Math.min(12, current + step));
@@ -364,13 +363,6 @@ export function RealtimeDemoPage({
     a.download = `realtime-output-${suffix}.wav`;
     a.click();
     URL.revokeObjectURL(url);
-  }
-
-  function onProcessingModeChange(nextMode: ProcessingMode): void {
-    setProcessingMode(nextMode);
-    if (nextMode !== "specific_speaker_enhancement") {
-      setSelectedSpeakerId(null);
-    }
   }
 
   function onMonitorSourceChange(nextSource: MonitorSource): void {
@@ -451,12 +443,6 @@ export function RealtimeDemoPage({
   return (
     <main className="app-shell">
       <h1>Realtime Speaker UI Demo</h1>
-      {processingMode === "localize_and_beamform" && (
-        <p className="launcher-hint">
-          Realtime localize and beamform follows the no-separator dominant-speaker path. It tracks the current speaker
-          with lower latency, but it is less robust when multiple people overlap.
-        </p>
-      )}
       <div className={`layout ${metricsExpanded ? "" : "metrics-collapsed"}`.trim()}>
         <SceneLauncher
           status={status}
@@ -472,16 +458,14 @@ export function RealtimeDemoPage({
           canDownloadWav={capturedAudioRef.current.length > 0}
           latencyMs={latencyMs}
           onLatencyMsChange={onLatencyMsChange}
-          processingMode={processingMode}
-          onProcessingModeChange={onProcessingModeChange}
           monitorSource={monitorSource}
           onMonitorSourceChange={onMonitorSourceChange}
         />
         <SpeakerStage
           speakers={speakers}
           groundTruth={groundTruth}
-          processingMode={processingMode}
-          selectedSpeakerId={processingMode === "specific_speaker_enhancement" ? selectedSpeakerId : null}
+          processingMode="specific_speaker_enhancement"
+          selectedSpeakerId={selectedSpeakerId}
           onSpeakerTap={selectSpeaker}
         />
         <MetricsPanel
@@ -512,7 +496,7 @@ export function RealtimeDemoPage({
         }}
       />
 
-      {processingMode === "specific_speaker_enhancement" && selectedSpeakerId !== null && (
+      {selectedSpeakerId !== null && (
         <SpeakerControlPopover
           speakerId={selectedSpeakerId}
           deltaDb={gainBySpeaker[selectedSpeakerId] ?? 0}
