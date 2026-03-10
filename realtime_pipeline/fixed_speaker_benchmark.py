@@ -653,6 +653,7 @@ def run_fixed_speaker_benchmark(
     out_dir: str | Path,
     noise_scale: float,
     use_mock_separation: bool = False,
+    single_dominant_no_separator: bool = False,
     identity_backend: str = "mfcc_legacy",
     duration_sec: float = 30.0,
     target_first_identified_speaker: bool = False,
@@ -672,6 +673,7 @@ def run_fixed_speaker_benchmark(
         scene_config_path=artifacts.scene_config_path,
         out_dir=output_root / "baseline" if target_first_identified_speaker else output_root,
         use_mock_separation=bool(use_mock_separation),
+        single_dominant_no_separator=bool(single_dominant_no_separator),
         capture_trace=True,
         slow_chunk_ms=2000,
         slow_chunk_hop_ms=1000,
@@ -695,6 +697,7 @@ def run_fixed_speaker_benchmark(
             scene_config_path=artifacts.scene_config_path,
             out_dir=output_root / "target_first_identified",
             use_mock_separation=bool(use_mock_separation),
+            single_dominant_no_separator=bool(single_dominant_no_separator),
             capture_trace=True,
             slow_chunk_ms=2000,
             slow_chunk_hop_ms=1000,
@@ -780,6 +783,8 @@ def run_fixed_speaker_benchmark(
         "noise_scale": float(noise_scale),
         "identity_backend": str(identity_backend),
         "use_mock_separation": bool(use_mock_separation),
+        "single_dominant_no_separator": bool(single_dominant_no_separator),
+        "separation_mode": str(primary_summary.get("separation_mode", "unknown")),
         "target_first_identified_speaker": bool(target_first_identified_speaker),
         "slow_chunk_ms": int(primary_summary["slow_chunk_ms"]),
         "slow_chunk_hop_ms": int(primary_summary["slow_chunk_hop_ms"]),
@@ -812,6 +817,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-dir", required=True)
     p.add_argument("--noise-scale", type=float, required=True)
     p.add_argument("--mock-separation", action="store_true")
+    p.add_argument("--single-dominant-no-separator", action="store_true")
     p.add_argument("--identity-backend", default="mfcc_legacy")
     p.add_argument("--target-first-identified-speaker", action="store_true")
     return p
@@ -823,6 +829,7 @@ def main() -> None:
         out_dir=args.out_dir,
         noise_scale=float(args.noise_scale),
         use_mock_separation=bool(args.mock_separation),
+        single_dominant_no_separator=bool(args.single_dominant_no_separator),
         identity_backend=str(args.identity_backend),
         target_first_identified_speaker=bool(args.target_first_identified_speaker),
     )

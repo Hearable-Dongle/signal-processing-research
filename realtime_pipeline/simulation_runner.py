@@ -13,7 +13,7 @@ from simulation.target_policy import iter_target_source_indices
 
 from .contracts import PipelineConfig
 from .orchestrator import RealtimeSpeakerPipeline
-from .separation_backends import MockSeparationBackend, build_default_backend
+from .separation_backends import DominantSpeakerPassthroughBackend, MockSeparationBackend, build_default_backend
 
 
 def _frame_iter(mic_audio: np.ndarray, frame_samples: int):
@@ -63,6 +63,7 @@ def run_simulation_pipeline(
     auto_lock_first_identified_speaker: bool = False,
     target_user_boost_db: float = 0.0,
     auto_focus_active_speaker: bool = False,
+    single_dominant_no_separator: bool = False,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -251,8 +252,13 @@ def run_simulation_pipeline(
             }
         )
 
-    if use_mock_separation:
+    separation_mode = "real_separator"
+    if single_dominant_no_separator:
+        sep = DominantSpeakerPassthroughBackend()
+        separation_mode = "single_dominant_no_separator"
+    elif use_mock_separation:
         sep = MockSeparationBackend(n_streams=cfg.max_speakers_hint)
+        separation_mode = "mock_separator"
     else:
         sep = build_default_backend(cfg)
 
@@ -328,6 +334,8 @@ def run_simulation_pipeline(
             "publish": stats.slow_publish_avg_ms,
         },
         "use_mock_separation": bool(use_mock_separation),
+        "single_dominant_no_separator": bool(single_dominant_no_separator),
+        "separation_mode": str(separation_mode),
         "beamforming_mode": str(cfg.beamforming_mode),
         "fast_path_reference_mode": str(cfg.fast_path_reference_mode),
         "slow_chunk_ms": int(cfg.slow_chunk_ms),
