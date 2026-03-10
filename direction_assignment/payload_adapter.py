@@ -77,6 +77,12 @@ def validate_balanced_payload(payload: DirectionAssignmentInput) -> None:
     if payload.srp_peak_scores is not None and len(payload.srp_peak_scores) != len(payload.srp_doa_peaks_deg):
         raise ValueError("srp_peak_scores length must match srp_doa_peaks_deg length")
 
+    for idx in payload.per_stream_identity_confidence.keys():
+        if idx < 0 or idx > max_idx:
+            raise ValueError(
+                f"per_stream_identity_confidence has out-of-range key {idx}; valid [0,{max_idx}]"
+            )
+
 
 def build_direction_assignment_input(
     *,
@@ -88,6 +94,10 @@ def build_direction_assignment_input(
     active_speakers: list[int] | None,
     srp_doa_peaks_deg: list[float] | None,
     srp_peak_scores: list[float] | None,
+    control_mode: str = "spatial_peak_mode",
+    per_stream_identity_confidence: dict[int, float] | None = None,
+    speaker_identity_metadata: dict[int, dict[str, object]] | None = None,
+    per_speaker_activity_confidence: dict[int, float] | None = None,
 ) -> tuple[DirectionAssignmentInput, BalancedPayloadBuildDebug]:
     """
     Build balanced payload with corrective normalization:
@@ -152,6 +162,21 @@ def build_direction_assignment_input(
         active_speakers=derived_active,
         srp_doa_peaks_deg=peaks,
         srp_peak_scores=scores,
+        control_mode=str(control_mode),
+        per_stream_identity_confidence={
+            int(k): float(v)
+            for k, v in (per_stream_identity_confidence or {}).items()
+            if isinstance(k, int) and 0 <= int(k) <= max_idx
+        },
+        speaker_identity_metadata={
+            int(k): dict(v)
+            for k, v in (speaker_identity_metadata or {}).items()
+            if v is not None
+        },
+        per_speaker_activity_confidence={
+            int(k): float(v)
+            for k, v in (per_speaker_activity_confidence or {}).items()
+        },
     )
 
     # Final strict check to keep adapter guarantees explicit.
