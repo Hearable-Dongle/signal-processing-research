@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
 import json
 import math
+import os
 import re
 import tempfile
 import zipfile
@@ -209,11 +211,51 @@ def _plot_spectrogram_compare(raw: np.ndarray, proc: np.ndarray, fs: int, out_pa
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
     plt.close(fig)
+def _load_ground_truth_tracks(recording_dir: Path) -> list[dict]:
+    metadata_path = recording_dir / "metadata.json"
+    if not metadata_path.exists():
+        return []
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    scene_config_path = metadata.get("sceneConfigPath")
+    if not scene_config_path:
+        return []
+    scene_path = Path(str(scene_config_path))
+    scenario_metadata = (
+        scene_path.parent.parent.parent
+        / "assets"
+        / scene_path.parent.name
+        / scene_path.stem
+        / "scenario_metadata.json"
+    )
+    if not scenario_metadata.exists():
+        return []
+    try:
+        payload = json.loads(scenario_metadata.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    tracks: list[dict] = []
+    for item in payload.get("assets", {}).get("speech", []):
+        window = item.get("active_window_sec", [])
+        if len(window) != 2:
+            continue
+        tracks.append(
+            {
+                "speaker_id": int(item.get("speaker_id", len(tracks))),
+                "start_sec": float(window[0]),
+                "end_sec": float(window[1]),
+                "angle_deg": float(item.get("angle_deg", 0.0)),
+            }
+        )
+    return tracks
 
 
-def _plot_speaker_timeline(summary: dict, out_path: Path, title: str) -> None:
+def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_truth_tracks: list[dict] | None = None) -> None:
     trace = list(summary.get("speaker_map_trace", []))
-    if not trace:
+    ground_truth_tracks = ground_truth_tracks or []
+    if not trace and not ground_truth_tracks:
         return
     frame_step_s = float(summary.get("fast_frame_ms", 10.0)) / 1000.0
     fig, ax = plt.subplots(figsize=(14, 4))
@@ -228,16 +270,46 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str) -> None:
             ys.append(float(speaker.get("direction_degrees", 0.0)))
             ss.append(20.0 + 80.0 * float(max(0.0, speaker.get("gain_weight", 0.0))))
             cs.append(float(max(0.0, speaker.get("confidence", 0.0))))
-    if not xs:
+    gt_handles = []
+    gt_labels = []
+    gt_colors = ["#c1121f", "#003049", "#669bbc", "#fb8500", "#2a9d8f", "#6a4c93"]
+    for idx, item in enumerate(ground_truth_tracks):
+        color = gt_colors[idx % len(gt_colors)]
+        line = ax.hlines(
+            y=float(item["angle_deg"]),
+            xmin=float(item["start_sec"]),
+            xmax=float(item["end_sec"]),
+            colors=color,
+            linewidth=3.0,
+            linestyles="-",
+            zorder=4,
+        )
+        gt_handles.append(line)
+        gt_labels.append(f"GT speaker {int(item['speaker_id'])}: {float(item['angle_deg']):.1f} deg")
+
+    if not xs and not gt_handles:
         plt.close(fig)
         return
-    scatter = ax.scatter(xs, ys, s=ss, c=cs, cmap="viridis", alpha=0.65, edgecolors="none")
+    scatter = None
+    if xs:
+        scatter = ax.scatter(xs, ys, s=ss, c=cs, cmap="viridis", alpha=0.65, edgecolors="none", zorder=2)
     ax.set_title(title)
     ax.set_xlabel("time (s)")
     ax.set_ylabel("direction (deg)")
     ax.set_ylim(-5.0, 365.0)
     ax.grid(True, alpha=0.2)
-    fig.colorbar(scatter, ax=ax, label="confidence")
+    if scatter is not None:
+        fig.colorbar(scatter, ax=ax, label="confidence")
+    if gt_handles:
+        pred_handle = None
+        if scatter is not None:
+            pred_handle = ax.scatter([], [], s=40, c="#6c757d", alpha=0.8, label="Predicted speakers")
+        legend_handles = list(gt_handles)
+        legend_labels = list(gt_labels)
+        if pred_handle is not None:
+            legend_handles.append(pred_handle)
+            legend_labels.append("Predicted speakers")
+        ax.legend(legend_handles, legend_labels, loc="upper right")
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
@@ -305,6 +377,100 @@ def _plot_summary_bars(summary_rows: list[dict], out_dir: Path) -> None:
     plt.close(fig)
 
 
+def _run_recording_method_job(
+    *,
+    recording_id: str,
+    recording_dir: Path,
+    method: str,
+    out_dir: Path,
+    mic_geometry_xyz: np.ndarray,
+    separation_mode: str,
+    fast_frame_ms: int,
+    localization_window_ms: int,
+    slow_chunk_ms: int,
+    slow_chunk_hop_ms: int,
+    fast_path_reference_mode: str,
+    output_normalization_enabled: bool,
+    output_allow_amplification: bool,
+    localization_backend: str,
+    tracking_mode: str,
+    control_mode: str,
+    direction_long_memory_enabled: bool,
+    identity_backend: str,
+    identity_speaker_embedding_model: str,
+    max_speakers_hint: int,
+) -> dict:
+    raw_dir = recording_dir / "raw" if (recording_dir / "raw").is_dir() else recording_dir
+    mic_audio, sample_rate_hz, channel_filenames = _load_multichannel_wavs(raw_dir)
+    raw_mix = np.mean(np.asarray(mic_audio, dtype=np.float64), axis=1)
+
+    method_slug = _slug(method)
+    run_dir = out_dir / "runs" / _slug(recording_id) / method_slug
+    summary = run_recording_pipeline(
+        mic_audio=mic_audio,
+        sample_rate_hz=sample_rate_hz,
+        mic_geometry_xyz=mic_geometry_xyz,
+        out_dir=run_dir,
+        input_recording_path=recording_dir,
+        separation_mode=str(separation_mode),
+        fast_frame_ms=int(fast_frame_ms),
+        slow_chunk_ms=int(slow_chunk_ms),
+        slow_chunk_hop_ms=int(slow_chunk_hop_ms),
+        beamforming_mode=str(method),
+        fast_path_reference_mode=str(fast_path_reference_mode),
+        output_normalization_enabled=bool(output_normalization_enabled),
+        output_allow_amplification=bool(output_allow_amplification),
+        capture_trace=True,
+        localization_backend=str(localization_backend),
+        localization_window_ms=int(localization_window_ms),
+        tracking_mode=str(tracking_mode),
+        control_mode=str(control_mode),
+        direction_long_memory_enabled=bool(direction_long_memory_enabled),
+        identity_backend=str(identity_backend),
+        identity_speaker_embedding_model=str(identity_speaker_embedding_model),
+        max_speakers_hint=int(max_speakers_hint),
+    )
+    proc, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
+    proc = np.asarray(proc, dtype=np.float32).reshape(-1)
+    fs = int(proc_sr if proc_sr > 0 else sample_rate_hz)
+    n = min(raw_mix.size, proc.size)
+    trace_metrics = _trace_metrics(summary)
+    ground_truth_tracks = _load_ground_truth_tracks(recording_dir)
+    row = {
+        "recording": recording_id,
+        "method": method,
+        "sample_rate_hz": fs,
+        "duration_s": float(n / max(fs, 1)),
+        "channel_count": int(mic_audio.shape[1]),
+        "raw_channel_filenames": ",".join(channel_filenames),
+        "separation_mode": str(separation_mode),
+        "fast_rtf": float(summary["fast_rtf"]),
+        "slow_rtf": float(summary["slow_rtf"]),
+        "fast_avg_ms": float(summary["fast_avg_ms"]),
+        "slow_avg_ms": float(summary["slow_avg_ms"]),
+        "clip_rate_raw": _clip_rate(raw_mix[:n]),
+        "clip_rate_processed": _clip_rate(proc[:n]),
+        "peak_abs_raw": float(np.max(np.abs(raw_mix[:n]))) if n else 0.0,
+        "peak_abs_processed": float(np.max(np.abs(proc[:n]))) if n else 0.0,
+        "rms_gain_db": _rms_db_ratio(raw_mix[:n], proc[:n]),
+        "high_band_noise_ratio_raw": _high_band_noise_ratio(raw_mix[:n], fs),
+        "high_band_noise_ratio_processed": _high_band_noise_ratio(proc[:n], fs),
+        "frame_gain_delta_p95": _frame_gain_delta_p95(raw_mix[:n], proc[:n]),
+        "speaker_count_final": int(len(summary.get("speaker_map_final", []))),
+        "active_speaker_count_final": int(sum(1 for speaker in summary.get("speaker_map_final", []) if bool(speaker.get("active", False)))),
+        "max_confidence_final": float(max((float(speaker.get("confidence", 0.0)) for speaker in summary.get("speaker_map_final", [])), default=0.0)),
+        "mean_gain_weight_final": float(np.mean([float(speaker.get("gain_weight", 0.0)) for speaker in summary.get("speaker_map_final", [])])) if summary.get("speaker_map_final") else 0.0,
+        **trace_metrics,
+    }
+
+    label = f"{recording_id} | {method} | {separation_mode}"
+    viz_dir = run_dir / "visualizations"
+    _plot_waveform_compare(raw_mix[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
+    _plot_spectrogram_compare(raw_mix[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
+    _plot_speaker_timeline(summary, viz_dir / "speaker_directions.png", label, ground_truth_tracks=ground_truth_tracks)
+    return row
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run realtime beamforming over Data Collection raw-channel recordings.")
     parser.add_argument("--input-path", required=True, help="Data Collection export root/zip, recording dir, or raw WAV dir")
@@ -331,6 +497,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disable-direction-long-memory", action="store_true")
     parser.add_argument("--identity-backend", choices=["mfcc_legacy", "speaker_embed_session"], default="mfcc_legacy")
     parser.add_argument("--identity-speaker-embedding-model", choices=["ecapa_voxceleb", "wavlm_base_sv", "wavlm_base_plus_sv"], default="wavlm_base_plus_sv")
+    parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 1) - 1))
     return parser
 
 
@@ -355,6 +522,7 @@ def main() -> None:
                     "n_recordings": len(recordings),
                     "methods": list(args.methods),
                     "separation_mode": str(args.separation_mode),
+                    "workers": int(args.workers),
                 },
                 indent=2,
             ),
@@ -363,83 +531,55 @@ def main() -> None:
 
         scene_rows: list[dict] = []
         summary_by_method: dict[str, list[dict]] = defaultdict(list)
-
+        jobs: list[tuple[int, int, str, Path, str]] = []
         for recording_idx, (recording_id, recording_dir) in enumerate(recordings, start=1):
-            raw_dir = recording_dir / "raw" if (recording_dir / "raw").is_dir() else recording_dir
-            mic_audio, sample_rate_hz, channel_filenames = _load_multichannel_wavs(raw_dir)
-            raw_mix = np.mean(np.asarray(mic_audio, dtype=np.float64), axis=1)
-
             for method_idx, method in enumerate(args.methods, start=1):
-                print(
-                    f"[{recording_idx}/{len(recordings)}] recording={recording_id} "
-                    f"[{method_idx}/{len(args.methods)}] method={method}",
-                    flush=True,
-                )
-                method_slug = _slug(method)
-                run_dir = out_dir / "runs" / _slug(recording_id) / method_slug
-                summary = run_recording_pipeline(
-                    mic_audio=mic_audio,
-                    sample_rate_hz=sample_rate_hz,
-                    mic_geometry_xyz=mic_geometry_xyz,
-                    out_dir=run_dir,
-                    input_recording_path=recording_dir,
-                    separation_mode=str(args.separation_mode),
-                    fast_frame_ms=int(args.fast_frame_ms),
-                    slow_chunk_ms=int(args.slow_chunk_ms),
-                    slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
-                    beamforming_mode=str(method),
-                    fast_path_reference_mode=str(args.fast_path_reference_mode),
-                    output_normalization_enabled=not bool(args.disable_output_normalization),
-                    output_allow_amplification=bool(args.allow_output_amplification),
-                    capture_trace=True,
-                    localization_backend=str(args.localization_backend),
-                    localization_window_ms=int(args.localization_window_ms),
-                    tracking_mode=str(args.tracking_mode),
-                    control_mode=str(args.control_mode),
-                    direction_long_memory_enabled=not bool(args.disable_direction_long_memory),
-                    identity_backend=str(args.identity_backend),
-                    identity_speaker_embedding_model=str(args.identity_speaker_embedding_model),
-                    max_speakers_hint=int(args.max_speakers_hint),
-                )
-                proc, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
-                proc = np.asarray(proc, dtype=np.float32).reshape(-1)
-                fs = int(proc_sr if proc_sr > 0 else sample_rate_hz)
-                n = min(raw_mix.size, proc.size)
-                trace_metrics = _trace_metrics(summary)
-                row = {
-                    "recording": recording_id,
-                    "method": method,
-                    "sample_rate_hz": fs,
-                    "duration_s": float(n / max(fs, 1)),
-                    "channel_count": int(mic_audio.shape[1]),
-                    "raw_channel_filenames": ",".join(channel_filenames),
-                    "separation_mode": str(args.separation_mode),
-                    "fast_rtf": float(summary["fast_rtf"]),
-                    "slow_rtf": float(summary["slow_rtf"]),
-                    "fast_avg_ms": float(summary["fast_avg_ms"]),
-                    "slow_avg_ms": float(summary["slow_avg_ms"]),
-                    "clip_rate_raw": _clip_rate(raw_mix[:n]),
-                    "clip_rate_processed": _clip_rate(proc[:n]),
-                    "peak_abs_raw": float(np.max(np.abs(raw_mix[:n]))) if n else 0.0,
-                    "peak_abs_processed": float(np.max(np.abs(proc[:n]))) if n else 0.0,
-                    "rms_gain_db": _rms_db_ratio(raw_mix[:n], proc[:n]),
-                    "high_band_noise_ratio_raw": _high_band_noise_ratio(raw_mix[:n], fs),
-                    "high_band_noise_ratio_processed": _high_band_noise_ratio(proc[:n], fs),
-                    "frame_gain_delta_p95": _frame_gain_delta_p95(raw_mix[:n], proc[:n]),
-                    "speaker_count_final": int(len(summary.get("speaker_map_final", []))),
-                    "active_speaker_count_final": int(sum(1 for speaker in summary.get("speaker_map_final", []) if bool(speaker.get("active", False)))),
-                    "max_confidence_final": float(max((float(speaker.get("confidence", 0.0)) for speaker in summary.get("speaker_map_final", [])), default=0.0)),
-                    "mean_gain_weight_final": float(np.mean([float(speaker.get("gain_weight", 0.0)) for speaker in summary.get("speaker_map_final", [])])) if summary.get("speaker_map_final") else 0.0,
-                    **trace_metrics,
-                }
-                scene_rows.append(row)
-                summary_by_method[method].append(row)
+                jobs.append((recording_idx, method_idx, recording_id, recording_dir, method))
 
-                label = f"{recording_id} | {method} | {args.separation_mode}"
-                viz_dir = run_dir / "visualizations"
-                _plot_waveform_compare(raw_mix[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
-                _plot_spectrogram_compare(raw_mix[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
-                _plot_speaker_timeline(summary, viz_dir / "speaker_directions.png", label)
+        def _submit_job(job: tuple[int, int, str, Path, str]) -> dict:
+            recording_idx, method_idx, recording_id, recording_dir, method = job
+            print(
+                f"[{recording_idx}/{len(recordings)}] recording={recording_id} "
+                f"[{method_idx}/{len(args.methods)}] method={method}",
+                flush=True,
+            )
+            return _run_recording_method_job(
+                recording_id=recording_id,
+                recording_dir=recording_dir,
+                method=method,
+                out_dir=out_dir,
+                mic_geometry_xyz=mic_geometry_xyz,
+                separation_mode=str(args.separation_mode),
+                fast_frame_ms=int(args.fast_frame_ms),
+                localization_window_ms=int(args.localization_window_ms),
+                slow_chunk_ms=int(args.slow_chunk_ms),
+                slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
+                fast_path_reference_mode=str(args.fast_path_reference_mode),
+                output_normalization_enabled=not bool(args.disable_output_normalization),
+                output_allow_amplification=bool(args.allow_output_amplification),
+                localization_backend=str(args.localization_backend),
+                tracking_mode=str(args.tracking_mode),
+                control_mode=str(args.control_mode),
+                direction_long_memory_enabled=not bool(args.disable_direction_long_memory),
+                identity_backend=str(args.identity_backend),
+                identity_speaker_embedding_model=str(args.identity_speaker_embedding_model),
+                max_speakers_hint=int(args.max_speakers_hint),
+            )
+
+        if int(args.workers) <= 1:
+            for job in jobs:
+                row = _submit_job(job)
+                scene_rows.append(row)
+                summary_by_method[str(row["method"])].append(row)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as pool:
+                futures = [pool.submit(_submit_job, job) for job in jobs]
+                for fut in concurrent.futures.as_completed(futures):
+                    row = fut.result()
+                    scene_rows.append(row)
+                    summary_by_method[str(row["method"])].append(row)
+
+        scene_rows.sort(key=lambda row: (str(row["recording"]), str(row["method"])))
 
         _write_csv(out_dir / "scene_metrics.csv", scene_rows)
 
