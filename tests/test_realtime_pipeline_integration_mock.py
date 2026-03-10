@@ -59,8 +59,9 @@ def test_realtime_pipeline_simulation_mock_end_to_end(tmp_path: Path) -> None:
     assert summary["fast_frames"] > 0
     assert summary["slow_chunks"] > 0
     assert summary["speaker_map_updates"] > 0
-    assert summary["localization_backend"] == "tiny_dp_ipd"
+    assert summary["localization_backend"] == "weighted_srp_dp"
     assert summary["tracking_mode"] == "multi_peak_v2"
+    assert summary["control_mode"] == "spatial_peak_mode"
     assert (out_dir / "summary.json").exists()
     assert (out_dir / "enhanced_fast_path.wav").exists()
 
@@ -180,4 +181,87 @@ def test_realtime_pipeline_methods_execute(tmp_path: Path, method: str) -> None:
     assert summary["fast_frames"] > 0
     assert summary["slow_chunks"] > 0
     assert summary["beamforming_mode"] == method
+    assert (out_dir / "enhanced_fast_path.wav").exists()
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_realtime_pipeline_speaker_tracking_mode_publishes_metadata(tmp_path: Path) -> None:
+    pytest.importorskip("pyroomacoustics")
+
+    repo = Path(__file__).resolve().parents[1]
+    input_dir = repo / "beamforming" / "input"
+    scene = {
+        "room": {"dimensions": [5.0, 4.0, 3.0], "absorption": 0.25},
+        "microphone_array": {"mic_center": [2.5, 2.0, 1.5], "mic_radius": 0.05, "mic_count": 4},
+        "audio": {
+            "sources": [
+                {
+                    "loc": [1.5, 1.4, 1.5],
+                    "audio": str((input_dir / "brit_talking.wav").resolve()),
+                    "gain": 1.0,
+                    "classification": "signal",
+                }
+            ],
+            "duration": 0.6,
+            "fs": 16000,
+        },
+    }
+    scene_path = tmp_path / "scene_tracking.json"
+    scene_path.write_text(json.dumps(scene), encoding="utf-8")
+    out_dir = tmp_path / "out_tracking"
+    summary = run_simulation_pipeline(
+        scene_config_path=scene_path,
+        out_dir=out_dir,
+        use_mock_separation=True,
+        control_mode="speaker_tracking_mode",
+    )
+
+    assert summary["control_mode"] == "speaker_tracking_mode"
+    if summary["speaker_map_final"]:
+        row = summary["speaker_map_final"][0]
+        assert "identity_confidence" in row
+        assert "identity_maturity" in row
+        assert "predicted_direction_deg" in row
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_realtime_pipeline_srp_peak_reference_mode_executes(tmp_path: Path) -> None:
+    pytest.importorskip("pyroomacoustics")
+
+    repo = Path(__file__).resolve().parents[1]
+    input_dir = repo / "beamforming" / "input"
+    scene = {
+        "room": {"dimensions": [5.0, 4.0, 3.0], "absorption": 0.25},
+        "microphone_array": {"mic_center": [2.5, 2.0, 1.5], "mic_radius": 0.05, "mic_count": 4},
+        "audio": {
+            "sources": [
+                {
+                    "loc": [1.5, 1.5, 1.5],
+                    "audio": str((input_dir / "brit_talking.wav").resolve()),
+                    "gain": 1.0,
+                    "classification": "signal",
+                },
+                {
+                    "loc": [3.5, 2.8, 1.5],
+                    "audio": str((input_dir / "babble_10dB.wav").resolve()),
+                    "gain": 0.1,
+                    "classification": "noise",
+                },
+            ],
+            "duration": 0.5,
+            "fs": 16000,
+        },
+    }
+    scene_path = tmp_path / "scene_srp_ref.json"
+    scene_path.write_text(json.dumps(scene), encoding="utf-8")
+    out_dir = tmp_path / "out_srp_ref"
+    summary = run_simulation_pipeline(
+        scene_config_path=scene_path,
+        out_dir=out_dir,
+        use_mock_separation=True,
+        fast_path_reference_mode="srp_peak",
+    )
+
+    assert summary["fast_frames"] > 0
+    assert summary["fast_path_reference_mode"] == "srp_peak"
     assert (out_dir / "enhanced_fast_path.wav").exists()

@@ -32,13 +32,15 @@ def run_simulation_pipeline(
     out_dir: str | Path,
     use_mock_separation: bool = True,
     beamforming_mode: str = "mvdr_fd",
+    fast_path_reference_mode: str = "speaker_map",
     output_normalization_enabled: bool = True,
     output_allow_amplification: bool = False,
     write_raw_mix_output: bool = True,
     robust_mode: bool = True,
     capture_trace: bool = False,
-    localization_backend: str = "tiny_dp_ipd",
+    localization_backend: str = "weighted_srp_dp",
     tracking_mode: str = "multi_peak_v2",
+    control_mode: str = "spatial_peak_mode",
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k",
     convtasnet_model_sample_rate_hz: int = 16000,
     convtasnet_input_sample_rate_hz: int = 16000,
@@ -57,6 +59,7 @@ def run_simulation_pipeline(
         sample_rate_hz=sim_cfg.audio.fs,
         fast_frame_ms=frame_ms,
         slow_chunk_ms=200,
+        fast_path_reference_mode=str(fast_path_reference_mode),
         convtasnet_model_name=str(convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(convtasnet_model_sample_rate_hz),
         convtasnet_input_sample_rate_hz=int(convtasnet_input_sample_rate_hz),
@@ -65,6 +68,7 @@ def run_simulation_pipeline(
         identity_speaker_embedding_model=str(identity_speaker_embedding_model),
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
+        control_mode=str(control_mode),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
         output_normalization_enabled=bool(output_normalization_enabled),
@@ -113,6 +117,11 @@ def run_simulation_pipeline(
                         "active": bool(v.active),
                         "activity_confidence": float(v.activity_confidence),
                         "updated_at_ms": float(v.updated_at_ms),
+                        "identity_confidence": float(v.identity_confidence),
+                        "identity_maturity": str(v.identity_maturity),
+                        "predicted_direction_deg": None if v.predicted_direction_deg is None else float(v.predicted_direction_deg),
+                        "angular_velocity_deg_per_chunk": float(v.angular_velocity_deg_per_chunk),
+                        "last_separator_stream_index": None if v.last_separator_stream_index is None else int(v.last_separator_stream_index),
                     }
                     for v in snapshot.values()
                 ],
@@ -154,6 +163,11 @@ def run_simulation_pipeline(
             "active": bool(v.active),
             "activity_confidence": float(v.activity_confidence),
             "updated_at_ms": float(v.updated_at_ms),
+            "identity_confidence": float(v.identity_confidence),
+            "identity_maturity": str(v.identity_maturity),
+            "predicted_direction_deg": None if v.predicted_direction_deg is None else float(v.predicted_direction_deg),
+            "angular_velocity_deg_per_chunk": float(v.angular_velocity_deg_per_chunk),
+            "last_separator_stream_index": None if v.last_separator_stream_index is None else int(v.last_separator_stream_index),
         }
         for v in final_speaker_map.values()
     ]
@@ -188,12 +202,14 @@ def run_simulation_pipeline(
         },
         "use_mock_separation": bool(use_mock_separation),
         "beamforming_mode": str(cfg.beamforming_mode),
+        "fast_path_reference_mode": str(cfg.fast_path_reference_mode),
         "output_normalization_enabled": bool(cfg.output_normalization_enabled),
         "output_allow_amplification": bool(cfg.output_allow_amplification),
         "speaker_map_final": speaker_map_rows,
         "robust_mode": bool(robust_mode),
         "localization_backend": str(cfg.localization_backend),
         "tracking_mode": str(cfg.tracking_mode),
+        "control_mode": str(cfg.control_mode),
     }
     if capture_trace:
         summary["speaker_map_trace"] = speaker_map_trace
@@ -211,11 +227,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--real-separation", action="store_true", help="Use real Asteroid ConvTasNet instead of mock backend")
     p.add_argument("--validate-only", action="store_true", help="Run sanity checks and emit validation_report.json")
     p.add_argument("--beamforming-mode", choices=["mvdr_fd", "gsc_fd", "delay_sum"], default="mvdr_fd")
+    p.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")
     p.add_argument("--disable-output-normalization", action="store_true")
     p.add_argument("--allow-output-amplification", action="store_true")
     p.add_argument("--disable-robust-mode", action="store_true")
-    p.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"], default="tiny_dp_ipd")
+    p.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"], default="weighted_srp_dp")
     p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
+    p.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     p.add_argument("--convtasnet-model-name", default="JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k")
     p.add_argument("--convtasnet-model-sample-rate-hz", type=int, default=16000)
     p.add_argument("--convtasnet-input-sample-rate-hz", type=int, default=16000)
@@ -243,11 +261,13 @@ def main() -> None:
         out_dir=args.out_dir,
         use_mock_separation=not args.real_separation,
         beamforming_mode=args.beamforming_mode,
+        fast_path_reference_mode=args.fast_path_reference_mode,
         output_normalization_enabled=not args.disable_output_normalization,
         output_allow_amplification=bool(args.allow_output_amplification),
         robust_mode=not bool(args.disable_robust_mode),
         localization_backend=str(args.localization_backend),
         tracking_mode=str(args.tracking_mode),
+        control_mode=str(args.control_mode),
         convtasnet_model_name=str(args.convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(args.convtasnet_model_sample_rate_hz),
         convtasnet_input_sample_rate_hz=int(args.convtasnet_input_sample_rate_hz),
