@@ -74,3 +74,32 @@ Separator/grouping + direction-assignment follow-up using oracle localization:
   - `Libri2Mix 8k` is better on the sampled `k=2` scene.
   - `Libri3Mix 8k` is substantially better on the sampled `k=3` scene and is the stronger general separator choice for the meeting-style setup overall.
   - Decision for the current branch: standardize on `JorisCos/ConvTasNet_Libri3Mix_sepnoisy_8k` as the default separator for this workflow.
+
+Speaker identity grouping follow-up:
+- Added a new `speaker_embed_session` backend on top of the existing `mfcc_legacy` grouper.
+- The new path keeps MFCC/Hungarian matching for short-term chunk stability, then adds causal rolling audio buffers and a session-local exact-cosine voiceprint registry for lookup/merge.
+
+CPU speaker-embedding benchmark on this machine:
+- `wavlm_xvector`:
+  - first embed/load path: `5010.73 ms`
+  - steady-state embed on a 1.0 s speech crop: mean `75.10 ms`, p95 `75.72 ms`
+  - embedding dim: `512`
+- `ecapa_voxceleb`:
+  - did not complete a valid benchmark on this machine
+  - current `speechbrain`/checkpoint path fails during model fetch/load (`custom.py` lookup failure against the upstream repo layout), so this backend is not usable yet in the active env
+
+Grouping baseline on `restaurant_meeting` with oracle localization and `Libri3Mix 8k` separator:
+- `mfcc_legacy`
+  - `k=2`: switch rate `0.3125`, stability `0.7778`, assignment confidence `0.1433`, direction mismatch `0.0706`, direction MAE `12.71 deg`, grouping avg `2.14 ms/chunk`, slow RTF `0.282`
+  - `k=3`: switch rate `0.4`, stability `0.6667`, assignment confidence `0.0996`, direction mismatch `0.2391`, direction MAE `26.61 deg`, grouping avg `1.89 ms/chunk`, slow RTF `0.256`
+- `speaker_embed_session` with `wavlm_xvector`
+  - `k=2`: switch rate `0.25`, stability `0.6111`, assignment confidence `0.1439`, direction mismatch `0.4842`, direction MAE `83.35 deg`, grouping avg `147.54 ms/chunk`, slow RTF `0.981`
+  - `k=3`: switch rate `0.2667`, stability `0.6667`, assignment confidence `0.0952`, direction mismatch `0.0`, direction MAE `1.62 deg`, grouping avg `117.99 ms/chunk`, slow RTF `0.826`
+
+Current takeaway on grouping:
+- `wavlm_xvector` is heavy but still technically within a `200 ms` slow chunk budget on this machine.
+- It is not a clear replacement for the current grouper yet:
+  - strong improvement on the sampled `k=3` meeting scene
+  - clear regression on the sampled `k=2` meeting scene
+- `mfcc_legacy` remains the safer baseline today.
+- If we keep pushing learned grouping, the next work should be on the session-merge/match thresholds rather than assuming the first learned backend is globally better.

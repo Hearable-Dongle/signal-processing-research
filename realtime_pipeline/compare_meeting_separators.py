@@ -206,6 +206,8 @@ def evaluate_scene(
     out_dir: Path,
     chunk_ms: int = 200,
     use_ground_truth_localization: bool = True,
+    identity_backend: str = "mfcc_legacy",
+    identity_speaker_embedding_model: str = "ecapa_voxceleb",
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_path)
     scene_dir = _scene_dir_from_config(scene_path, sim_cfg)
@@ -225,6 +227,8 @@ def evaluate_scene(
             sample_rate_hz=sample_rate,
             chunk_duration_ms=chunk_ms,
             max_speakers=max(1, expected_num_sources),
+            backend=str(identity_backend),
+            speaker_embedding_model=str(identity_speaker_embedding_model),
         )
     )
     direction_cfg = DirectionAssignmentConfig(sample_rate=sample_rate, chunk_ms=chunk_ms)
@@ -435,6 +439,8 @@ def evaluate_scene(
         "scene": scene_path.stem,
         "separator": separator_spec,
         "ground_truth_localization": bool(use_ground_truth_localization),
+        "identity_backend": str(identity_backend),
+        "identity_speaker_embedding_model": str(identity_speaker_embedding_model),
         "grouping": grouping_summary,
         "direction_assignment": direction_summary,
         "true_doa_by_speaker": {str(k): float(v) for k, v in true_doa_by_speaker.items()},
@@ -463,6 +469,8 @@ def main() -> None:
     parser.add_argument("--out-dir", default="realtime_pipeline/output/meeting_separator_compare")
     parser.add_argument("--chunk-ms", type=int, default=200)
     parser.add_argument("--estimated-localization", action="store_true", help="Use estimated localization instead of oracle chunk DOAs.")
+    parser.add_argument("--identity-backend", choices=["mfcc_legacy", "speaker_embed_session"], default="mfcc_legacy")
+    parser.add_argument("--identity-speaker-embedding-model", choices=["ecapa_voxceleb", "wavlm_xvector"], default="ecapa_voxceleb")
     args = parser.parse_args()
 
     scene_paths = [Path(p) for p in args.scenes] if args.scenes else _default_scene_paths()
@@ -484,12 +492,16 @@ def main() -> None:
                 out_dir=scene_out,
                 chunk_ms=int(args.chunk_ms),
                 use_ground_truth_localization=not bool(args.estimated_localization),
+                identity_backend=str(args.identity_backend),
+                identity_speaker_embedding_model=str(args.identity_speaker_embedding_model),
             )
             rows.append(
                 {
                     "scene": scene_path.stem,
                     "k": k,
                     "separator": spec,
+                    "identity_backend": str(args.identity_backend),
+                    "identity_speaker_embedding_model": str(args.identity_speaker_embedding_model),
                     **{f"grouping_{k2}": v for k2, v in summary["grouping"].items()},
                     **{f"direction_{k2}": v for k2, v in summary["direction_assignment"].items()},
                     "summary_json": str((scene_out / "summary.json").resolve()),

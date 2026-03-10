@@ -473,6 +473,8 @@ class DemoSession:
                 convtasnet_expected_num_sources=(
                     None if self.req.convtasnet_expected_num_sources is None else int(self.req.convtasnet_expected_num_sources)
                 ),
+                identity_backend=str(self.req.identity_backend),
+                identity_speaker_embedding_model=str(self.req.identity_speaker_embedding_model),
                 beamforming_mode=str(self.req.beamforming_mode),
                 localization_backend=str(self.req.localization_backend),
                 tracking_mode=str(self.req.tracking_mode),

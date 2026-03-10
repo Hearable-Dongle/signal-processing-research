@@ -98,6 +98,16 @@ class PipelineConfig:
     identity_hold_similarity_threshold: float = 0.6
     identity_carry_forward_chunks: int = 1
     identity_confidence_decay: float = 0.92
+    identity_backend: str = "mfcc_legacy"
+    identity_speaker_embedding_model: str = "ecapa_voxceleb"
+    identity_speaker_embedding_device: str = "cpu"
+    identity_speaker_embedding_min_speech_ms: float = 600.0
+    identity_speaker_embedding_buffer_ms: float = 1000.0
+    identity_speaker_embedding_update_interval_chunks: int = 2
+    identity_speaker_embedding_match_threshold: float = 0.72
+    identity_speaker_embedding_merge_threshold: float = 0.82
+    identity_speaker_embedding_margin: float = 0.05
+    identity_provisional_speaker_timeout_chunks: int = 6
     direction_transition_penalty_deg: float = 22.0
     direction_min_confidence_for_switch: float = 0.35
     direction_hold_confidence_decay: float = 0.9

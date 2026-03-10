@@ -43,6 +43,8 @@ def run_simulation_pipeline(
     convtasnet_model_sample_rate_hz: int = 16000,
     convtasnet_input_sample_rate_hz: int = 16000,
     convtasnet_expected_num_sources: int | None = None,
+    identity_backend: str = "mfcc_legacy",
+    identity_speaker_embedding_model: str = "ecapa_voxceleb",
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -59,6 +61,8 @@ def run_simulation_pipeline(
         convtasnet_model_sample_rate_hz=int(convtasnet_model_sample_rate_hz),
         convtasnet_input_sample_rate_hz=int(convtasnet_input_sample_rate_hz),
         convtasnet_expected_num_sources=None if convtasnet_expected_num_sources is None else int(convtasnet_expected_num_sources),
+        identity_backend=str(identity_backend),
+        identity_speaker_embedding_model=str(identity_speaker_embedding_model),
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
@@ -216,6 +220,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--convtasnet-model-sample-rate-hz", type=int, default=16000)
     p.add_argument("--convtasnet-input-sample-rate-hz", type=int, default=16000)
     p.add_argument("--convtasnet-expected-num-sources", type=int, default=None)
+    p.add_argument("--identity-backend", choices=["mfcc_legacy", "speaker_embed_session"], default="mfcc_legacy")
+    p.add_argument("--identity-speaker-embedding-model", choices=["ecapa_voxceleb", "wavlm_xvector"], default="ecapa_voxceleb")
     return p
 
 
@@ -244,6 +250,8 @@ def main() -> None:
         convtasnet_expected_num_sources=(
             None if args.convtasnet_expected_num_sources is None else int(args.convtasnet_expected_num_sources)
         ),
+        identity_backend=str(args.identity_backend),
+        identity_speaker_embedding_model=str(args.identity_speaker_embedding_model),
     )
     print(json.dumps(summary, indent=2))
 
