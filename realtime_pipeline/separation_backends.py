@@ -33,6 +33,22 @@ class MockSeparationBackend:
         return out
 
 
+@dataclass(slots=True)
+class DominantSpeakerPassthroughBackend:
+    """Low-latency backend that treats the chunk as one dominant speaker stream."""
+
+    apply_peak_normalization: bool = False
+
+    def separate(self, mono_chunk: np.ndarray, expected_speakers: int | None = None) -> list[np.ndarray]:
+        del expected_speakers
+        x = np.asarray(mono_chunk, dtype=np.float32).reshape(-1)
+        if self.apply_peak_normalization:
+            peak = float(np.max(np.abs(x))) if x.size else 0.0
+            if peak > 1e-6:
+                x = (x / peak).astype(np.float32, copy=False)
+        return [x]
+
+
 class MultispeakerModuleBackend:
     """Thin adapter over multispeaker_separation.SpeakerSeparationSystem."""
 
