@@ -1,13 +1,31 @@
-Single-dominant no-separator benchmark
+Update offline Data Collection benchmarking defaults and diagnostics.
 
 What changed:
-- Added a low-latency benchmark mode that skips ConvTasNet and treats each 2s analysis window as one dominant speaker stream.
-- Kept speaker tracking based on the window’s voice features plus recent direction history.
-- Wired the mode through the fixed 30s benchmark and summary output as `single_dominant_no_separator`.
-- Added smoke coverage for the new benchmark path.
+- Set offline recording benchmark defaults to:
+  - localization hop `50 ms`
+  - localization window `200 ms`
+  - speaker relation window `2000 ms`
+  - speaker relation hop `1000 ms`
+- Propagated `fast_frame_ms` into recording summaries.
+- Fixed offline speaker-direction plots to use the actual frame step instead of assuming `10 ms`.
 
-Validation:
-- `PYTHONPATH=. pytest -q tests/test_realtime_pipeline_integration_mock.py -k 'fixed_speaker_scene_generator_emits_expected_metadata or fixed_speaker_benchmark_smoke_with_mock_separation or fixed_speaker_benchmark_target_first_identified_smoke or fixed_speaker_benchmark_single_dominant_no_separator_smoke'`
+Files:
+- `realtime_pipeline/recording_runner.py`
+- `beamforming/benchmark/data_collection_benchmark.py`
 
-Run command:
-- `PYTHONPATH=. python -m realtime_pipeline.fixed_speaker_benchmark --out-dir realtime_pipeline/output/fixed_speaker_benchmark_noise0p0x_no_separator --noise-scale 0.0 --identity-backend mfcc_legacy --single-dominant-no-separator`
+Run used:
+- `python -m beamforming.benchmark.data_collection_benchmark --input-path . --out-dir beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200 --methods mvdr_fd --separation-mode single_dominant_no_separator --control-mode speaker_tracking_mode --fast-path-reference-mode speaker_map`
+
+Artifacts:
+- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/report.json`
+- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/scene_metrics.csv`
+- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/summary_by_method.csv`
+
+Observed on `fifth-floor-sun-mar-9`:
+- mean `fast_rtf`: `2.45`
+- mean `slow_rtf`: `0.124`
+- mean final speaker count: `0.33`
+- mean dominant confidence: `0.283`
+
+Validation / rerun:
+- `python -m beamforming.benchmark.data_collection_benchmark --input-path . --out-dir beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200 --methods mvdr_fd --separation-mode single_dominant_no_separator --control-mode speaker_tracking_mode --fast-path-reference-mode speaker_map`
