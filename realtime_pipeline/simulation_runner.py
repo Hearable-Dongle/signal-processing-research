@@ -55,6 +55,8 @@ def run_simulation_pipeline(
     identity_backend: str = "mfcc_legacy",
     identity_speaker_embedding_model: str = "wavlm_base_plus_sv",
     identity_retire_after_chunks: int | None = None,
+    identity_new_speaker_max_existing_score: float | None = None,
+    identity_direction_mismatch_block_deg: float | None = None,
     auto_focus_active_speaker: bool = False,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
@@ -76,6 +78,16 @@ def run_simulation_pipeline(
         convtasnet_expected_num_sources=None if convtasnet_expected_num_sources is None else int(convtasnet_expected_num_sources),
         identity_backend=str(identity_backend),
         identity_speaker_embedding_model=str(identity_speaker_embedding_model),
+        identity_new_speaker_max_existing_score=(
+            float(identity_new_speaker_max_existing_score)
+            if identity_new_speaker_max_existing_score is not None
+            else float(PipelineConfig.identity_new_speaker_max_existing_score)
+        ),
+        identity_direction_mismatch_block_deg=(
+            float(identity_direction_mismatch_block_deg)
+            if identity_direction_mismatch_block_deg is not None
+            else float(PipelineConfig.identity_direction_mismatch_block_deg)
+        ),
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
         control_mode=str(control_mode),

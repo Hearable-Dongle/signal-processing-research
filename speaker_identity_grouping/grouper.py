@@ -63,6 +63,10 @@ class SpeakerIdentityGrouper:
             )
 
         retired_speakers = self._retire_stale_speakers(input_chunk.chunk_id)
+        self._direction_priors_deg = {int(k): float(v) for k, v in input_chunk.speaker_direction_priors.items()}
+        self._direction_prior_confidence = {
+            int(k): float(v) for k, v in input_chunk.speaker_direction_prior_confidence.items()
+        }
 
         stream_to_speaker: dict[int, int | None] = {}
         per_stream_confidence: dict[int, float] = {}
@@ -71,8 +75,9 @@ class SpeakerIdentityGrouper:
         for i, stream in enumerate(input_chunk.streams):
             audio = np.asarray(stream, dtype=np.float64).reshape(-1)
             rms = float(np.sqrt(np.mean(audio**2) + cfg.eps))
+            speech_likelihood = float(np.clip(input_chunk.per_stream_speech_likelihood.get(i, 0.0), 0.0, 1.0))
             embedding = self._extract_embedding(audio) if rms >= cfg.vad_rms_threshold else None
-            active = embedding is not None
+            active = embedding is not None and speech_likelihood >= float(cfg.speech_likelihood_threshold)
             voiceprint = None
             if cfg.backend == "speaker_embed_session":
                 if active:
@@ -86,6 +91,11 @@ class SpeakerIdentityGrouper:
                     embedding=embedding,
                     active=active,
                     voiceprint=voiceprint,
+                    speech_likelihood=speech_likelihood,
+                    direction_deg=(
+                        None if i not in input_chunk.per_stream_direction_deg else float(input_chunk.per_stream_direction_deg[i])
+                    ),
+                    direction_confidence=float(input_chunk.per_stream_direction_confidence.get(i, 0.0)),
                 )
             )
             stream_to_speaker[i] = None
@@ -115,6 +125,7 @@ class SpeakerIdentityGrouper:
         matched_stream_conf: dict[int, float] = {}
         held_streams: list[int] = []
         blocked_switch_streams: list[int] = []
+        blocked_new_speaker_streams: list[int] = []
         continuity_tiebreak_margin = 0.03
 
         if active_obs:
@@ -125,20 +136,28 @@ class SpeakerIdentityGrouper:
             if known_ids:
                 centroids = np.stack([self._speakers[sid].centroid for sid in known_ids], axis=0)
                 sim = embeddings @ centroids.T
-                adjusted = sim.copy()
+                sim01 = np.clip((sim + 1.0) * 0.5, 0.0, 1.0)
+                adjusted = sim01.copy()
                 for row_idx, sidx in enumerate(stream_ids):
                     prev_sid = self._prev_stream_to_speaker.get(sidx)
                     if prev_sid in known_ids:
                         adjusted[row_idx, known_ids.index(prev_sid)] += cfg.continuity_bonus
+                    for col_idx, sid in enumerate(known_ids):
+                        adjusted[row_idx, col_idx] = self._combined_assignment_score(
+                            identity_score=float(sim01[row_idx, col_idx]),
+                            stream_obs=active_obs[row_idx],
+                            speaker_id=int(sid),
+                            carry_bonus=(cfg.continuity_bonus if prev_sid == sid else 0.0),
+                        )
 
-                rows, cols = linear_sum_assignment(1.0 - adjusted)
+                rows, cols = linear_sum_assignment(1.0 - np.clip(adjusted, 0.0, 1.0))
                 assigned_streams = set()
 
                 for r, c in zip(rows.tolist(), cols.tolist()):
-                    score = float(np.clip(sim[r, c], -1.0, 1.0))
-                    best_raw_score = float(np.max(sim[r]))
+                    score = float(np.clip(adjusted[r, c], 0.0, 1.0))
+                    best_raw_score = float(np.max(adjusted[r]))
                     raw_margin = best_raw_score - score
-                    if score >= cfg.match_threshold:
+                    if score >= cfg.combined_match_threshold:
                         sidx = stream_ids[r]
                         sid = known_ids[c]
                         prev_sid = self._prev_stream_to_speaker.get(sidx)
@@ -146,7 +165,7 @@ class SpeakerIdentityGrouper:
                             continue
                         if prev_sid in known_ids and sid != prev_sid:
                             prev_idx = known_ids.index(prev_sid)
-                            prev_score = float(sim[r, prev_idx])
+                            prev_score = float(adjusted[r, prev_idx])
                             if score < prev_score + cfg.switch_penalty:
                                 blocked_switch_streams.append(sidx)
                                 continue
@@ -166,7 +185,13 @@ class SpeakerIdentityGrouper:
                 prev_conf = float(self._prev_stream_confidence.get(sidx, 0.0))
 
                 if prev_sid in self._speakers:
-                    prev_score = float(np.clip(emb @ self._speakers[prev_sid].centroid.T, -1.0, 1.0))
+                    prev_identity = float(np.clip(((emb @ self._speakers[prev_sid].centroid.T) + 1.0) * 0.5, 0.0, 1.0))
+                    prev_score = self._combined_assignment_score(
+                        identity_score=prev_identity,
+                        stream_obs=active_obs[r],
+                        speaker_id=int(prev_sid),
+                        carry_bonus=cfg.continuity_bonus,
+                    )
                     age = input_chunk.chunk_id - self._speakers[prev_sid].last_seen_chunk
                     support = max(prev_score, prev_conf)
                     if age <= cfg.carry_forward_chunks and support >= cfg.hold_similarity_threshold:
@@ -176,18 +201,72 @@ class SpeakerIdentityGrouper:
                         held_streams.append(sidx)
                         continue
 
+                best_existing_sid = None
+                best_existing_score = -1.0
+                if self._speakers:
+                    known_ids = sorted(self._speakers.keys())
+                    centroids = np.stack([self._speakers[sid].centroid for sid in known_ids], axis=0)
+                    sims = np.clip(((emb @ centroids.T) + 1.0) * 0.5, 0.0, 1.0)
+                    combined = np.asarray(
+                        [
+                            self._combined_assignment_score(
+                                identity_score=float(sims[idx]),
+                                stream_obs=active_obs[r],
+                                speaker_id=int(sid),
+                                carry_bonus=(cfg.continuity_bonus if self._prev_stream_to_speaker.get(sidx) == sid else 0.0),
+                            )
+                            for idx, sid in enumerate(known_ids)
+                        ],
+                        dtype=float,
+                    )
+                    best_idx = int(np.argmax(combined))
+                    best_existing_sid = int(known_ids[best_idx])
+                    best_existing_score = float(combined[best_idx])
+
                 if len(self._speakers) < cfg.max_speakers:
-                    sid = self._register_new_speaker(emb, input_chunk.chunk_id, input_chunk.timestamp_ms, cfg.new_speaker_confidence, stream_index=sidx)
-                    new_speakers.append(sid)
-                    matched_stream_to_speaker[sidx] = sid
-                    matched_stream_conf[sidx] = float(cfg.new_speaker_confidence)
+                    if best_existing_sid is not None and best_existing_score > float(cfg.new_speaker_max_existing_score):
+                        matched_stream_to_speaker[sidx] = int(best_existing_sid)
+                        matched_stream_conf[sidx] = max(0.0, best_existing_score)
+                        self._update_speaker_local(
+                            int(best_existing_sid),
+                            emb,
+                            input_chunk.chunk_id,
+                            input_chunk.timestamp_ms,
+                            best_existing_score,
+                            stream_index=sidx,
+                        )
+                        forced_reuse_streams.append(sidx)
+                        blocked_new_speaker_streams.append(sidx)
+                    else:
+                        sid = self._register_new_speaker(
+                            emb,
+                            input_chunk.chunk_id,
+                            input_chunk.timestamp_ms,
+                            cfg.new_speaker_confidence,
+                            stream_index=sidx,
+                        )
+                        new_speakers.append(sid)
+                        matched_stream_to_speaker[sidx] = sid
+                        matched_stream_conf[sidx] = float(cfg.new_speaker_confidence)
                 else:
                     known_ids = sorted(self._speakers.keys())
                     centroids = np.stack([self._speakers[sid].centroid for sid in known_ids], axis=0)
-                    sims = emb @ centroids.T
-                    c = int(np.argmax(sims))
+                    sims = np.clip(((emb @ centroids.T) + 1.0) * 0.5, 0.0, 1.0)
+                    combined = np.asarray(
+                        [
+                            self._combined_assignment_score(
+                                identity_score=float(sims[idx]),
+                                stream_obs=active_obs[r],
+                                speaker_id=int(sid),
+                                carry_bonus=(cfg.continuity_bonus if self._prev_stream_to_speaker.get(sidx) == sid else 0.0),
+                            )
+                            for idx, sid in enumerate(known_ids)
+                        ],
+                        dtype=float,
+                    )
+                    c = int(np.argmax(combined))
                     sid = known_ids[c]
-                    score = float(np.clip(sims[c], -1.0, 1.0))
+                    score = float(np.clip(combined[c], 0.0, 1.0))
                     matched_stream_to_speaker[sidx] = sid
                     matched_stream_conf[sidx] = max(0.0, score)
                     self._update_speaker_local(sid, emb, input_chunk.chunk_id, input_chunk.timestamp_ms, score, stream_index=sidx)
@@ -214,8 +293,50 @@ class SpeakerIdentityGrouper:
                 "forced_reuse_streams": forced_reuse_streams,
                 "held_streams": held_streams,
                 "blocked_switch_streams": blocked_switch_streams,
+                "blocked_new_speaker_streams": blocked_new_speaker_streams,
             },
         )
+
+    def _combined_assignment_score(
+        self,
+        *,
+        identity_score: float,
+        stream_obs: StreamObservation,
+        speaker_id: int,
+        carry_bonus: float = 0.0,
+    ) -> float:
+        cfg = self.config
+        id_w = max(0.0, float(cfg.identity_match_weight))
+        dir_w = max(0.0, float(cfg.direction_match_weight))
+        total_w = max(id_w + dir_w, 1e-8)
+        combined = id_w * float(identity_score)
+
+        prior_deg = None
+        prior_conf = 0.0
+        if speaker_id in getattr(self, "_direction_priors_deg", {}):
+            prior_deg = float(self._direction_priors_deg[speaker_id])
+            prior_conf = float(getattr(self, "_direction_prior_confidence", {}).get(speaker_id, 0.0))
+
+        if (
+            stream_obs.direction_deg is not None
+            and float(stream_obs.direction_confidence) >= float(cfg.direction_gate_confidence)
+            and prior_deg is not None
+            and prior_conf >= float(cfg.direction_gate_confidence)
+        ):
+            dist = self._circular_distance_deg(float(stream_obs.direction_deg), float(prior_deg))
+            if dist >= float(cfg.direction_mismatch_block_deg):
+                return -1.0
+            dir_score = max(0.0, 1.0 - (dist / max(float(cfg.direction_match_max_distance_deg), 1e-6)))
+            combined += dir_w * dir_score
+        else:
+            total_w = max(id_w, 1e-8)
+
+        combined = (combined / total_w) + float(carry_bonus)
+        return float(np.clip(combined, -1.0, 1.0))
+
+    @staticmethod
+    def _circular_distance_deg(a: float, b: float) -> float:
+        return abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
 
     def _update_session_backend(
         self,

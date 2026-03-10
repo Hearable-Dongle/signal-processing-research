@@ -111,6 +111,14 @@ class PipelineConfig:
     identity_carry_forward_chunks: int = 1
     identity_confidence_decay: float = 0.92
     identity_retire_after_chunks: int = 25
+    identity_speech_likelihood_threshold: float = 0.45
+    identity_match_weight: float = 0.7
+    identity_direction_match_weight: float = 0.3
+    identity_combined_match_threshold: float = 0.58
+    identity_new_speaker_max_existing_score: float = 0.32
+    identity_direction_match_max_distance_deg: float = 35.0
+    identity_direction_mismatch_block_deg: float = 60.0
+    identity_direction_gate_confidence: float = 0.3
     identity_backend: str = "mfcc_legacy"
     identity_speaker_embedding_model: str = "wavlm_base_plus_sv"
     identity_speaker_embedding_device: str = "cpu"

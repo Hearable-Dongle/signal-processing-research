@@ -413,6 +413,8 @@ def run_fixed_speaker_benchmark(
         direction_speaker_forget_timeout_ms=2000.0,
         identity_backend=str(identity_backend),
         identity_retire_after_chunks=2,
+        identity_new_speaker_max_existing_score=0.22,
+        identity_direction_mismatch_block_deg=45.0,
         fast_path_reference_mode="speaker_map",
         auto_focus_active_speaker=True,
         robust_mode=True,
