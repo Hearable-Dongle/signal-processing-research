@@ -44,7 +44,7 @@ def run_simulation_pipeline(
     convtasnet_input_sample_rate_hz: int = 16000,
     convtasnet_expected_num_sources: int | None = None,
     identity_backend: str = "mfcc_legacy",
-    identity_speaker_embedding_model: str = "ecapa_voxceleb",
+    identity_speaker_embedding_model: str = "wavlm_base_plus_sv",
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -221,7 +221,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--convtasnet-input-sample-rate-hz", type=int, default=16000)
     p.add_argument("--convtasnet-expected-num-sources", type=int, default=None)
     p.add_argument("--identity-backend", choices=["mfcc_legacy", "speaker_embed_session"], default="mfcc_legacy")
-    p.add_argument("--identity-speaker-embedding-model", choices=["ecapa_voxceleb", "wavlm_xvector"], default="ecapa_voxceleb")
+    p.add_argument(
+        "--identity-speaker-embedding-model",
+        choices=["ecapa_voxceleb", "wavlm_base_sv", "wavlm_base_plus_sv"],
+        default="wavlm_base_plus_sv",
+    )
     return p
 
 

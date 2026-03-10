@@ -99,7 +99,7 @@ class PipelineConfig:
     identity_carry_forward_chunks: int = 1
     identity_confidence_decay: float = 0.92
     identity_backend: str = "mfcc_legacy"
-    identity_speaker_embedding_model: str = "ecapa_voxceleb"
+    identity_speaker_embedding_model: str = "wavlm_base_plus_sv"
     identity_speaker_embedding_device: str = "cpu"
     identity_speaker_embedding_min_speech_ms: float = 600.0
     identity_speaker_embedding_buffer_ms: float = 1000.0

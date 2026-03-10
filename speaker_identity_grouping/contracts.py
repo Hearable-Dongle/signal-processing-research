@@ -31,7 +31,7 @@ class IdentityConfig:
     preemphasis: float = 0.97
     eps: float = 1e-8
     # Session-local voiceprint lookup controls
-    speaker_embedding_model: str = "ecapa_voxceleb"
+    speaker_embedding_model: str = "wavlm_base_plus_sv"
     speaker_embedding_device: str = "cpu"
     speaker_embedding_min_speech_ms: float = 600.0
     speaker_embedding_buffer_ms: float = 1000.0

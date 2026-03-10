@@ -70,10 +70,9 @@ class SpeechbrainECAPABackend:
 
 
 class WavLMXVectorBackend:
-    MODEL_ID = "microsoft/wavlm-base-plus-sv"
-
-    def __init__(self, device: str = "cpu") -> None:
+    def __init__(self, device: str = "cpu", model_id: str = "microsoft/wavlm-base-plus-sv") -> None:
         self._device = str(device)
+        self._model_id = str(model_id)
         self._torch = None
         self._processor = None
         self._model = None
@@ -85,8 +84,8 @@ class WavLMXVectorBackend:
         from transformers import Wav2Vec2FeatureExtractor, WavLMForXVector
 
         self._torch = torch
-        self._processor = Wav2Vec2FeatureExtractor.from_pretrained(self.MODEL_ID)
-        self._model = WavLMForXVector.from_pretrained(self.MODEL_ID).to(torch.device(self._device)).eval()
+        self._processor = Wav2Vec2FeatureExtractor.from_pretrained(self._model_id)
+        self._model = WavLMForXVector.from_pretrained(self._model_id).to(torch.device(self._device)).eval()
 
     def embed(self, audio: np.ndarray, sample_rate_hz: int) -> np.ndarray | None:
         if int(sample_rate_hz) != 16000:
@@ -111,6 +110,8 @@ def build_session_embedding_backend(model_name: str, device: str = "cpu") -> Spe
     key = str(model_name).strip().lower()
     if key in {"ecapa_voxceleb", "ecapa-voxceleb", "speechbrain_ecapa"}:
         return SpeechbrainECAPABackend(device=device)
-    if key in {"wavlm_xvector", "wavlm-large", "wavlm"}:
-        return WavLMXVectorBackend(device=device)
+    if key in {"wavlm_xvector", "wavlm-large", "wavlm", "wavlm_base_plus_sv", "wavlm-base-plus-sv"}:
+        return WavLMXVectorBackend(device=device, model_id="microsoft/wavlm-base-plus-sv")
+    if key in {"wavlm_base_sv", "wavlm-base-sv"}:
+        return WavLMXVectorBackend(device=device, model_id="microsoft/wavlm-base-sv")
     raise ValueError(f"Unsupported speaker embedding model: {model_name}")

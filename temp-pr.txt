@@ -80,10 +80,22 @@ Speaker identity grouping follow-up:
 - The new path keeps MFCC/Hungarian matching for short-term chunk stability, then adds causal rolling audio buffers and a session-local exact-cosine voiceprint registry for lookup/merge.
 
 CPU speaker-embedding benchmark on this machine:
-- `wavlm_xvector`:
-  - first embed/load path: `5010.73 ms`
-  - steady-state embed on a 1.0 s speech crop: mean `75.10 ms`, p95 `75.72 ms`
-  - embedding dim: `512`
+- WavLM speaker-verification variants benchmarked on CPU with real 16 kHz meeting-scene speech:
+  - `microsoft/wavlm-base-sv`
+    - load: `706.58 ms`
+    - `200 ms`: fails
+    - `400 ms`: mean `75.11 ms`, `RTF 0.188`
+    - `600 ms`: mean `77.50 ms`, `RTF 0.129`
+    - `1000 ms`: mean `94.46 ms`, `RTF 0.094`
+    - `2000 ms`: mean `108.78 ms`, `RTF 0.054`
+  - `microsoft/wavlm-base-plus-sv`
+    - load: `552.69 ms`
+    - `200 ms`: fails
+    - `400 ms`: mean `63.88 ms`, `RTF 0.160`
+    - `600 ms`: mean `70.41 ms`, `RTF 0.117`
+    - `1000 ms`: mean `79.56 ms`, `RTF 0.080`
+    - `2000 ms`: mean `109.39 ms`, `RTF 0.055`
+  - Decision: default the learned grouping path to `wavlm_base_plus_sv`
 - `ecapa_voxceleb`:
   - did not complete a valid benchmark on this machine
   - current `speechbrain`/checkpoint path fails during model fetch/load (`custom.py` lookup failure against the upstream repo layout), so this backend is not usable yet in the active env
@@ -92,12 +104,12 @@ Grouping baseline on `restaurant_meeting` with oracle localization and `Libri3Mi
 - `mfcc_legacy`
   - `k=2`: switch rate `0.3125`, stability `0.7778`, assignment confidence `0.1433`, direction mismatch `0.0706`, direction MAE `12.71 deg`, grouping avg `2.14 ms/chunk`, slow RTF `0.282`
   - `k=3`: switch rate `0.4`, stability `0.6667`, assignment confidence `0.0996`, direction mismatch `0.2391`, direction MAE `26.61 deg`, grouping avg `1.89 ms/chunk`, slow RTF `0.256`
-- `speaker_embed_session` with `wavlm_xvector`
+- `speaker_embed_session` with `wavlm_base_plus_sv`
   - `k=2`: switch rate `0.25`, stability `0.6111`, assignment confidence `0.1439`, direction mismatch `0.4842`, direction MAE `83.35 deg`, grouping avg `147.54 ms/chunk`, slow RTF `0.981`
   - `k=3`: switch rate `0.2667`, stability `0.6667`, assignment confidence `0.0952`, direction mismatch `0.0`, direction MAE `1.62 deg`, grouping avg `117.99 ms/chunk`, slow RTF `0.826`
 
 Current takeaway on grouping:
-- `wavlm_xvector` is heavy but still technically within a `200 ms` slow chunk budget on this machine.
+- `wavlm_base_plus_sv` is the best WavLM option tested here and is still technically within a `200 ms` slow chunk budget on this machine once enough trailing speech is accumulated.
 - It is not a clear replacement for the current grouper yet:
   - strong improvement on the sampled `k=3` meeting scene
   - clear regression on the sampled `k=2` meeting scene

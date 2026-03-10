@@ -207,7 +207,7 @@ def evaluate_scene(
     chunk_ms: int = 200,
     use_ground_truth_localization: bool = True,
     identity_backend: str = "mfcc_legacy",
-    identity_speaker_embedding_model: str = "ecapa_voxceleb",
+    identity_speaker_embedding_model: str = "wavlm_base_plus_sv",
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_path)
     scene_dir = _scene_dir_from_config(scene_path, sim_cfg)
@@ -470,7 +470,11 @@ def main() -> None:
     parser.add_argument("--chunk-ms", type=int, default=200)
     parser.add_argument("--estimated-localization", action="store_true", help="Use estimated localization instead of oracle chunk DOAs.")
     parser.add_argument("--identity-backend", choices=["mfcc_legacy", "speaker_embed_session"], default="mfcc_legacy")
-    parser.add_argument("--identity-speaker-embedding-model", choices=["ecapa_voxceleb", "wavlm_xvector"], default="ecapa_voxceleb")
+    parser.add_argument(
+        "--identity-speaker-embedding-model",
+        choices=["ecapa_voxceleb", "wavlm_base_sv", "wavlm_base_plus_sv"],
+        default="wavlm_base_plus_sv",
+    )
     args = parser.parse_args()
 
     scene_paths = [Path(p) for p in args.scenes] if args.scenes else _default_scene_paths()
