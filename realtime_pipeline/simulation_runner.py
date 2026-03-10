@@ -31,6 +31,8 @@ def run_simulation_pipeline(
     scene_config_path: str | Path,
     out_dir: str | Path,
     use_mock_separation: bool = True,
+    slow_chunk_ms: int = 200,
+    slow_chunk_hop_ms: int | None = None,
     beamforming_mode: str = "mvdr_fd",
     fast_path_reference_mode: str = "speaker_map",
     output_normalization_enabled: bool = True,
@@ -43,15 +45,28 @@ def run_simulation_pipeline(
     control_mode: str = "spatial_peak_mode",
     direction_long_memory_enabled: bool = True,
     direction_long_memory_window_ms: float = 60000.0,
+    direction_history_window_chunks: int = 4,
+    direction_speaker_stale_timeout_ms: float = 2000.0,
+    direction_speaker_forget_timeout_ms: float = 8000.0,
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k",
     convtasnet_model_sample_rate_hz: int = 16000,
     convtasnet_input_sample_rate_hz: int = 16000,
     convtasnet_expected_num_sources: int | None = None,
     identity_backend: str = "mfcc_legacy",
     identity_speaker_embedding_model: str = "wavlm_base_plus_sv",
+    identity_retire_after_chunks: int | None = None,
+    identity_new_speaker_max_existing_score: float | None = None,
+    identity_direction_mismatch_block_deg: float | None = None,
+    direction_focus_gain_db: float | None = None,
+    direction_non_focus_attenuation_db: float | None = None,
+    manual_target_speaker_id: int | None = None,
+    auto_lock_first_identified_speaker: bool = False,
+    target_user_boost_db: float = 0.0,
+    auto_focus_active_speaker: bool = False,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
+    default_cfg = PipelineConfig()
 
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
@@ -60,7 +75,8 @@ def run_simulation_pipeline(
     cfg = PipelineConfig(
         sample_rate_hz=sim_cfg.audio.fs,
         fast_frame_ms=frame_ms,
-        slow_chunk_ms=200,
+        slow_chunk_ms=int(slow_chunk_ms),
+        slow_chunk_hop_ms=None if slow_chunk_hop_ms is None else int(slow_chunk_hop_ms),
         fast_path_reference_mode=str(fast_path_reference_mode),
         convtasnet_model_name=str(convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(convtasnet_model_sample_rate_hz),
@@ -68,11 +84,34 @@ def run_simulation_pipeline(
         convtasnet_expected_num_sources=None if convtasnet_expected_num_sources is None else int(convtasnet_expected_num_sources),
         identity_backend=str(identity_backend),
         identity_speaker_embedding_model=str(identity_speaker_embedding_model),
+        identity_new_speaker_max_existing_score=(
+            float(identity_new_speaker_max_existing_score)
+            if identity_new_speaker_max_existing_score is not None
+            else float(default_cfg.identity_new_speaker_max_existing_score)
+        ),
+        identity_direction_mismatch_block_deg=(
+            float(identity_direction_mismatch_block_deg)
+            if identity_direction_mismatch_block_deg is not None
+            else float(default_cfg.identity_direction_mismatch_block_deg)
+        ),
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
         control_mode=str(control_mode),
         direction_long_memory_enabled=bool(direction_long_memory_enabled),
         direction_long_memory_window_ms=float(direction_long_memory_window_ms),
+        direction_history_window_chunks=int(direction_history_window_chunks),
+        direction_speaker_stale_timeout_ms=float(direction_speaker_stale_timeout_ms),
+        direction_speaker_forget_timeout_ms=float(direction_speaker_forget_timeout_ms),
+        direction_focus_gain_db=(
+            float(direction_focus_gain_db)
+            if direction_focus_gain_db is not None
+            else float(default_cfg.direction_focus_gain_db)
+        ),
+        direction_non_focus_attenuation_db=(
+            float(direction_non_focus_attenuation_db)
+            if direction_non_focus_attenuation_db is not None
+            else float(default_cfg.direction_non_focus_attenuation_db)
+        ),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
         output_normalization_enabled=bool(output_normalization_enabled),
@@ -85,6 +124,11 @@ def run_simulation_pipeline(
         identity_hold_similarity_threshold=0.6 if robust_mode else 1.1,
         identity_carry_forward_chunks=1 if robust_mode else 0,
         identity_confidence_decay=0.92 if robust_mode else 0.0,
+        identity_retire_after_chunks=(
+            int(identity_retire_after_chunks)
+            if identity_retire_after_chunks is not None
+            else (25 if robust_mode else 1)
+        ),
         direction_transition_penalty_deg=22.0 if robust_mode else 180.0,
         direction_min_confidence_for_switch=0.35 if robust_mode else 0.0,
         direction_hold_confidence_decay=0.9 if robust_mode else 1.0,
@@ -100,14 +144,63 @@ def run_simulation_pipeline(
     enhanced_parts: list[np.ndarray] = []
     speaker_map_trace: list[dict] = []
     srp_trace: list[dict] = []
+    focus_trace: list[dict] = []
     pipe_holder: dict[str, RealtimeSpeakerPipeline] = {}
+    auto_focus_state: dict[str, int | None] = {"speaker_id": None}
+    target_lock_state: dict[str, int | None] = {
+        "speaker_id": None if manual_target_speaker_id is None else int(manual_target_speaker_id)
+    }
 
     def _sink(x: np.ndarray) -> None:
         enhanced_parts.append(np.asarray(x, dtype=np.float32).reshape(-1))
-        if not capture_trace:
-            return
         pipe = pipe_holder.get("pipe")
         if pipe is None:
+            return
+        if target_lock_state["speaker_id"] is not None:
+            pipe.set_focus_control(
+                focused_speaker_ids=[int(target_lock_state["speaker_id"])],
+                user_boost_db=float(target_user_boost_db),
+            )
+        elif auto_lock_first_identified_speaker:
+            snapshot = pipe.shared_state.get_speaker_map_snapshot()
+            best_sid: int | None = None
+            best_key: tuple[int, float, float, float] | None = None
+            for sid, item in snapshot.items():
+                maturity = 1 if str(getattr(item, "identity_maturity", "unknown")) == "stable" else 0
+                active_score = float(getattr(item, "activity_confidence", 0.0))
+                conf = float(getattr(item, "confidence", 0.0))
+                ident = float(getattr(item, "identity_confidence", 0.0))
+                if maturity == 0 and conf < 0.45 and ident < 0.45:
+                    continue
+                key = (maturity, ident, conf, active_score)
+                if best_key is None or key > best_key:
+                    best_sid = int(sid)
+                    best_key = key
+            if best_sid is not None:
+                target_lock_state["speaker_id"] = int(best_sid)
+                pipe.set_focus_control(
+                    focused_speaker_ids=[int(best_sid)],
+                    user_boost_db=float(target_user_boost_db),
+                )
+        if auto_focus_active_speaker:
+            snapshot = pipe.shared_state.get_speaker_map_snapshot()
+            best_sid: int | None = None
+            best_key: tuple[float, float, float] | None = None
+            for sid, item in snapshot.items():
+                active_score = float(getattr(item, "activity_confidence", 0.0))
+                conf = float(getattr(item, "confidence", 0.0))
+                ident = float(getattr(item, "identity_confidence", 0.0))
+                if active_score < 0.2 and conf < 0.2 and ident < 0.2:
+                    continue
+                key = (active_score, conf, ident)
+                if best_key is None or key > best_key:
+                    best_sid = int(sid)
+                    best_key = key
+            if best_sid is not None and auto_focus_state["speaker_id"] != best_sid:
+                pipe.set_focus_control(focused_speaker_ids=[best_sid], user_boost_db=0.0)
+                auto_focus_state["speaker_id"] = best_sid
+
+        if not capture_trace:
             return
         srp = pipe.shared_state.get_srp_snapshot()
         srp_trace.append(
@@ -145,6 +238,16 @@ def run_simulation_pipeline(
                     }
                     for v in snapshot.values()
                 ],
+            }
+        )
+        focus = pipe.shared_state.get_focus_control_snapshot()
+        focus_trace.append(
+            {
+                "frame_index": len(enhanced_parts) - 1,
+                "focused_speaker_ids": None if focus.focused_speaker_ids is None else [int(v) for v in focus.focused_speaker_ids],
+                "focused_direction_deg": None if focus.focused_direction_deg is None else float(focus.focused_direction_deg),
+                "user_boost_db": float(focus.user_boost_db),
+                "locked_target_speaker_id": None if target_lock_state["speaker_id"] is None else int(target_lock_state["speaker_id"]),
             }
         )
 
@@ -227,6 +330,8 @@ def run_simulation_pipeline(
         "use_mock_separation": bool(use_mock_separation),
         "beamforming_mode": str(cfg.beamforming_mode),
         "fast_path_reference_mode": str(cfg.fast_path_reference_mode),
+        "slow_chunk_ms": int(cfg.slow_chunk_ms),
+        "slow_chunk_hop_ms": int(cfg.slow_chunk_ms if cfg.slow_chunk_hop_ms is None else cfg.slow_chunk_hop_ms),
         "output_normalization_enabled": bool(cfg.output_normalization_enabled),
         "output_allow_amplification": bool(cfg.output_allow_amplification),
         "speaker_map_final": speaker_map_rows,
@@ -236,10 +341,20 @@ def run_simulation_pipeline(
         "control_mode": str(cfg.control_mode),
         "direction_long_memory_enabled": bool(cfg.direction_long_memory_enabled),
         "direction_long_memory_window_ms": float(cfg.direction_long_memory_window_ms),
+        "direction_history_window_chunks": int(cfg.direction_history_window_chunks),
+        "direction_speaker_stale_timeout_ms": float(cfg.direction_speaker_stale_timeout_ms),
+        "direction_speaker_forget_timeout_ms": float(cfg.direction_speaker_forget_timeout_ms),
+        "direction_focus_gain_db": float(cfg.direction_focus_gain_db),
+        "direction_non_focus_attenuation_db": float(cfg.direction_non_focus_attenuation_db),
+        "manual_target_speaker_id": None if manual_target_speaker_id is None else int(manual_target_speaker_id),
+        "auto_lock_first_identified_speaker": bool(auto_lock_first_identified_speaker),
+        "target_user_boost_db": float(target_user_boost_db),
+        "final_locked_target_speaker_id": None if target_lock_state["speaker_id"] is None else int(target_lock_state["speaker_id"]),
     }
     if capture_trace:
         summary["speaker_map_trace"] = speaker_map_trace
         summary["srp_trace"] = srp_trace
+        summary["focus_trace"] = focus_trace
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)

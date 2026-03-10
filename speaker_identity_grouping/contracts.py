@@ -21,6 +21,14 @@ class IdentityConfig:
     hold_similarity_threshold: float = 0.6
     carry_forward_chunks: int = 1
     confidence_decay: float = 0.92
+    speech_likelihood_threshold: float = 0.45
+    identity_match_weight: float = 0.7
+    direction_match_weight: float = 0.3
+    combined_match_threshold: float = 0.58
+    new_speaker_max_existing_score: float = 0.32
+    direction_match_max_distance_deg: float = 35.0
+    direction_mismatch_block_deg: float = 60.0
+    direction_gate_confidence: float = 0.3
 
     # Embedding controls
     n_mfcc: int = 13
@@ -49,6 +57,9 @@ class StreamObservation:
     embedding: np.ndarray | None
     active: bool
     voiceprint: np.ndarray | None = None
+    speech_likelihood: float = 0.0
+    direction_deg: float | None = None
+    direction_confidence: float = 0.0
 
 
 @dataclass(slots=True)
@@ -74,6 +85,11 @@ class IdentityChunkInput:
     timestamp_ms: float
     sample_rate_hz: int
     streams: list[np.ndarray]
+    per_stream_direction_deg: dict[int, float] = field(default_factory=dict)
+    per_stream_direction_confidence: dict[int, float] = field(default_factory=dict)
+    per_stream_speech_likelihood: dict[int, float] = field(default_factory=dict)
+    speaker_direction_priors: dict[int, float] = field(default_factory=dict)
+    speaker_direction_prior_confidence: dict[int, float] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

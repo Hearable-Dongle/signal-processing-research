@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from realtime_pipeline.contracts import PipelineConfig
+from realtime_pipeline.fixed_speaker_benchmark import generate_fixed_speaker_scene, run_fixed_speaker_benchmark
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
 from realtime_pipeline.separation_backends import MockSeparationBackend
 from realtime_pipeline.simulation_runner import run_simulation_pipeline
@@ -267,3 +268,87 @@ def test_realtime_pipeline_srp_peak_reference_mode_executes(tmp_path: Path) -> N
     assert summary["fast_frames"] > 0
     assert summary["fast_path_reference_mode"] == "srp_peak"
     assert (out_dir / "enhanced_fast_path.wav").exists()
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_realtime_pipeline_supports_overlapping_slow_windows(tmp_path: Path) -> None:
+    pytest.importorskip("pyroomacoustics")
+
+    repo = Path(__file__).resolve().parents[1]
+    input_dir = repo / "beamforming" / "input"
+    scene = {
+        "room": {"dimensions": [5.0, 4.0, 3.0], "absorption": 0.25},
+        "microphone_array": {"mic_center": [2.5, 2.0, 1.5], "mic_radius": 0.05, "mic_count": 4},
+        "audio": {
+            "sources": [
+                {
+                    "loc": [1.5, 1.5, 1.5],
+                    "audio": str((input_dir / "brit_talking.wav").resolve()),
+                    "gain": 1.0,
+                    "classification": "signal",
+                }
+            ],
+            "duration": 0.6,
+            "fs": 16000,
+        },
+    }
+    scene_path = tmp_path / "scene_overlap.json"
+    scene_path.write_text(json.dumps(scene), encoding="utf-8")
+
+    summary = run_simulation_pipeline(
+        scene_config_path=scene_path,
+        out_dir=tmp_path / "out_overlap",
+        use_mock_separation=True,
+        slow_chunk_ms=200,
+        slow_chunk_hop_ms=100,
+    )
+    assert summary["slow_chunk_ms"] == 200
+    assert summary["slow_chunk_hop_ms"] == 100
+    assert summary["slow_chunks"] == 6
+
+
+def test_fixed_speaker_scene_generator_emits_expected_metadata(tmp_path: Path) -> None:
+    artifacts = generate_fixed_speaker_scene(out_root=tmp_path, noise_scale=0.0)
+    metadata = json.loads(artifacts.scenario_metadata_path.read_text(encoding="utf-8"))
+    events = metadata["assets"]["speech_events"]
+    assert [row["speaker_id"] for row in events] == [0, 1, 2]
+    assert [row["start_sec"] for row in events] == [0.0, 10.0, 20.0]
+    assert [row["direction_deg"] for row in events] == [0.0, 75.0, 150.0]
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_fixed_speaker_benchmark_smoke_with_mock_separation(tmp_path: Path) -> None:
+    pytest.importorskip("pyroomacoustics")
+
+    summary = run_fixed_speaker_benchmark(
+        out_dir=tmp_path / "bench",
+        noise_scale=0.0,
+        use_mock_separation=True,
+        identity_backend="mfcc_legacy",
+        duration_sec=3.0,
+    )
+    assert summary["slow_chunk_ms"] == 2000
+    assert summary["slow_chunk_hop_ms"] == 1000
+    assert (tmp_path / "bench" / "benchmark_summary.json").exists()
+    assert (tmp_path / "bench" / "speaker_timeline.json").exists()
+    assert (tmp_path / "bench" / "unique_speakers_over_time.json").exists()
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_fixed_speaker_benchmark_target_first_identified_smoke(tmp_path: Path) -> None:
+    pytest.importorskip("pyroomacoustics")
+
+    summary = run_fixed_speaker_benchmark(
+        out_dir=tmp_path / "bench_target",
+        noise_scale=0.0,
+        use_mock_separation=True,
+        identity_backend="mfcc_legacy",
+        duration_sec=3.0,
+        target_first_identified_speaker=True,
+    )
+    assert summary["target_first_identified_speaker"] is True
+    assert (tmp_path / "bench_target" / "baseline" / "enhanced_fast_path.wav").exists()
+    assert (tmp_path / "bench_target" / "target_first_identified" / "enhanced_fast_path.wav").exists()
+    assert (tmp_path / "bench_target" / "visualizations" / "target_lock_over_time.png").exists()
+    target_summary = json.loads((tmp_path / "bench_target" / "target_first_identified" / "summary.json").read_text(encoding="utf-8"))
+    assert target_summary["auto_lock_first_identified_speaker"] is True

@@ -7,6 +7,8 @@ from time import perf_counter
 import numpy as np
 
 from direction_assignment import DirectionAssignmentConfig, DirectionAssignmentEngine, build_direction_assignment_input
+from direction_assignment.doa_estimation import estimate_stream_doa
+from direction_assignment.mask_backprojection import backproject_streams_to_multichannel
 from speaker_identity_grouping import IdentityChunkInput, IdentityConfig, SpeakerIdentityGrouper
 
 from .contracts import PipelineConfig, SpeakerGainDirection
@@ -18,6 +20,25 @@ def _identity_maturity_label(*, backend: str, sample_count: int, provisional: bo
     if backend == "speaker_embed_session":
         return "provisional" if provisional else "stable"
     return "stable" if int(sample_count) >= 3 else "provisional"
+
+
+def _stream_speech_likelihood(audio: np.ndarray, sample_rate_hz: int) -> float:
+    x = np.asarray(audio, dtype=np.float64).reshape(-1)
+    if x.size == 0:
+        return 0.0
+    x = x - float(np.mean(x))
+    rms = float(np.sqrt(np.mean(x**2) + 1e-12))
+    if rms <= 1e-6:
+        return 0.0
+    spec = np.abs(np.fft.rfft(x * np.hanning(x.size)))
+    freqs = np.fft.rfftfreq(x.size, d=1.0 / max(int(sample_rate_hz), 1))
+    total_energy = float(np.sum(spec**2) + 1e-12)
+    speech_band = (freqs >= 150.0) & (freqs <= 4200.0)
+    band_ratio = float(np.sum((spec[speech_band] ** 2)) / total_energy) if np.any(speech_band) else 0.0
+    spec_flatness = float(np.exp(np.mean(np.log(spec + 1e-12))) / (np.mean(spec) + 1e-12))
+    voicedness = float(np.clip(1.0 - spec_flatness, 0.0, 1.0))
+    rms_score = float(np.clip((rms - 0.004) / 0.03, 0.0, 1.0))
+    return float(np.clip((0.45 * band_ratio) + (0.35 * voicedness) + (0.20 * rms_score), 0.0, 1.0))
 
 
 class SlowPathWorker(threading.Thread):
@@ -39,6 +60,8 @@ class SlowPathWorker(threading.Thread):
         self._stop = stop_event
         self._chunk_id = 0
         self._chunk_samples = max(1, int(config.sample_rate_hz * config.slow_chunk_ms / 1000))
+        hop_ms = config.slow_chunk_ms if config.slow_chunk_hop_ms is None else int(config.slow_chunk_hop_ms)
+        self._chunk_hop_samples = max(1, int(config.sample_rate_hz * hop_ms / 1000))
         self._frame_samples = max(1, int(config.sample_rate_hz * config.fast_frame_ms / 1000))
 
         self._identity = SpeakerIdentityGrouper(
@@ -52,6 +75,15 @@ class SlowPathWorker(threading.Thread):
                 hold_similarity_threshold=config.identity_hold_similarity_threshold,
                 carry_forward_chunks=config.identity_carry_forward_chunks,
                 confidence_decay=config.identity_confidence_decay,
+                retire_after_chunks=config.identity_retire_after_chunks,
+                speech_likelihood_threshold=config.identity_speech_likelihood_threshold,
+                identity_match_weight=config.identity_match_weight,
+                direction_match_weight=config.identity_direction_match_weight,
+                combined_match_threshold=config.identity_combined_match_threshold,
+                new_speaker_max_existing_score=config.identity_new_speaker_max_existing_score,
+                direction_match_max_distance_deg=config.identity_direction_match_max_distance_deg,
+                direction_mismatch_block_deg=config.identity_direction_mismatch_block_deg,
+                direction_gate_confidence=config.identity_direction_gate_confidence,
                 speaker_embedding_model=config.identity_speaker_embedding_model,
                 speaker_embedding_device=config.identity_speaker_embedding_device,
                 speaker_embedding_min_speech_ms=config.identity_speaker_embedding_min_speech_ms,
@@ -82,6 +114,7 @@ class SlowPathWorker(threading.Thread):
                 speaker_tracking_large_change_persist_chunks=config.direction_large_change_persist_chunks,
                 speaker_tracking_identity_hold_margin=config.direction_identity_hold_margin,
                 speaker_tracking_stable_confidence_threshold=config.direction_stable_confidence_threshold,
+                history_window_chunks=config.direction_history_window_chunks,
                 long_memory_enabled=config.direction_long_memory_enabled,
                 long_memory_window_ms=config.direction_long_memory_window_ms,
                 long_memory_min_observations=config.direction_long_memory_min_observations,
@@ -91,12 +124,14 @@ class SlowPathWorker(threading.Thread):
                 long_memory_relock_persist_chunks=config.direction_long_memory_relock_persist_chunks,
                 long_memory_decay=config.direction_long_memory_decay,
                 long_memory_stale_timeout_ms=config.direction_long_memory_stale_timeout_ms,
+                speaker_stale_timeout_ms=config.direction_speaker_stale_timeout_ms,
+                speaker_forget_timeout_ms=config.direction_speaker_forget_timeout_ms,
             ),
         )
         self._published_map: dict[int, SpeakerGainDirection] = {}
 
     def _process_chunk(self, raw_chunk_mc: np.ndarray) -> None:
-        ts_ms = 1000.0 * (self._chunk_id * self._chunk_samples) / self._cfg.sample_rate_hz
+        ts_ms = 1000.0 * (self._chunk_id * self._chunk_hop_samples) / self._cfg.sample_rate_hz
 
         with Timer() as t:
             separation_ms = 0.0
@@ -119,6 +154,42 @@ class SlowPathWorker(threading.Thread):
             separated = self._sep.separate(mono_mix, expected_speakers=expected_speakers)
             separation_ms += (perf_counter() - t0) * 1000.0
 
+            pre_direction_state = self._direction.get_state_snapshot()
+            stream_speech_likelihood: dict[int, float] = {}
+            stream_direction_deg: dict[int, float] = {}
+            stream_direction_confidence: dict[int, float] = {}
+            if separated:
+                streams_mc, _ = backproject_streams_to_multichannel(
+                    raw_mic_chunk=raw_chunk_mc,
+                    separated_streams=separated,
+                    cfg=self._direction.cfg,
+                )
+                for stream_idx, stream in enumerate(separated):
+                    audio = np.asarray(stream, dtype=np.float32).reshape(-1)
+                    speech_likelihood = _stream_speech_likelihood(audio, self._cfg.sample_rate_hz)
+                    stream_speech_likelihood[int(stream_idx)] = float(speech_likelihood)
+                    if stream_idx < len(streams_mc):
+                        doa_deg, doa_conf, _ = estimate_stream_doa(
+                            stream_multichannel=streams_mc[stream_idx],
+                            mic_geometry=self._direction.mic_geometry,
+                            mic_pairs=self._direction.mic_pairs,
+                            cfg=self._direction.cfg,
+                        )
+                        if doa_deg is not None:
+                            stream_direction_deg[int(stream_idx)] = float(doa_deg)
+                            stream_direction_confidence[int(stream_idx)] = float(doa_conf)
+
+            speaker_direction_priors = {
+                int(sid): float(
+                    st.anchor_direction_deg if st.anchor_direction_deg is not None else st.direction_deg
+                )
+                for sid, st in pre_direction_state.items()
+            }
+            speaker_direction_prior_confidence = {
+                int(sid): float(max(getattr(st, "anchor_confidence", 0.0), getattr(st, "confidence", 0.0)))
+                for sid, st in pre_direction_state.items()
+            }
+
             t0 = perf_counter()
             identity_out = self._identity.update(
                 IdentityChunkInput(
@@ -126,6 +197,11 @@ class SlowPathWorker(threading.Thread):
                     timestamp_ms=ts_ms,
                     sample_rate_hz=self._cfg.sample_rate_hz,
                     streams=separated,
+                    per_stream_direction_deg=stream_direction_deg,
+                    per_stream_direction_confidence=stream_direction_confidence,
+                    per_stream_speech_likelihood=stream_speech_likelihood,
+                    speaker_direction_priors=speaker_direction_priors,
+                    speaker_direction_prior_confidence=speaker_direction_prior_confidence,
                 )
             )
             identity_ms += (perf_counter() - t0) * 1000.0
@@ -251,7 +327,7 @@ class SlowPathWorker(threading.Thread):
             while acc_samples >= self._chunk_samples:
                 chunk = np.concatenate(frames, axis=0)
                 raw_chunk = chunk[: self._chunk_samples, :]
-                residual = chunk[self._chunk_samples :, :]
+                residual = chunk[self._chunk_hop_samples :, :]
                 frames = [residual] if residual.size else []
                 acc_samples = residual.shape[0] if residual.size else 0
                 self._process_chunk(raw_chunk)
@@ -294,6 +370,10 @@ class SlowPathWorker(threading.Thread):
                 predicted_direction_deg=prev.predicted_direction_deg,
                 angular_velocity_deg_per_chunk=prev.angular_velocity_deg_per_chunk,
                 last_separator_stream_index=prev.last_separator_stream_index,
+                anchor_direction_deg=prev.anchor_direction_deg,
+                anchor_confidence=prev.anchor_confidence,
+                anchor_locked=prev.anchor_locked,
+                anchor_last_confirmed_ms=prev.anchor_last_confirmed_ms,
             )
 
         for sid, prev in self._published_map.items():
@@ -315,6 +395,10 @@ class SlowPathWorker(threading.Thread):
                 predicted_direction_deg=prev.predicted_direction_deg,
                 angular_velocity_deg_per_chunk=prev.angular_velocity_deg_per_chunk,
                 last_separator_stream_index=prev.last_separator_stream_index,
+                anchor_direction_deg=prev.anchor_direction_deg,
+                anchor_confidence=prev.anchor_confidence,
+                anchor_locked=prev.anchor_locked,
+                anchor_last_confirmed_ms=prev.anchor_last_confirmed_ms,
             )
 
         self._published_map = dict(out)

@@ -44,6 +44,7 @@ class PipelineConfig:
     sample_rate_hz: int = 16000
     fast_frame_ms: int = 10
     slow_chunk_ms: int = 200
+    slow_chunk_hop_ms: int | None = None
     fast_path_reference_mode: str = "speaker_map"  # one of: speaker_map, srp_peak
     localization_backend: str = "weighted_srp_dp"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy, music_1src, gcc_tdoa_1src
     tracking_mode: str = "multi_peak_v2"  # one of: legacy, multi_peak_v2
@@ -109,6 +110,15 @@ class PipelineConfig:
     identity_hold_similarity_threshold: float = 0.6
     identity_carry_forward_chunks: int = 1
     identity_confidence_decay: float = 0.92
+    identity_retire_after_chunks: int = 25
+    identity_speech_likelihood_threshold: float = 0.45
+    identity_match_weight: float = 0.7
+    identity_direction_match_weight: float = 0.3
+    identity_combined_match_threshold: float = 0.58
+    identity_new_speaker_max_existing_score: float = 0.32
+    identity_direction_match_max_distance_deg: float = 35.0
+    identity_direction_mismatch_block_deg: float = 60.0
+    identity_direction_gate_confidence: float = 0.3
     identity_backend: str = "mfcc_legacy"
     identity_speaker_embedding_model: str = "wavlm_base_plus_sv"
     identity_speaker_embedding_device: str = "cpu"
@@ -129,6 +139,7 @@ class PipelineConfig:
     direction_large_change_persist_chunks: int = 3
     direction_identity_hold_margin: float = 0.08
     direction_stable_confidence_threshold: float = 0.55
+    direction_history_window_chunks: int = 4
     direction_long_memory_enabled: bool = True
     direction_long_memory_window_ms: float = 60000.0
     direction_long_memory_min_observations: int = 4
@@ -138,6 +149,8 @@ class PipelineConfig:
     direction_long_memory_relock_persist_chunks: int = 4
     direction_long_memory_decay: float = 0.995
     direction_long_memory_stale_timeout_ms: float = 60000.0
+    direction_speaker_stale_timeout_ms: float = 2000.0
+    direction_speaker_forget_timeout_ms: float = 8000.0
     speaker_map_min_confidence_for_refresh: float = 0.2
     speaker_map_hold_ms: float = 300.0
     speaker_map_confidence_decay: float = 0.9
