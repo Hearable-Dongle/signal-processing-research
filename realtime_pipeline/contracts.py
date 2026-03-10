@@ -12,6 +12,11 @@ class SpeakerGainDirection:
     active: bool
     activity_confidence: float
     updated_at_ms: float
+    identity_confidence: float = 0.0
+    identity_maturity: str = "unknown"
+    predicted_direction_deg: float | None = None
+    angular_velocity_deg_per_chunk: float = 0.0
+    last_separator_stream_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,8 +40,10 @@ class PipelineConfig:
     sample_rate_hz: int = 16000
     fast_frame_ms: int = 10
     slow_chunk_ms: int = 200
-    localization_backend: str = "tiny_dp_ipd"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy, music_1src, gcc_tdoa_1src
+    fast_path_reference_mode: str = "speaker_map"  # one of: speaker_map, srp_peak
+    localization_backend: str = "weighted_srp_dp"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy, music_1src, gcc_tdoa_1src
     tracking_mode: str = "multi_peak_v2"  # one of: legacy, multi_peak_v2
+    control_mode: str = "spatial_peak_mode"  # one of: spatial_peak_mode, speaker_tracking_mode
     localization_window_ms: int = 160
     localization_hop_ms: int = 50
     localization_grid_size: int = 72
@@ -113,6 +120,11 @@ class PipelineConfig:
     direction_hold_confidence_decay: float = 0.9
     direction_stale_confidence_decay: float = 0.96
     direction_min_persist_confidence: float = 0.05
+    direction_small_change_deg: float = 12.0
+    direction_medium_change_deg: float = 30.0
+    direction_large_change_persist_chunks: int = 3
+    direction_identity_hold_margin: float = 0.08
+    direction_stable_confidence_threshold: float = 0.55
     speaker_map_min_confidence_for_refresh: float = 0.2
     speaker_map_hold_ms: float = 300.0
     speaker_map_confidence_decay: float = 0.9
@@ -131,7 +143,7 @@ class PipelineConfig:
     postfilter_enabled: bool = True
     postfilter_noise_ema_alpha: float = 0.08
     postfilter_speech_ema_alpha: float = 0.12
-    postfilter_gain_floor: float = 0.18
+    postfilter_gain_floor: float = 0.22
     postfilter_gain_ema_alpha: float = 0.2
     # Fast-path safety
     output_soft_clip_enabled: bool = True

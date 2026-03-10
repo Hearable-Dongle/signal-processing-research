@@ -60,6 +60,12 @@ def _ema_angle(prev_deg: float, new_deg: float, alpha: float) -> float:
     return _norm_deg(np.degrees(np.arctan2(v[1], v[0])))
 
 
+def _frame_speech_activity(frame_mc: np.ndarray) -> float:
+    mono = np.mean(np.asarray(frame_mc, dtype=np.float64), axis=1)
+    rms = float(np.sqrt(np.mean(mono**2) + 1e-12))
+    return float(np.clip((rms - 0.005) / 0.03, 0.0, 1.0))
+
+
 def delay_and_sum_frame(
     frame_mc: np.ndarray,
     doa_deg: float,
@@ -402,6 +408,20 @@ class FastPathWorker(threading.Thread):
             except queue.Full:
                 self._state.incr_dropped_fast_to_slow(1)
 
+    def _beamform_single_direction(self, x: np.ndarray, doa_deg: float, speech_activity: float) -> np.ndarray:
+        mode = str(self._cfg.beamforming_mode).strip().lower()
+        if mode == "delay_sum":
+            return delay_and_sum_frame(
+                x,
+                doa_deg=doa_deg,
+                mic_geometry_xyz=self._mic_geometry_xyz,
+                fs=self._cfg.sample_rate_hz,
+                sound_speed_m_s=self._cfg.sound_speed_m_s,
+            )
+        if mode == "gsc_fd":
+            return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
+        return self._fd.mvdr(x, doa_deg=doa_deg, speech_activity=speech_activity)
+
     def run(self) -> None:
         frame_samples = max(1, int(self._cfg.sample_rate_hz * self._cfg.fast_frame_ms / 1000))
         try:
@@ -442,26 +462,21 @@ class FastPathWorker(threading.Thread):
 
                     speaker_map = self._state.get_speaker_map_snapshot()
                     t0 = perf_counter()
-                    if speaker_map:
+                    ref_mode = str(self._cfg.fast_path_reference_mode).strip().lower()
+                    if ref_mode == "srp_peak" and peaks:
+                        speech_activity = _frame_speech_activity(x)
+                        doa_deg = float(peaks[0])
+                        out = self._beamform_single_direction(x, doa_deg=doa_deg, speech_activity=speech_activity)
+                        if self._cfg.postfilter_enabled:
+                            out = self._postfilter.process(out, speech_activity=speech_activity)
+                    elif speaker_map:
                         out = np.zeros(x.shape[0], dtype=np.float32)
                         smoothed_items = self._smooth_speaker_items(speaker_map)
                         speech_activity = float(
                             max((float(getattr(v, "activity_confidence", 0.0)) for v in speaker_map.values()), default=0.0)
                         )
                         for _sid, doa_deg, gain_weight in smoothed_items:
-                            mode = str(self._cfg.beamforming_mode).strip().lower()
-                            if mode == "delay_sum":
-                                bf = delay_and_sum_frame(
-                                    x,
-                                    doa_deg=doa_deg,
-                                    mic_geometry_xyz=self._mic_geometry_xyz,
-                                    fs=self._cfg.sample_rate_hz,
-                                    sound_speed_m_s=self._cfg.sound_speed_m_s,
-                                )
-                            elif mode == "gsc_fd":
-                                bf = self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
-                            else:
-                                bf = self._fd.mvdr(x, doa_deg=doa_deg, speech_activity=speech_activity)
+                            bf = self._beamform_single_direction(x, doa_deg=doa_deg, speech_activity=speech_activity)
                             out += float(gain_weight) * bf
                         if self._cfg.postfilter_enabled:
                             out = self._postfilter.process(out, speech_activity=speech_activity)
