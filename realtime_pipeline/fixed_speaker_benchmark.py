@@ -379,6 +379,275 @@ def _plot_unique_speakers(*, out_path: Path, time_s: np.ndarray, cumulative_coun
     plt.close()
 
 
+def _wrap_diff_deg(a: float, b: float) -> float:
+    return float((float(a) - float(b) + 180.0) % 360.0 - 180.0)
+
+
+def _smooth_direction_series(
+    *,
+    raw_deg: np.ndarray,
+    conf: np.ndarray,
+    ident: np.ndarray,
+    activity: np.ndarray,
+    small_change_deg: float = 12.0,
+    medium_change_deg: float = 30.0,
+    relock_persist_frames: int = 2,
+    max_hold_frames: int = 150,
+) -> dict[str, object]:
+    n = raw_deg.shape[0]
+    smoothed = np.full(n, np.nan, dtype=np.float64)
+    confidence_gate = np.clip((0.55 * conf) + (0.30 * ident) + (0.15 * activity), 0.0, 1.0)
+    decision = np.full(n, "", dtype=object)
+    pending_counts = np.zeros(n, dtype=np.int32)
+    pending_candidate = np.nan
+    pending_count = 0
+    hold_frames = 0
+
+    for idx in range(n):
+        raw = float(raw_deg[idx])
+        if not np.isfinite(raw):
+            if idx > 0 and np.isfinite(smoothed[idx - 1]) and hold_frames < max_hold_frames:
+                smoothed[idx] = smoothed[idx - 1]
+                hold_frames += 1
+                decision[idx] = "hold_missing"
+            else:
+                hold_frames = max_hold_frames
+                decision[idx] = "missing"
+            pending_counts[idx] = pending_count
+            continue
+
+        hold_frames = 0
+        if idx == 0 or not np.isfinite(smoothed[idx - 1]):
+            smoothed[idx] = raw
+            decision[idx] = "init"
+            pending_candidate = np.nan
+            pending_count = 0
+            pending_counts[idx] = pending_count
+            continue
+
+        prev = float(smoothed[idx - 1])
+        delta = abs(_wrap_diff_deg(raw, prev))
+        gate = float(confidence_gate[idx])
+        if delta <= float(small_change_deg):
+            smoothed[idx] = raw
+            pending_candidate = np.nan
+            pending_count = 0
+            decision[idx] = "fast"
+        elif delta <= float(medium_change_deg):
+            alpha = float(np.clip(0.20 + (0.50 * gate), 0.20, 0.70))
+            smoothed[idx] = float((prev + alpha * _wrap_diff_deg(raw, prev)) % 360.0)
+            pending_candidate = np.nan
+            pending_count = 0
+            decision[idx] = "smooth"
+        else:
+            if np.isfinite(pending_candidate) and abs(_wrap_diff_deg(raw, float(pending_candidate))) <= float(small_change_deg):
+                pending_count += 1
+            else:
+                pending_candidate = raw
+                pending_count = 1
+            if pending_count >= int(relock_persist_frames) and gate >= 0.45:
+                smoothed[idx] = raw
+                pending_candidate = np.nan
+                pending_count = 0
+                decision[idx] = "relock"
+            else:
+                smoothed[idx] = prev
+                decision[idx] = "hold_large"
+        pending_counts[idx] = pending_count
+
+    lower_small = np.mod(smoothed - float(small_change_deg), 360.0)
+    upper_small = np.mod(smoothed + float(small_change_deg), 360.0)
+    lower_medium = np.mod(smoothed - float(medium_change_deg), 360.0)
+    upper_medium = np.mod(smoothed + float(medium_change_deg), 360.0)
+    return {
+        "smoothed_deg": smoothed.tolist(),
+        "confidence_gate": confidence_gate.tolist(),
+        "small_change_deg": [float(small_change_deg)] * n,
+        "medium_change_deg": [float(medium_change_deg)] * n,
+        "small_band_lower_deg": lower_small.tolist(),
+        "small_band_upper_deg": upper_small.tolist(),
+        "medium_band_lower_deg": lower_medium.tolist(),
+        "medium_band_upper_deg": upper_medium.tolist(),
+        "pending_count": pending_counts.tolist(),
+        "decision": [str(v) for v in decision.tolist()],
+    }
+
+
+def _build_smoothing_payload(summary: dict, ground_truth: dict[str, object]) -> dict[str, object]:
+    time_s = np.asarray(ground_truth["time_s"], dtype=float)
+    traces: dict[int, dict[str, np.ndarray]] = {}
+    for row in summary.get("speaker_map_trace", []):
+        frame_idx = int(row["frame_index"])
+        for item in row.get("speakers", []):
+            sid = int(item["speaker_id"])
+            speaker = traces.setdefault(
+                sid,
+                {
+                    "raw_deg": np.full(time_s.shape[0], np.nan, dtype=np.float64),
+                    "conf": np.zeros(time_s.shape[0], dtype=np.float64),
+                    "ident": np.zeros(time_s.shape[0], dtype=np.float64),
+                    "activity": np.zeros(time_s.shape[0], dtype=np.float64),
+                },
+            )
+            if frame_idx >= time_s.shape[0]:
+                continue
+            speaker["raw_deg"][frame_idx] = float(item.get("direction_degrees", np.nan))
+            speaker["conf"][frame_idx] = float(item.get("confidence", 0.0))
+            speaker["ident"][frame_idx] = float(item.get("identity_confidence", 0.0))
+            speaker["activity"][frame_idx] = float(item.get("activity_confidence", 0.0))
+
+    payload: dict[str, object] = {"time_s": ground_truth["time_s"], "speakers": {}}
+    for sid, vals in sorted(traces.items()):
+        smooth = _smooth_direction_series(
+            raw_deg=vals["raw_deg"],
+            conf=vals["conf"],
+            ident=vals["ident"],
+            activity=vals["activity"],
+        )
+        payload["speakers"][str(sid)] = {
+            "raw_deg": vals["raw_deg"].tolist(),
+            "confidence": vals["conf"].tolist(),
+            "identity_confidence": vals["ident"].tolist(),
+            "activity_confidence": vals["activity"].tolist(),
+            **smooth,
+        }
+    return payload
+
+
+def _plot_smoothed_directions(
+    *,
+    out_path: Path,
+    summary: dict,
+    ground_truth: dict[str, object],
+    smoothing_payload: dict[str, object],
+) -> None:
+    time_s = np.asarray(ground_truth["time_s"], dtype=float)
+    gt_speakers = np.asarray(ground_truth["active_speaker_ids"], dtype=int)
+    gt_deg = np.asarray(ground_truth["active_directions_deg"], dtype=float)
+    speaker_match = _match_predicted_ids_to_truth(summary)
+    cmap = plt.get_cmap("tab10")
+    gt_colors = {sid: cmap(sid % 10) for sid in range(len(TRUE_SPEAKER_ANGLES_DEG))}
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+    ax_dir, ax_gate = axes
+
+    for true_sid in range(len(TRUE_SPEAKER_ANGLES_DEG)):
+        mask = gt_speakers == true_sid
+        gt_series = np.where(mask, gt_deg, np.nan)
+        ax_dir.plot(time_s, gt_series, color=gt_colors[true_sid], linewidth=2.0, alpha=0.3, label=f"gt spk {true_sid}")
+
+    for sid_str, speaker in sorted(smoothing_payload["speakers"].items(), key=lambda item: int(item[0])):
+        sid = int(sid_str)
+        color_sid = speaker_match.get(sid, sid)
+        color = gt_colors.get(color_sid, cmap(sid % 10))
+        raw = np.asarray(speaker["raw_deg"], dtype=float)
+        smooth = np.asarray(speaker["smoothed_deg"], dtype=float)
+        band_lo = np.asarray(speaker["small_band_lower_deg"], dtype=float)
+        band_hi = np.asarray(speaker["small_band_upper_deg"], dtype=float)
+        gate = np.asarray(speaker["confidence_gate"], dtype=float)
+
+        ax_dir.plot(time_s, raw, color=color, linestyle=":", linewidth=1.0, alpha=0.7, label=f"raw spk {sid}")
+        ax_dir.plot(time_s, smooth, color=color, linewidth=2.0, label=f"smooth spk {sid}")
+        if np.nanmax(np.abs(_wrap_diff_deg(band_hi[np.isfinite(smooth)][0], band_lo[np.isfinite(smooth)][0])) if np.any(np.isfinite(smooth)) else [0]) >= 0:
+            lower = np.where(np.isfinite(smooth), smooth - 12.0, np.nan)
+            upper = np.where(np.isfinite(smooth), smooth + 12.0, np.nan)
+            ax_dir.fill_between(time_s, lower, upper, color=color, alpha=0.08)
+        ax_gate.plot(time_s, gate, color=color, linewidth=1.5, label=f"gate spk {sid}")
+
+    ax_dir.set_ylabel("direction (deg)")
+    ax_dir.set_ylim(-5.0, 365.0)
+    ax_dir.grid(True, alpha=0.2)
+    ax_dir.legend(loc="upper right", ncol=2)
+    ax_dir.set_title("Raw vs smoothed accepted speaker directions")
+
+    ax_gate.axhline(0.45, color="black", linestyle="--", linewidth=1.0, alpha=0.6, label="relock gate")
+    ax_gate.set_ylabel("confidence gate")
+    ax_gate.set_xlabel("time (s)")
+    ax_gate.set_ylim(-0.02, 1.02)
+    ax_gate.grid(True, alpha=0.2)
+    ax_gate.legend(loc="upper right", ncol=2)
+    ax_gate.set_title("Smoothing gate / threshold over time")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
+def _plot_target_lock(
+    *,
+    out_path: Path,
+    summary: dict,
+    ground_truth: dict[str, object],
+) -> None:
+    time_s = np.asarray(ground_truth["time_s"], dtype=float)
+    gt_ids = np.asarray(ground_truth["active_speaker_ids"], dtype=int)
+    focus_trace = summary.get("focus_trace", [])
+    locked = np.full(time_s.shape[0], np.nan, dtype=np.float64)
+    boost = np.zeros(time_s.shape[0], dtype=np.float64)
+    for row in focus_trace:
+        idx = int(row["frame_index"])
+        if idx >= time_s.shape[0]:
+            continue
+        if row.get("locked_target_speaker_id") is not None:
+            locked[idx] = float(row["locked_target_speaker_id"])
+        boost[idx] = float(row.get("user_boost_db", 0.0))
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 5), sharex=True)
+    axes[0].plot(time_s, gt_ids, linewidth=1.8, alpha=0.35, label="ground truth active speaker")
+    axes[0].plot(time_s, locked, linewidth=1.8, linestyle="--", label="locked target speaker")
+    axes[0].set_ylabel("speaker id")
+    axes[0].grid(True, alpha=0.2)
+    axes[0].legend(loc="upper right")
+    axes[0].set_title("Target speaker lock over time")
+
+    axes[1].plot(time_s, boost, linewidth=1.8)
+    axes[1].set_ylabel("boost dB")
+    axes[1].set_xlabel("time (s)")
+    axes[1].grid(True, alpha=0.2)
+    axes[1].set_title("Applied target boost over time")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
+def _plot_output_comparison(*, out_path: Path, base_wav: Path, target_wav: Path) -> None:
+    y_base, sr = sf.read(base_wav, always_2d=False)
+    y_tgt, _ = sf.read(target_wav, always_2d=False)
+    y_base = np.asarray(y_base, dtype=np.float32).reshape(-1)
+    y_tgt = np.asarray(y_tgt, dtype=np.float32).reshape(-1)
+    t = np.arange(min(y_base.shape[0], y_tgt.shape[0]), dtype=np.float64) / max(int(sr), 1)
+    y_base = y_base[: t.shape[0]]
+    y_tgt = y_tgt[: t.shape[0]]
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 5), sharex=True)
+    axes[0].plot(t, y_base, linewidth=0.8, label="baseline")
+    axes[0].plot(t, y_tgt, linewidth=0.8, alpha=0.8, label="target amplified")
+    axes[0].legend(loc="upper right")
+    axes[0].grid(True, alpha=0.2)
+    axes[0].set_title("Baseline vs target-amplified output")
+
+    win = max(1, int(sr * 0.25))
+    def _window_rms(x: np.ndarray) -> np.ndarray:
+        vals = []
+        for start in range(0, x.shape[0], win):
+            seg = x[start : start + win]
+            vals.append(float(np.sqrt(np.mean(seg.astype(np.float64) ** 2) + 1e-12)))
+        return np.asarray(vals, dtype=np.float64)
+
+    rms_t = np.arange(_window_rms(y_base).shape[0], dtype=np.float64) * (win / max(int(sr), 1))
+    axes[1].plot(rms_t, _window_rms(y_base), linewidth=1.5, label="baseline rms")
+    axes[1].plot(rms_t, _window_rms(y_tgt), linewidth=1.5, label="target rms")
+    axes[1].legend(loc="upper right")
+    axes[1].grid(True, alpha=0.2)
+    axes[1].set_xlabel("time (s)")
+    axes[1].set_ylabel("rms")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
 def run_fixed_speaker_benchmark(
     *,
     out_dir: str | Path,
@@ -386,6 +655,7 @@ def run_fixed_speaker_benchmark(
     use_mock_separation: bool = False,
     identity_backend: str = "mfcc_legacy",
     duration_sec: float = 30.0,
+    target_first_identified_speaker: bool = False,
 ) -> dict[str, object]:
     output_root = Path(out_dir).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -400,7 +670,7 @@ def run_fixed_speaker_benchmark(
 
     run_summary = run_simulation_pipeline(
         scene_config_path=artifacts.scene_config_path,
-        out_dir=output_root,
+        out_dir=output_root / "baseline" if target_first_identified_speaker else output_root,
         use_mock_separation=bool(use_mock_separation),
         capture_trace=True,
         slow_chunk_ms=2000,
@@ -419,15 +689,42 @@ def run_fixed_speaker_benchmark(
         auto_focus_active_speaker=True,
         robust_mode=True,
     )
+    target_summary = None
+    if target_first_identified_speaker:
+        target_summary = run_simulation_pipeline(
+            scene_config_path=artifacts.scene_config_path,
+            out_dir=output_root / "target_first_identified",
+            use_mock_separation=bool(use_mock_separation),
+            capture_trace=True,
+            slow_chunk_ms=2000,
+            slow_chunk_hop_ms=1000,
+            control_mode="speaker_tracking_mode",
+            direction_long_memory_enabled=False,
+            direction_long_memory_window_ms=2000.0,
+            direction_history_window_chunks=2,
+            direction_speaker_stale_timeout_ms=2000.0,
+            direction_speaker_forget_timeout_ms=2000.0,
+            identity_backend=str(identity_backend),
+            identity_retire_after_chunks=2,
+            identity_new_speaker_max_existing_score=0.22,
+            identity_direction_mismatch_block_deg=45.0,
+            fast_path_reference_mode="speaker_map",
+            auto_lock_first_identified_speaker=True,
+            target_user_boost_db=3.0,
+            direction_focus_gain_db=3.0,
+            direction_non_focus_attenuation_db=-18.0,
+            robust_mode=True,
+        )
 
-    ground_truth = _ground_truth_timeline(duration_s=float(run_summary["duration_s"]))
+    primary_summary = target_summary or run_summary
+    ground_truth = _ground_truth_timeline(duration_s=float(primary_summary["duration_s"]))
     speaker_match = _plot_direction_timeline(
         out_path=visualizations_root / "speaker_directions_over_time.png",
-        summary=run_summary,
+        summary=primary_summary,
         ground_truth=ground_truth,
     )
     time_s = np.asarray(ground_truth["time_s"], dtype=float)
-    cumulative_count, discovery_events = _speaker_count_timeline(run_summary, frame_count=time_s.shape[0])
+    cumulative_count, discovery_events = _speaker_count_timeline(primary_summary, frame_count=time_s.shape[0])
     _plot_unique_speakers(
         out_path=visualizations_root / "unique_speakers_over_time.png",
         time_s=time_s,
@@ -439,13 +736,32 @@ def run_fixed_speaker_benchmark(
         comparison_summary_path=None,
         out_path=visualizations_root / "scene_layout_user_view.png",
     )
+    smoothing_payload = _build_smoothing_payload(primary_summary, ground_truth)
+    (output_root / "speaker_smoothing_trace.json").write_text(json.dumps(smoothing_payload, indent=2), encoding="utf-8")
+    _plot_smoothed_directions(
+        out_path=visualizations_root / "speaker_directions_smoothed.png",
+        summary=primary_summary,
+        ground_truth=ground_truth,
+        smoothing_payload=smoothing_payload,
+    )
+    if target_summary is not None:
+        _plot_target_lock(
+            out_path=visualizations_root / "target_lock_over_time.png",
+            summary=target_summary,
+            ground_truth=ground_truth,
+        )
+        _plot_output_comparison(
+            out_path=visualizations_root / "baseline_vs_target_output.png",
+            base_wav=(output_root / "baseline" / "enhanced_fast_path.wav"),
+            target_wav=(output_root / "target_first_identified" / "enhanced_fast_path.wav"),
+        )
 
     speaker_timeline = {
         "time_s": ground_truth["time_s"],
         "ground_truth_active_speaker_ids": ground_truth["active_speaker_ids"],
         "ground_truth_active_directions_deg": ground_truth["active_directions_deg"],
-        "speaker_map_trace": run_summary.get("speaker_map_trace", []),
-        "focus_trace": run_summary.get("focus_trace", []),
+        "speaker_map_trace": primary_summary.get("speaker_map_trace", []),
+        "focus_trace": primary_summary.get("focus_trace", []),
         "predicted_to_ground_truth_mapping": {str(k): int(v) for k, v in sorted(speaker_match.items())},
     }
     (output_root / "speaker_timeline.json").write_text(json.dumps(speaker_timeline, indent=2), encoding="utf-8")
@@ -464,22 +780,29 @@ def run_fixed_speaker_benchmark(
         "noise_scale": float(noise_scale),
         "identity_backend": str(identity_backend),
         "use_mock_separation": bool(use_mock_separation),
-        "slow_chunk_ms": int(run_summary["slow_chunk_ms"]),
-        "slow_chunk_hop_ms": int(run_summary["slow_chunk_hop_ms"]),
-        "fast_rtf": float(run_summary["fast_rtf"]),
-        "slow_rtf": float(run_summary["slow_rtf"]),
-        "speaker_map_updates": int(run_summary["speaker_map_updates"]),
+        "target_first_identified_speaker": bool(target_first_identified_speaker),
+        "slow_chunk_ms": int(primary_summary["slow_chunk_ms"]),
+        "slow_chunk_hop_ms": int(primary_summary["slow_chunk_hop_ms"]),
+        "fast_rtf": float(primary_summary["fast_rtf"]),
+        "slow_rtf": float(primary_summary["slow_rtf"]),
+        "speaker_map_updates": int(primary_summary["speaker_map_updates"]),
         "final_unique_speakers_found": int(max(cumulative_count) if cumulative_count else 0),
         "artifacts": {
-            "enhanced_wav": str((output_root / "enhanced_fast_path.wav").resolve()),
-            "summary_json": str((output_root / "summary.json").resolve()),
+            "enhanced_wav": str(((output_root / "target_first_identified" / "enhanced_fast_path.wav") if target_summary is not None else (output_root / "enhanced_fast_path.wav")).resolve()),
+            "summary_json": str(((output_root / "target_first_identified" / "summary.json") if target_summary is not None else (output_root / "summary.json")).resolve()),
             "speaker_timeline": str((output_root / "speaker_timeline.json").resolve()),
             "unique_speakers": str((output_root / "unique_speakers_over_time.json").resolve()),
             "direction_plot": str((visualizations_root / "speaker_directions_over_time.png").resolve()),
             "unique_count_plot": str((visualizations_root / "unique_speakers_over_time.png").resolve()),
             "scene_layout": str((visualizations_root / "scene_layout_user_view.png").resolve()),
+            "smoothed_direction_plot": str((visualizations_root / "speaker_directions_smoothed.png").resolve()),
         },
     }
+    if target_summary is not None:
+        final_summary["artifacts"]["baseline_enhanced_wav"] = str((output_root / "baseline" / "enhanced_fast_path.wav").resolve())
+        final_summary["artifacts"]["target_lock_plot"] = str((visualizations_root / "target_lock_over_time.png").resolve())
+        final_summary["artifacts"]["baseline_vs_target_output"] = str((visualizations_root / "baseline_vs_target_output.png").resolve())
+        final_summary["artifacts"]["target_summary_json"] = str((output_root / "target_first_identified" / "summary.json").resolve())
     (output_root / "benchmark_summary.json").write_text(json.dumps(final_summary, indent=2), encoding="utf-8")
     return final_summary
 
@@ -490,6 +813,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--noise-scale", type=float, required=True)
     p.add_argument("--mock-separation", action="store_true")
     p.add_argument("--identity-backend", default="mfcc_legacy")
+    p.add_argument("--target-first-identified-speaker", action="store_true")
     return p
 
 
@@ -500,6 +824,7 @@ def main() -> None:
         noise_scale=float(args.noise_scale),
         use_mock_separation=bool(args.mock_separation),
         identity_backend=str(args.identity_backend),
+        target_first_identified_speaker=bool(args.target_first_identified_speaker),
     )
     print(json.dumps(summary, indent=2))
 

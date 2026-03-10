@@ -57,10 +57,16 @@ def run_simulation_pipeline(
     identity_retire_after_chunks: int | None = None,
     identity_new_speaker_max_existing_score: float | None = None,
     identity_direction_mismatch_block_deg: float | None = None,
+    direction_focus_gain_db: float | None = None,
+    direction_non_focus_attenuation_db: float | None = None,
+    manual_target_speaker_id: int | None = None,
+    auto_lock_first_identified_speaker: bool = False,
+    target_user_boost_db: float = 0.0,
     auto_focus_active_speaker: bool = False,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
+    default_cfg = PipelineConfig()
 
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
@@ -81,12 +87,12 @@ def run_simulation_pipeline(
         identity_new_speaker_max_existing_score=(
             float(identity_new_speaker_max_existing_score)
             if identity_new_speaker_max_existing_score is not None
-            else float(PipelineConfig.identity_new_speaker_max_existing_score)
+            else float(default_cfg.identity_new_speaker_max_existing_score)
         ),
         identity_direction_mismatch_block_deg=(
             float(identity_direction_mismatch_block_deg)
             if identity_direction_mismatch_block_deg is not None
-            else float(PipelineConfig.identity_direction_mismatch_block_deg)
+            else float(default_cfg.identity_direction_mismatch_block_deg)
         ),
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
@@ -96,6 +102,16 @@ def run_simulation_pipeline(
         direction_history_window_chunks=int(direction_history_window_chunks),
         direction_speaker_stale_timeout_ms=float(direction_speaker_stale_timeout_ms),
         direction_speaker_forget_timeout_ms=float(direction_speaker_forget_timeout_ms),
+        direction_focus_gain_db=(
+            float(direction_focus_gain_db)
+            if direction_focus_gain_db is not None
+            else float(default_cfg.direction_focus_gain_db)
+        ),
+        direction_non_focus_attenuation_db=(
+            float(direction_non_focus_attenuation_db)
+            if direction_non_focus_attenuation_db is not None
+            else float(default_cfg.direction_non_focus_attenuation_db)
+        ),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
         output_normalization_enabled=bool(output_normalization_enabled),
@@ -131,12 +147,41 @@ def run_simulation_pipeline(
     focus_trace: list[dict] = []
     pipe_holder: dict[str, RealtimeSpeakerPipeline] = {}
     auto_focus_state: dict[str, int | None] = {"speaker_id": None}
+    target_lock_state: dict[str, int | None] = {
+        "speaker_id": None if manual_target_speaker_id is None else int(manual_target_speaker_id)
+    }
 
     def _sink(x: np.ndarray) -> None:
         enhanced_parts.append(np.asarray(x, dtype=np.float32).reshape(-1))
         pipe = pipe_holder.get("pipe")
         if pipe is None:
             return
+        if target_lock_state["speaker_id"] is not None:
+            pipe.set_focus_control(
+                focused_speaker_ids=[int(target_lock_state["speaker_id"])],
+                user_boost_db=float(target_user_boost_db),
+            )
+        elif auto_lock_first_identified_speaker:
+            snapshot = pipe.shared_state.get_speaker_map_snapshot()
+            best_sid: int | None = None
+            best_key: tuple[int, float, float, float] | None = None
+            for sid, item in snapshot.items():
+                maturity = 1 if str(getattr(item, "identity_maturity", "unknown")) == "stable" else 0
+                active_score = float(getattr(item, "activity_confidence", 0.0))
+                conf = float(getattr(item, "confidence", 0.0))
+                ident = float(getattr(item, "identity_confidence", 0.0))
+                if maturity == 0 and conf < 0.45 and ident < 0.45:
+                    continue
+                key = (maturity, ident, conf, active_score)
+                if best_key is None or key > best_key:
+                    best_sid = int(sid)
+                    best_key = key
+            if best_sid is not None:
+                target_lock_state["speaker_id"] = int(best_sid)
+                pipe.set_focus_control(
+                    focused_speaker_ids=[int(best_sid)],
+                    user_boost_db=float(target_user_boost_db),
+                )
         if auto_focus_active_speaker:
             snapshot = pipe.shared_state.get_speaker_map_snapshot()
             best_sid: int | None = None
@@ -202,6 +247,7 @@ def run_simulation_pipeline(
                 "focused_speaker_ids": None if focus.focused_speaker_ids is None else [int(v) for v in focus.focused_speaker_ids],
                 "focused_direction_deg": None if focus.focused_direction_deg is None else float(focus.focused_direction_deg),
                 "user_boost_db": float(focus.user_boost_db),
+                "locked_target_speaker_id": None if target_lock_state["speaker_id"] is None else int(target_lock_state["speaker_id"]),
             }
         )
 
@@ -298,6 +344,12 @@ def run_simulation_pipeline(
         "direction_history_window_chunks": int(cfg.direction_history_window_chunks),
         "direction_speaker_stale_timeout_ms": float(cfg.direction_speaker_stale_timeout_ms),
         "direction_speaker_forget_timeout_ms": float(cfg.direction_speaker_forget_timeout_ms),
+        "direction_focus_gain_db": float(cfg.direction_focus_gain_db),
+        "direction_non_focus_attenuation_db": float(cfg.direction_non_focus_attenuation_db),
+        "manual_target_speaker_id": None if manual_target_speaker_id is None else int(manual_target_speaker_id),
+        "auto_lock_first_identified_speaker": bool(auto_lock_first_identified_speaker),
+        "target_user_boost_db": float(target_user_boost_db),
+        "final_locked_target_speaker_id": None if target_lock_state["speaker_id"] is None else int(target_lock_state["speaker_id"]),
     }
     if capture_trace:
         summary["speaker_map_trace"] = speaker_map_trace

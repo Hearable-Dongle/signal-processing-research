@@ -332,3 +332,23 @@ def test_fixed_speaker_benchmark_smoke_with_mock_separation(tmp_path: Path) -> N
     assert (tmp_path / "bench" / "benchmark_summary.json").exists()
     assert (tmp_path / "bench" / "speaker_timeline.json").exists()
     assert (tmp_path / "bench" / "unique_speakers_over_time.json").exists()
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_fixed_speaker_benchmark_target_first_identified_smoke(tmp_path: Path) -> None:
+    pytest.importorskip("pyroomacoustics")
+
+    summary = run_fixed_speaker_benchmark(
+        out_dir=tmp_path / "bench_target",
+        noise_scale=0.0,
+        use_mock_separation=True,
+        identity_backend="mfcc_legacy",
+        duration_sec=3.0,
+        target_first_identified_speaker=True,
+    )
+    assert summary["target_first_identified_speaker"] is True
+    assert (tmp_path / "bench_target" / "baseline" / "enhanced_fast_path.wav").exists()
+    assert (tmp_path / "bench_target" / "target_first_identified" / "enhanced_fast_path.wav").exists()
+    assert (tmp_path / "bench_target" / "visualizations" / "target_lock_over_time.png").exists()
+    target_summary = json.loads((tmp_path / "bench_target" / "target_first_identified" / "summary.json").read_text(encoding="utf-8"))
+    assert target_summary["auto_lock_first_identified_speaker"] is True
