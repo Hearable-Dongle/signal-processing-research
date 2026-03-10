@@ -144,6 +144,31 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.separation_mode).toBe("single_dominant_no_separator");
 });
 
+test("localize and beamform starts with the no-separator realtime strategy", async () => {
+  const user = userEvent.setup();
+  (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
+  (globalThis as unknown as { AudioContext: typeof AudioContext }).AudioContext = MockAudioContext as unknown as typeof AudioContext;
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ session_id: "beam123" }),
+  } as Response);
+
+  render(<App />);
+
+  await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
+  await user.selectOptions(screen.getByLabelText("Processing mode"), "localize_and_beamform");
+  expect(screen.getByLabelText("Speaker stream mode")).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Start" }));
+
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+  const startCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+    String(c[0]).includes("/api/session/start")
+  );
+  const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+  expect(body.processing_mode).toBe("localize_and_beamform");
+  expect(body.separation_mode).toBe("single_dominant_no_separator");
+});
+
 test("data collection exports raw channels for a captured set", async () => {
   const user = userEvent.setup();
   Object.defineProperty(URL, "createObjectURL", {

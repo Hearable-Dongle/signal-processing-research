@@ -67,6 +67,8 @@ export function SceneLauncher({
   const showSimulationSettings = inputSource === "simulation";
   const showLiveSettings = inputSource === "respeaker_live";
   const canStart = inputSource !== null && !isBusy;
+  const effectiveSeparationMode: SeparationMode =
+    processingMode === "localize_and_beamform" ? "single_dominant_no_separator" : separationMode;
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
@@ -143,14 +145,19 @@ export function SceneLauncher({
               <select
                 id="separation-mode"
                 aria-label="Speaker stream mode"
-                value={separationMode}
-                disabled={isBusy}
+                value={effectiveSeparationMode}
+                disabled={isBusy || processingMode === "localize_and_beamform"}
                 onChange={(e) => setSeparationMode(e.target.value as SeparationMode)}
               >
                 <option value="single_dominant_no_separator">No separator (single dominant speaker)</option>
                 <option value="auto">Auto separator</option>
                 <option value="mock">Mock separator</option>
               </select>
+              {processingMode === "localize_and_beamform" && (
+                <p className="launcher-hint">
+                  Localize and beamform uses the single-dominant no-separator path for realtime direction tracking.
+                </p>
+              )}
             </>
           )}
 
@@ -205,10 +212,10 @@ export function SceneLauncher({
             onChange={(e) => applyLatency(Number(e.target.value))}
           />
 
-          <label htmlFor="processing-mode">Beamforming mode</label>
+          <label htmlFor="processing-mode">Processing mode</label>
           <select
             id="processing-mode"
-            aria-label="Beamforming mode"
+            aria-label="Processing mode"
             value={processingMode}
             disabled={isBusy}
             onChange={(e) => onProcessingModeChange(e.target.value as ProcessingMode)}
@@ -238,7 +245,7 @@ export function SceneLauncher({
                   scenePath,
                   backgroundNoisePath,
                   backgroundNoiseGain,
-                  separationMode,
+                  separationMode: effectiveSeparationMode,
                   audioDeviceQuery,
                   monitorSource,
                   sampleRateHz,

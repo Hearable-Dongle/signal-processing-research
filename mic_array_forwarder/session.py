@@ -503,9 +503,13 @@ class DemoSession:
                     if sleep_s > 0:
                         time.sleep(sleep_s)
 
-            if self.req.separation_mode == "single_dominant_no_separator":
+            separation_mode = str(self.req.separation_mode)
+            if self.req.processing_mode == "localize_and_beamform" and separation_mode == "auto":
+                separation_mode = "single_dominant_no_separator"
+
+            if separation_mode == "single_dominant_no_separator":
                 sep = DominantSpeakerPassthroughBackend()
-            elif self.req.separation_mode == "mock":
+            elif separation_mode == "mock":
                 sep = MockSeparationBackend(n_streams=cfg.max_speakers_hint)
             else:
                 sep = build_default_backend(cfg)

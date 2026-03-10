@@ -8,6 +8,7 @@ test("mode picker gates launcher settings and latency controls invoke callback",
   const onLatency = vi.fn();
   const onKill = vi.fn();
   const onProcessingModeChange = vi.fn();
+  const onStart = vi.fn();
 
   render(
     <SceneLauncher
@@ -15,7 +16,7 @@ test("mode picker gates launcher settings and latency controls invoke callback",
       defaultScenePath="x.json"
       defaultBackgroundNoisePath="noise.wav"
       defaultBackgroundNoiseGain={0.15}
-      onStart={() => undefined}
+      onStart={onStart}
       onStop={() => undefined}
       onKillRun={onKill}
       canKillRun={true}
@@ -48,8 +49,47 @@ test("mode picker gates launcher settings and latency controls invoke callback",
   await user.click(screen.getByRole("button", { name: "Kill Current Run" }));
   expect(onKill).toHaveBeenCalledTimes(1);
 
-  await user.selectOptions(screen.getByLabelText("Beamforming mode"), "beamform_from_ground_truth");
+  await user.selectOptions(screen.getByLabelText("Processing mode"), "beamform_from_ground_truth");
   expect(onProcessingModeChange).toHaveBeenCalledWith("beamform_from_ground_truth");
+});
+
+test("localize and beamform locks speaker stream mode to no-separator", async () => {
+  const user = userEvent.setup();
+  const onStart = vi.fn();
+
+  render(
+    <SceneLauncher
+      status="idle"
+      defaultScenePath="x.json"
+      defaultBackgroundNoisePath="noise.wav"
+      defaultBackgroundNoiseGain={0.15}
+      onStart={onStart}
+      onStop={() => undefined}
+      onKillRun={() => undefined}
+      canKillRun={true}
+      onStopActiveSession={() => undefined}
+      onDownloadWav={() => undefined}
+      canDownloadWav={false}
+      latencyMs={180}
+      onLatencyMsChange={() => undefined}
+      processingMode="localize_and_beamform"
+      onProcessingModeChange={() => undefined}
+      monitorSource="processed"
+      onMonitorSourceChange={() => undefined}
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
+  expect(screen.getByLabelText("Speaker stream mode")).toHaveValue("single_dominant_no_separator");
+  expect(screen.getByLabelText("Speaker stream mode")).toBeDisabled();
+  expect(screen.getByText(/uses the single-dominant no-separator path/i)).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Start" }));
+  expect(onStart).toHaveBeenCalledWith(
+    expect.objectContaining({
+      separationMode: "single_dominant_no_separator",
+    })
+  );
 });
 
 test("live mode reveals only ReSpeaker-specific settings", async () => {
