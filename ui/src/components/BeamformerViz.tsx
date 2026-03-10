@@ -1,8 +1,9 @@
-import type { ProcessingMode, Speaker } from "../types/contracts";
+import type { BeamformingState, ProcessingMode, Speaker } from "../types/contracts";
 import { speakerColor } from "../utils/color";
 
 type Props = {
   speakers: Speaker[];
+  beamforming: BeamformingState | null;
   processingMode: ProcessingMode;
   selectedSpeakerId: number | null;
 };
@@ -16,7 +17,7 @@ function pointFor(directionDeg: number, magnitude: number): { x: number; y: numb
   };
 }
 
-export function BeamformerViz({ speakers, processingMode, selectedSpeakerId }: Props) {
+export function BeamformerViz({ speakers, beamforming, processingMode, selectedSpeakerId }: Props) {
   if (processingMode === "beamform_from_ground_truth") {
     return null;
   }
@@ -93,6 +94,22 @@ export function BeamformerViz({ speakers, processingMode, selectedSpeakerId }: P
               <span className="beamformer-weight-value">Weight {speaker.gain_weight.toFixed(2)}</span>
             </div>
           ))}
+          {beamforming?.microphone_weights?.length
+            ? beamforming.microphone_weights
+                .slice()
+                .sort((a, b) => a.mic_index - b.mic_index)
+                .map((mic) => (
+                  <div key={`mic-${mic.mic_index}`} className="beamformer-weight-item" data-testid={`beam-mic-${mic.mic_index}`}>
+                    <span className="beamformer-weight-name">Mic {mic.mic_index}</span>
+                    <span className="beamformer-weight-meta">
+                      |w| {mic.magnitude.toFixed(3)} / phase {mic.phase_degrees.toFixed(1)} deg
+                    </span>
+                    <span className="beamformer-weight-value">
+                      {mic.delay_samples === null ? beamforming.mode : `delay ${mic.delay_samples.toFixed(2)} samples`}
+                    </span>
+                  </div>
+                ))
+            : null}
         </div>
       </div>
     </div>

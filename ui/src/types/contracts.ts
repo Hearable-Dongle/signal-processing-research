@@ -23,6 +23,20 @@ export type Speaker = {
   gain_weight: number;
 };
 
+export type MicrophoneBeamformingWeight = {
+  mic_index: number;
+  magnitude: number;
+  phase_degrees: number;
+  delay_samples: number | null;
+};
+
+export type BeamformingState = {
+  timestamp_ms: number;
+  mode: string;
+  steering_direction_deg: number | null;
+  microphone_weights: MicrophoneBeamformingWeight[];
+};
+
 export type GroundTruthSpeaker = {
   source_id: number;
   direction_degrees: number;
@@ -34,6 +48,7 @@ export type SpeakerStateMessage = {
   timestamp_ms: number;
   speakers: Speaker[];
   ground_truth: GroundTruthSpeaker[];
+  beamforming?: BeamformingState | null;
 };
 
 export type MetricsMessage = {
