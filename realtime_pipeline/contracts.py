@@ -86,6 +86,10 @@ class PipelineConfig:
     # Asteroid backend defaults
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
     convtasnet_device: str = "cpu"
+    convtasnet_model_sample_rate_hz: int = 16000
+    convtasnet_input_sample_rate_hz: int = 16000
+    convtasnet_resample_mode: str = "polyphase"
+    convtasnet_expected_num_sources: int | None = None
     direction_focus_gain_db: float = 0.0
     direction_non_focus_attenuation_db: float = -14.0
     max_user_boost_db: float = 12.0
@@ -94,6 +98,16 @@ class PipelineConfig:
     identity_hold_similarity_threshold: float = 0.6
     identity_carry_forward_chunks: int = 1
     identity_confidence_decay: float = 0.92
+    identity_backend: str = "mfcc_legacy"
+    identity_speaker_embedding_model: str = "wavlm_base_plus_sv"
+    identity_speaker_embedding_device: str = "cpu"
+    identity_speaker_embedding_min_speech_ms: float = 600.0
+    identity_speaker_embedding_buffer_ms: float = 1000.0
+    identity_speaker_embedding_update_interval_chunks: int = 2
+    identity_speaker_embedding_match_threshold: float = 0.72
+    identity_speaker_embedding_merge_threshold: float = 0.82
+    identity_speaker_embedding_margin: float = 0.05
+    identity_provisional_speaker_timeout_chunks: int = 6
     direction_transition_penalty_deg: float = 22.0
     direction_min_confidence_for_switch: float = 0.35
     direction_hold_confidence_decay: float = 0.9

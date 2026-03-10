@@ -109,3 +109,77 @@ def test_weak_evidence_carries_forward_recent_assignment():
 
     assert out1.stream_to_speaker[0] == sid0
     assert 0 in out1.debug["held_streams"]
+
+
+class _FakeSessionEmbedder:
+    def __init__(self, mapping: dict[int, np.ndarray]) -> None:
+        self._mapping = {int(k): np.asarray(v, dtype=np.float32) for k, v in mapping.items()}
+
+    def embed(self, audio: np.ndarray, sample_rate_hz: int) -> np.ndarray | None:
+        x = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if x.size == 0:
+            return None
+        key = int(np.round(float(np.mean(x)) * 1000.0))
+        return self._mapping.get(key)
+
+
+def test_session_backend_merges_duplicate_voiceprints_after_support():
+    cfg = IdentityConfig(
+        backend="speaker_embed_session",
+        chunk_duration_ms=200,
+        speaker_embedding_min_speech_ms=400.0,
+        speaker_embedding_update_interval_chunks=1,
+        speaker_embedding_match_threshold=0.6,
+        speaker_embedding_merge_threshold=0.7,
+        speaker_embedding_margin=0.01,
+        provisional_speaker_timeout_chunks=8,
+    )
+    voiceprint = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    grouper = SpeakerIdentityGrouper(
+        cfg,
+        session_embedder=_FakeSessionEmbedder(
+            {
+                100: voiceprint,
+                200: voiceprint,
+            }
+        ),
+    )
+
+    a = np.full(3200, 0.100, dtype=np.float64)
+    b = np.full(3200, 0.200, dtype=np.float64)
+
+    out0 = grouper.update(IdentityChunkInput(chunk_id=0, timestamp_ms=0.0, sample_rate_hz=16000, streams=[a]))
+    sid0 = out0.stream_to_speaker[0]
+    assert sid0 is not None
+
+    out1 = grouper.update(IdentityChunkInput(chunk_id=1, timestamp_ms=200.0, sample_rate_hz=16000, streams=[a]))
+    assert sid0 in out1.debug["promoted_speakers"] or sid0 in grouper.get_state()
+
+    out2 = grouper.update(IdentityChunkInput(chunk_id=2, timestamp_ms=400.0, sample_rate_hz=16000, streams=[b]))
+    assert out2.stream_to_speaker[0] == sid0
+
+
+def test_session_backend_scales_to_five_distinct_speakers_without_reuse():
+    cfg = IdentityConfig(
+        backend="speaker_embed_session",
+        max_speakers=5,
+        speaker_embedding_min_speech_ms=200.0,
+        speaker_embedding_update_interval_chunks=1,
+        speaker_embedding_match_threshold=0.6,
+        speaker_embedding_merge_threshold=0.8,
+        speaker_embedding_margin=0.01,
+    )
+    mapping = {
+        100: np.array([1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        110: np.array([0.0, 1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        120: np.array([0.0, 0.0, 1.0, 0.0, 0.0], dtype=np.float32),
+        130: np.array([0.0, 0.0, 0.0, 1.0, 0.0], dtype=np.float32),
+        140: np.array([0.0, 0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+    }
+    grouper = SpeakerIdentityGrouper(cfg, session_embedder=_FakeSessionEmbedder(mapping))
+    streams = [np.full(3200, k / 1000.0, dtype=np.float64) for k in [100, 110, 120, 130, 140]]
+
+    out = grouper.update(IdentityChunkInput(chunk_id=0, timestamp_ms=0.0, sample_rate_hz=16000, streams=streams))
+    ids = [out.stream_to_speaker[i] for i in range(5)]
+    assert all(sid is not None for sid in ids)
+    assert len(set(ids)) == 5

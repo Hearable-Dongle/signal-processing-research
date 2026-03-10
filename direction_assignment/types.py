@@ -28,6 +28,8 @@ class SpeakerDirectionState:
     hold_count: int = 0
     stale_updates: int = 0
     last_raw_direction_deg: float | None = None
+    velocity_deg_per_chunk: float = 0.0
+    recent_direction_history_deg: tuple[float, ...] = ()
 
 
 @dataclass

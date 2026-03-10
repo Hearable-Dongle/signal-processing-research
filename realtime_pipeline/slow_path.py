@@ -39,12 +39,22 @@ class SlowPathWorker(threading.Thread):
             IdentityConfig(
                 sample_rate_hz=config.sample_rate_hz,
                 chunk_duration_ms=config.slow_chunk_ms,
+                backend=config.identity_backend,
                 max_speakers=config.max_speakers_hint,
                 continuity_bonus=config.identity_continuity_bonus,
                 switch_penalty=config.identity_switch_penalty,
                 hold_similarity_threshold=config.identity_hold_similarity_threshold,
                 carry_forward_chunks=config.identity_carry_forward_chunks,
                 confidence_decay=config.identity_confidence_decay,
+                speaker_embedding_model=config.identity_speaker_embedding_model,
+                speaker_embedding_device=config.identity_speaker_embedding_device,
+                speaker_embedding_min_speech_ms=config.identity_speaker_embedding_min_speech_ms,
+                speaker_embedding_buffer_ms=config.identity_speaker_embedding_buffer_ms,
+                speaker_embedding_update_interval_chunks=config.identity_speaker_embedding_update_interval_chunks,
+                speaker_embedding_match_threshold=config.identity_speaker_embedding_match_threshold,
+                speaker_embedding_merge_threshold=config.identity_speaker_embedding_merge_threshold,
+                speaker_embedding_margin=config.identity_speaker_embedding_margin,
+                provisional_speaker_timeout_chunks=config.identity_provisional_speaker_timeout_chunks,
             )
         )
         self._direction = DirectionAssignmentEngine(
