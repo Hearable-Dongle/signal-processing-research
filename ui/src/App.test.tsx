@@ -72,8 +72,17 @@ test("speaker interaction emits select and adjust messages", async () => {
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
+  expect(screen.getByLabelText("Speaker stream mode")).toHaveValue("single_dominant_no_separator");
   await user.click(screen.getByRole("button", { name: "Start" }));
   await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
+
+  const startCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+    String(c[0]).includes("/api/session/start")
+  );
+  expect(startCall).toBeTruthy();
+  expect(JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}")).separation_mode).toBe(
+    "single_dominant_no_separator"
+  );
 
   const ws = MockWebSocket.instances[0];
   ws.onmessage?.({
@@ -132,6 +141,7 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.audio_device_query).toBe("USB Mic");
   expect(body.sample_rate_hz).toBe(48000);
   expect(body.channel_map).toEqual([0, 1, 2, 3]);
+  expect(body.separation_mode).toBe("single_dominant_no_separator");
 });
 
 test("data collection exports raw channels for a captured set", async () => {

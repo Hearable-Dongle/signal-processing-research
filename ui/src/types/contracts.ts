@@ -1,5 +1,7 @@
 export const SCHEMA_VERSION = "v1" as const;
 
+export type SeparationMode = "auto" | "mock" | "single_dominant_no_separator";
+
 export type ProcessingMode =
   | "specific_speaker_enhancement"
   | "localize_and_beamform"

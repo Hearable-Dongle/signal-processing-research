@@ -16,7 +16,7 @@ import numpy as np
 from realtime_pipeline.catchup_metrics import compute_catchup_metrics
 from realtime_pipeline.contracts import PipelineConfig
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
-from realtime_pipeline.separation_backends import MockSeparationBackend, build_default_backend
+from realtime_pipeline.separation_backends import DominantSpeakerPassthroughBackend, MockSeparationBackend, build_default_backend
 from simulation.simulation_config import SimulationConfig, SimulationSource
 from simulation.simulator import run_simulation
 from simulation.target_policy import iter_target_source_indices
@@ -503,7 +503,9 @@ class DemoSession:
                     if sleep_s > 0:
                         time.sleep(sleep_s)
 
-            if self.req.separation_mode == "mock":
+            if self.req.separation_mode == "single_dominant_no_separator":
+                sep = DominantSpeakerPassthroughBackend()
+            elif self.req.separation_mode == "mock":
                 sep = MockSeparationBackend(n_streams=cfg.max_speakers_hint)
             else:
                 sep = build_default_backend(cfg)

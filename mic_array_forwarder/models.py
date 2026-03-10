@@ -21,7 +21,7 @@ class SessionStartRequest(BaseModel):
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4
-    separation_mode: Literal["auto", "mock"] = "auto"
+    separation_mode: Literal["auto", "mock", "single_dominant_no_separator"] = "auto"
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
     convtasnet_model_sample_rate_hz: int = 16000
     convtasnet_input_sample_rate_hz: int = 16000

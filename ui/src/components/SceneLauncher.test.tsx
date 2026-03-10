@@ -38,6 +38,7 @@ test("mode picker gates launcher settings and latency controls invoke callback",
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
 
   const slider = screen.getByLabelText("Playback latency (ms)");
+  expect(screen.getByLabelText("Speaker stream mode")).toHaveValue("single_dominant_no_separator");
   await user.clear(screen.getByLabelText("Playback latency number"));
   await user.type(screen.getByLabelText("Playback latency number"), "240");
   await user.click(slider);

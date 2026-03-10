@@ -214,6 +214,7 @@ export function RealtimeDemoPage({
       scenePath,
       backgroundNoisePath,
       backgroundNoiseGain,
+      separationMode,
       audioDeviceQuery,
       monitorSource: nextMonitorSource,
       sampleRateHz,
@@ -238,7 +239,7 @@ export function RealtimeDemoPage({
         body: JSON.stringify({
           input_source: inputSource,
           scene_config_path: scenePath,
-          separation_mode: "mock",
+          separation_mode: separationMode,
           processing_mode: processingMode,
           monitor_source: nextMonitorSource,
           sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,

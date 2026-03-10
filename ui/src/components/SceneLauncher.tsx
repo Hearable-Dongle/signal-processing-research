@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { MonitorSource, ProcessingMode } from "../types/contracts";
+import type { MonitorSource, ProcessingMode, SeparationMode } from "../types/contracts";
 
 export type InputSource = "simulation" | "respeaker_live";
 
@@ -9,6 +9,7 @@ export type SessionLaunchConfig = {
   scenePath: string;
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
+  separationMode: SeparationMode;
   audioDeviceQuery: string;
   monitorSource: MonitorSource;
   sampleRateHz: number;
@@ -58,6 +59,7 @@ export function SceneLauncher({
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
+  const [separationMode, setSeparationMode] = useState<SeparationMode>("single_dominant_no_separator");
   const [audioDeviceQuery, setAudioDeviceQuery] = useState("ReSpeaker");
   const [sampleRateHz, setSampleRateHz] = useState(48000);
   const [channelMap, setChannelMap] = useState("0,1,2,3");
@@ -137,6 +139,18 @@ export function SceneLauncher({
                 value={backgroundNoiseGain}
                 onChange={(e) => setBackgroundNoiseGain(Math.max(0, Math.min(2, Number(e.target.value))))}
               />
+              <label htmlFor="separation-mode">Speaker stream mode</label>
+              <select
+                id="separation-mode"
+                aria-label="Speaker stream mode"
+                value={separationMode}
+                disabled={isBusy}
+                onChange={(e) => setSeparationMode(e.target.value as SeparationMode)}
+              >
+                <option value="single_dominant_no_separator">No separator (single dominant speaker)</option>
+                <option value="auto">Auto separator</option>
+                <option value="mock">Mock separator</option>
+              </select>
             </>
           )}
 
@@ -224,6 +238,7 @@ export function SceneLauncher({
                   scenePath,
                   backgroundNoisePath,
                   backgroundNoiseGain,
+                  separationMode,
                   audioDeviceQuery,
                   monitorSource,
                   sampleRateHz,
