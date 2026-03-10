@@ -12,8 +12,13 @@ from mic_array_forwarder.models import (
 
 def test_models_roundtrip_and_schema_version() -> None:
     req = SessionStartRequest(scene_config_path="x.json")
+    assert req.algorithm_mode == "single_dominant_no_separator"
     assert req.background_noise_audio_path is None
     assert req.background_noise_gain == 0.15
+    assert req.use_ground_truth_location is False
+    assert req.use_ground_truth_speaker_sources is False
+    assert req.localization_hop_ms == 10
+    assert req.localization_window_ms == 160
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
     assert req.localization_backend == "weighted_srp_dp"

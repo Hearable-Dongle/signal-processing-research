@@ -9,11 +9,12 @@ import { SpeakerControlPopover } from "./SpeakerControlPopover";
 import { SpeakerStage } from "./SpeakerStage";
 import { WaveformTimeline } from "./WaveformTimeline";
 import {
+  type BeamformingState,
   SCHEMA_VERSION,
+  type AlgorithmMode,
   type GroundTruthSpeaker,
   type MetricsMessage,
   type MonitorSource,
-  type ProcessingMode,
   type ServerMessage,
   type Speaker,
 } from "../types/contracts";
@@ -88,11 +89,23 @@ function apiUrl(path: string): string {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
+async function fetchSessionWav(path: string): Promise<Blob | null> {
+  try {
+    const resp = await fetch(apiUrl(path));
+    if (!resp.ok) {
+      return null;
+    }
+    return await resp.blob();
+  } catch {
+    return null;
+  }
+}
+
 type Props = {
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
   defaultBackgroundNoiseGain: number;
-  defaultProcessingMode: ProcessingMode;
+  defaultAlgorithmMode: AlgorithmMode;
 };
 
 const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
@@ -111,12 +124,13 @@ export function RealtimeDemoPage({
   defaultScenePath,
   defaultBackgroundNoisePath,
   defaultBackgroundNoiseGain,
-  defaultProcessingMode,
+  defaultAlgorithmMode,
 }: Props) {
   const [status, setStatus] = useState("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [groundTruth, setGroundTruth] = useState<GroundTruthSpeaker[]>([]);
+  const [beamforming, setBeamforming] = useState<BeamformingState | null>(null);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<number | null>(null);
   const [gainBySpeaker, setGainBySpeaker] = useState<Record<number, number>>({});
   const [metrics, setMetrics] = useState<MetricsMessage | null>(null);
@@ -128,7 +142,7 @@ export function RealtimeDemoPage({
   const [metricsExpanded, setMetricsExpanded] = useState(true);
   const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
   const [isOutputPlaybackPaused, setIsOutputPlaybackPaused] = useState(false);
-  const [processingMode, setProcessingMode] = useState<ProcessingMode>(defaultProcessingMode);
+  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>(defaultAlgorithmMode);
   const [monitorSource, setMonitorSource] = useState<MonitorSource>("processed");
   const [activePlaybackSource, setActivePlaybackSource] = useState<PlaybackSource | null>(null);
   const [activeInputSource, setActiveInputSource] = useState<SessionLaunchConfig["inputSource"]>("simulation");
@@ -140,6 +154,30 @@ export function RealtimeDemoPage({
   const rawMixedTotalSamplesRef = useRef(0);
   const outputPlaybackRef = useRef<HTMLAudioElement | null>(null);
   const outputPlaybackUrlRef = useRef<string | null>(null);
+
+  async function refreshStoredWaveforms(nextSessionId: string, inputSource: SessionLaunchConfig["inputSource"]): Promise<void> {
+    const processedBlob = await fetchSessionWav(`/api/session/${nextSessionId}/processed-wav`);
+    if (processedBlob) {
+      const parsed = parsePcm16MonoWav(await processedBlob.arrayBuffer());
+      if (parsed) {
+        totalSamplesRef.current = parsed.samples.length;
+        setWaveformBins(computeWaveformBinsFromPcm16(parsed.samples, WAVEFORM_BINS));
+        setAudioSampleRateHz(parsed.sampleRateHz);
+      }
+    }
+
+    const rawBlob = await fetchSessionWav(`/api/session/${nextSessionId}/raw-mix-wav`);
+    if (rawBlob) {
+      const parsed = parsePcm16MonoWav(await rawBlob.arrayBuffer());
+      if (parsed) {
+        rawMixedTotalSamplesRef.current = parsed.samples.length;
+        setRawWaveformBins(computeWaveformBinsFromPcm16(parsed.samples, WAVEFORM_BINS));
+        if (inputSource !== "respeaker_live") {
+          setAudioSampleRateHz(parsed.sampleRateHz);
+        }
+      }
+    }
+  }
 
   function stopOutputPlayback(): void {
     const player = outputPlaybackRef.current;
@@ -163,6 +201,7 @@ export function RealtimeDemoPage({
     setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setSelectedSpeakerId(null);
     setGroundTruth([]);
+    setBeamforming(null);
     setPlayheadMs(0);
     setRawWaveformBins([]);
     rawMixedTotalSamplesRef.current = 0;
@@ -176,6 +215,7 @@ export function RealtimeDemoPage({
           if (msg.type === "speaker_state") {
             setSpeakers(msg.speakers);
             setGroundTruth(msg.ground_truth ?? []);
+            setBeamforming(msg.beamforming ?? null);
           }
           if (msg.type === "metrics") {
             setMetrics(msg);
@@ -211,9 +251,14 @@ export function RealtimeDemoPage({
   async function startSession(config: SessionLaunchConfig): Promise<void> {
     const {
       inputSource,
+      algorithmMode: nextAlgorithmMode,
+      localizationHopMs,
+      localizationWindowMs,
       scenePath,
       backgroundNoisePath,
       backgroundNoiseGain,
+      useGroundTruthLocation,
+      useGroundTruthSpeakerSources,
       audioDeviceQuery,
       monitorSource: nextMonitorSource,
       sampleRateHz,
@@ -222,6 +267,7 @@ export function RealtimeDemoPage({
     const playbackSampleRateHz = inputSource === "respeaker_live" ? sampleRateHz : DEFAULT_SAMPLE_RATE;
     setStatus("starting");
     setActiveInputSource(inputSource);
+    setAlgorithmMode(nextAlgorithmMode);
     setMonitorSource(nextMonitorSource);
     setAudioSampleRateHz(playbackSampleRateHz);
     capturedAudioRef.current = [];
@@ -236,14 +282,18 @@ export function RealtimeDemoPage({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          algorithm_mode: nextAlgorithmMode,
+          localization_hop_ms: localizationHopMs,
+          localization_window_ms: localizationWindowMs,
           input_source: inputSource,
           scene_config_path: scenePath,
-          separation_mode: "mock",
-          processing_mode: processingMode,
+          processing_mode: "specific_speaker_enhancement",
           monitor_source: nextMonitorSource,
           sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
           background_noise_audio_path: backgroundNoisePath,
           background_noise_gain: backgroundNoiseGain,
+          use_ground_truth_location: inputSource === "simulation" ? useGroundTruthLocation : undefined,
+          use_ground_truth_speaker_sources: inputSource === "simulation" ? useGroundTruthSpeakerSources : undefined,
           audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
           channel_map:
             inputSource === "respeaker_live" && channelMap.trim()
@@ -261,30 +311,15 @@ export function RealtimeDemoPage({
     }
     const payload = (await resp.json()) as { session_id: string };
     setSessionId(payload.session_id);
-    if (inputSource === "simulation") {
-      void (async () => {
-        try {
-          for (let i = 0; i < 30; i += 1) {
-            const rawResp = await fetch(apiUrl(`/api/session/${payload.session_id}/raw-mix-wav`));
-            if (rawResp.ok && typeof rawResp.arrayBuffer === "function") {
-              const parsed = parsePcm16MonoWav(await rawResp.arrayBuffer());
-              if (parsed) {
-                rawMixedTotalSamplesRef.current = parsed.samples.length;
-                setRawWaveformBins(computeWaveformBinsFromPcm16(parsed.samples, WAVEFORM_BINS));
-                setAudioSampleRateHz(parsed.sampleRateHz);
-              }
-              break;
-            }
-            if (rawResp.ok) {
-              break;
-            }
-            await new Promise((r) => setTimeout(r, 100));
-          }
-        } catch {
-          // Raw mixed waveform visualization is best-effort.
+    void (async () => {
+      for (let i = 0; i < 30; i += 1) {
+        await refreshStoredWaveforms(payload.session_id, inputSource);
+        if (totalSamplesRef.current > 0 || rawMixedTotalSamplesRef.current > 0) {
+          break;
         }
-      })();
-    }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    })();
     audioRef.current.setTargetLatencyMs(latencyMs);
     await audioRef.current.start(playbackSampleRateHz);
     setPlaybackStats(audioRef.current.getStats());
@@ -327,17 +362,11 @@ export function RealtimeDemoPage({
   }
 
   function selectSpeaker(speakerId: number): void {
-    if (processingMode !== "specific_speaker_enhancement") {
-      return;
-    }
     setSelectedSpeakerId(speakerId);
     ws.send({ schema_version: SCHEMA_VERSION, type: "select_speaker", speaker_id: speakerId });
   }
 
   function adjustSpeakerGain(speakerId: number, step: 1 | -1): void {
-    if (processingMode !== "specific_speaker_enhancement") {
-      return;
-    }
     setGainBySpeaker((prev) => {
       const current = prev[speakerId] ?? 0;
       const next = Math.max(-12, Math.min(12, current + step));
@@ -352,24 +381,25 @@ export function RealtimeDemoPage({
   }
 
   function downloadWav(): void {
-    if (!capturedAudioRef.current.length) {
-      return;
-    }
-    const blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const suffix = sessionId ? sessionId : "session";
-    a.href = url;
-    a.download = `realtime-output-${suffix}.wav`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function onProcessingModeChange(nextMode: ProcessingMode): void {
-    setProcessingMode(nextMode);
-    if (nextMode !== "specific_speaker_enhancement") {
-      setSelectedSpeakerId(null);
-    }
+    void (async () => {
+      let blob: Blob | null = null;
+      if (sessionId) {
+        blob = await fetchSessionWav(`/api/session/${sessionId}/processed-wav`);
+      }
+      if (!blob && capturedAudioRef.current.length) {
+        blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
+      }
+      if (!blob) {
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const suffix = sessionId ? sessionId : "session";
+      a.href = url;
+      a.download = `realtime-output-${suffix}.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+    })();
   }
 
   function onMonitorSourceChange(nextSource: MonitorSource): void {
@@ -398,19 +428,23 @@ export function RealtimeDemoPage({
     stopOutputPlayback();
     let blob: Blob;
     if (source === "beamformed_output") {
-      if (!capturedAudioRef.current.length) {
-        return;
+      if (sessionId) {
+        blob = await fetchSessionWav(`/api/session/${sessionId}/processed-wav`);
       }
-      blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
+      if (!blob && capturedAudioRef.current.length) {
+        blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
+      }
     } else {
-      if (!sessionId || activeInputSource !== "simulation") {
+      if (!sessionId) {
         return;
       }
-      const resp = await fetch(apiUrl(`/api/session/${sessionId}/raw-mix-wav`));
-      if (!resp.ok) {
+      blob = await fetchSessionWav(`/api/session/${sessionId}/raw-mix-wav`);
+      if (!blob) {
         return;
       }
-      blob = await resp.blob();
+    }
+    if (!blob) {
+      return;
     }
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
@@ -444,8 +478,8 @@ export function RealtimeDemoPage({
 
   const totalDurationMs = (totalSamplesRef.current / audioSampleRateHz) * 1000;
   const rawMixedDurationMs = (rawMixedTotalSamplesRef.current / audioSampleRateHz) * 1000;
-  const canPlayBeamformed = capturedAudioRef.current.length > 0;
-  const canPlayRawMixed = Boolean(sessionId) && activeInputSource === "simulation";
+  const canPlayBeamformed = Boolean(sessionId) || capturedAudioRef.current.length > 0;
+  const canPlayRawMixed = Boolean(sessionId);
 
   return (
     <main className="app-shell">
@@ -465,16 +499,15 @@ export function RealtimeDemoPage({
           canDownloadWav={capturedAudioRef.current.length > 0}
           latencyMs={latencyMs}
           onLatencyMsChange={onLatencyMsChange}
-          processingMode={processingMode}
-          onProcessingModeChange={onProcessingModeChange}
           monitorSource={monitorSource}
           onMonitorSourceChange={onMonitorSourceChange}
         />
         <SpeakerStage
           speakers={speakers}
+          beamforming={beamforming}
           groundTruth={groundTruth}
-          processingMode={processingMode}
-          selectedSpeakerId={processingMode === "specific_speaker_enhancement" ? selectedSpeakerId : null}
+          processingMode="specific_speaker_enhancement"
+          selectedSpeakerId={selectedSpeakerId}
           onSpeakerTap={selectSpeaker}
         />
         <MetricsPanel
@@ -505,7 +538,7 @@ export function RealtimeDemoPage({
         }}
       />
 
-      {processingMode === "specific_speaker_enhancement" && selectedSpeakerId !== null && (
+      {selectedSpeakerId !== null && (
         <SpeakerControlPopover
           speakerId={selectedSpeakerId}
           deltaDb={gainBySpeaker[selectedSpeakerId] ?? 0}

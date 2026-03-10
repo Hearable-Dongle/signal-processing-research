@@ -8,7 +8,7 @@ from typing import Callable
 
 import numpy as np
 
-from .contracts import FocusControlSnapshot, PipelineConfig
+from .contracts import FocusControlSnapshot, PipelineConfig, SRPPeakSnapshot
 from .fast_path import FastPathWorker
 from .separation_backends import SeparationBackend, build_default_backend
 from .shared_state import SharedPipelineState
@@ -49,6 +49,7 @@ class RealtimeSpeakerPipeline:
         frame_iterator: Iterator[np.ndarray],
         frame_sink: FrameSink | None = None,
         separation_backend: SeparationBackend | None = None,
+        srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
     ):
         self.config = config
         self._state = SharedPipelineState()
@@ -66,6 +67,7 @@ class RealtimeSpeakerPipeline:
             slow_queue=self._slow_q,
             mic_geometry_xyz=mic_geometry_xyz,
             stop_event=self._stop,
+            srp_override_provider=srp_override_provider,
         )
         self._slow = SlowPathWorker(
             config=config,

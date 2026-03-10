@@ -49,6 +49,34 @@ class DominantSpeakerPassthroughBackend:
         return [x]
 
 
+@dataclass(slots=True)
+class OracleSourceSeparationBackend:
+    """Simulation-only backend that emits true source chunks instead of separator estimates."""
+
+    source_signals: list[np.ndarray]
+    chunk_samples: int
+    hop_samples: int
+    rms_active_threshold: float = 1e-4
+    _chunk_id: int = 0
+
+    def separate(self, mono_chunk: np.ndarray, expected_speakers: int | None = None) -> list[np.ndarray]:
+        del mono_chunk, expected_speakers
+        start = int(self._chunk_id * self.hop_samples)
+        end = start + int(self.chunk_samples)
+        self._chunk_id += 1
+
+        out: list[np.ndarray] = []
+        for signal_arr in self.source_signals:
+            sig = np.asarray(signal_arr, dtype=np.float32).reshape(-1)
+            chunk = sig[start:end]
+            if chunk.shape[0] < self.chunk_samples:
+                chunk = np.pad(chunk, (0, self.chunk_samples - chunk.shape[0])).astype(np.float32, copy=False)
+            rms = float(np.sqrt(np.mean(np.square(chunk.astype(np.float64))) + 1e-12))
+            if rms >= float(self.rms_active_threshold):
+                out.append(np.asarray(chunk, dtype=np.float32, copy=False))
+        return out
+
+
 class MultispeakerModuleBackend:
     """Thin adapter over multispeaker_separation.SpeakerSeparationSystem."""
 

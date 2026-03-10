@@ -8,6 +8,13 @@ SCHEMA_VERSION = "v1"
 
 
 class SessionStartRequest(BaseModel):
+    algorithm_mode: Literal[
+        "localization_only",
+        "spatial_baseline",
+        "speaker_tracking",
+        "speaker_tracking_long_memory",
+        "single_dominant_no_separator",
+    ] = "single_dominant_no_separator"
     scene_config_path: str = ""
     input_source: Literal["simulation", "respeaker_live"] = "simulation"
     audio_device_query: str | None = None
@@ -18,10 +25,14 @@ class SessionStartRequest(BaseModel):
     channel_map: list[int] | None = None
     background_noise_audio_path: str | None = None
     background_noise_gain: float = 0.15
+    use_ground_truth_location: bool = False
+    use_ground_truth_speaker_sources: bool = False
+    localization_hop_ms: int = 10
+    localization_window_ms: int = 160
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4
-    separation_mode: Literal["auto", "mock"] = "auto"
+    separation_mode: Literal["auto", "mock", "single_dominant_no_separator"] = "auto"
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
     convtasnet_model_sample_rate_hz: int = 16000
     convtasnet_input_sample_rate_hz: int = 16000

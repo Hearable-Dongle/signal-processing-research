@@ -31,6 +31,7 @@ def run_simulation_pipeline(
     scene_config_path: str | Path,
     out_dir: str | Path,
     use_mock_separation: bool = True,
+    fast_frame_ms: int = 10,
     slow_chunk_ms: int = 200,
     slow_chunk_hop_ms: int | None = None,
     beamforming_mode: str = "mvdr_fd",
@@ -43,6 +44,7 @@ def run_simulation_pipeline(
     localization_backend: str = "weighted_srp_dp",
     tracking_mode: str = "multi_peak_v2",
     control_mode: str = "spatial_peak_mode",
+    localization_window_ms: int = 160,
     direction_long_memory_enabled: bool = True,
     direction_long_memory_window_ms: float = 60000.0,
     direction_history_window_chunks: int = 4,
@@ -72,13 +74,13 @@ def run_simulation_pipeline(
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
-    frame_ms = 10
     cfg = PipelineConfig(
         sample_rate_hz=sim_cfg.audio.fs,
-        fast_frame_ms=frame_ms,
+        fast_frame_ms=int(fast_frame_ms),
         slow_chunk_ms=int(slow_chunk_ms),
         slow_chunk_hop_ms=None if slow_chunk_hop_ms is None else int(slow_chunk_hop_ms),
         fast_path_reference_mode=str(fast_path_reference_mode),
+        localization_window_ms=int(localization_window_ms),
         convtasnet_model_name=str(convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(convtasnet_model_sample_rate_hz),
         convtasnet_input_sample_rate_hz=int(convtasnet_input_sample_rate_hz),
@@ -312,6 +314,7 @@ def run_simulation_pipeline(
         "scene_config": str(Path(scene_config_path).resolve()),
         "sample_rate_hz": cfg.sample_rate_hz,
         "duration_s": float(mic_audio.shape[0] / cfg.sample_rate_hz),
+        "fast_frame_ms": int(cfg.fast_frame_ms),
         "fast_frames": stats.fast_frames,
         "slow_chunks": stats.slow_chunks,
         "speaker_map_updates": stats.speaker_map_updates,

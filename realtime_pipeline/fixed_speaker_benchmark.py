@@ -720,7 +720,8 @@ def run_fixed_speaker_benchmark(
         )
 
     primary_summary = target_summary or run_summary
-    ground_truth = _ground_truth_timeline(duration_s=float(primary_summary["duration_s"]))
+    frame_step_ms = float(primary_summary.get("fast_frame_ms", 10.0))
+    ground_truth = _ground_truth_timeline(duration_s=float(primary_summary["duration_s"]), frame_step_ms=frame_step_ms)
     speaker_match = _plot_direction_timeline(
         out_path=visualizations_root / "speaker_directions_over_time.png",
         summary=primary_summary,

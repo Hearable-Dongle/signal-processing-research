@@ -2,12 +2,12 @@ import { useState } from "react";
 
 import { DataCollectionPage } from "./components/DataCollectionPage";
 import { RealtimeDemoPage } from "./components/RealtimeDemoPage";
-import type { ProcessingMode } from "./types/contracts";
+import type { AlgorithmMode } from "./types/contracts";
 
 const DEFAULT_SCENE = "simulation/simulations/configs/library_scene/library_k1_scene00.json";
 const DEFAULT_BACKGROUND_NOISE = "wham_noise/tr/01dc0215_0.22439_01fc0207_-0.22439sp12.wav";
 const DEFAULT_BACKGROUND_NOISE_GAIN = 0.15;
-const DEFAULT_PROCESSING_MODE: ProcessingMode = "specific_speaker_enhancement";
+const DEFAULT_ALGORITHM_MODE: AlgorithmMode = "single_dominant_no_separator";
 
 type Page = "demo" | "collection";
 
@@ -40,7 +40,7 @@ export default function App() {
           defaultScenePath={DEFAULT_SCENE}
           defaultBackgroundNoisePath={DEFAULT_BACKGROUND_NOISE}
           defaultBackgroundNoiseGain={DEFAULT_BACKGROUND_NOISE_GAIN}
-          defaultProcessingMode={DEFAULT_PROCESSING_MODE}
+          defaultAlgorithmMode={DEFAULT_ALGORITHM_MODE}
         />
       ) : (
         <DataCollectionPage />

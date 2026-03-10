@@ -1,4 +1,4 @@
-Add simulated Data Collection benchmark support and parallelize offline runs.
+Simulated beamforming benchmark workflow and UI beamformer-weight surfacing.
 
 What changed:
 - Added `beamforming.benchmark.export_simulation_to_collection` to render simulation scene configs into a Data Collection-style export with `collection.json` and per-recording `raw/channel_XXX.wav` files.
@@ -11,6 +11,10 @@ What changed:
   - `simulation/create_testing_specific_angles_scene.py`
   - `simulation/run_testing_specific_angles_eval.py`
 - Updated `simulation/README.md` with the new commands.
+- Extended the realtime demo frontend contract to carry beamforming metadata.
+- Updated the realtime page and speaker stage to keep the latest beamforming snapshot in UI state.
+- Expanded the Beamforming Weights panel to show per-microphone rows with magnitude, phase, and delay when available.
+- Added UI test coverage for the microphone-weight rows.
 
 Files:
 - `beamforming/benchmark/data_collection_benchmark.py`
@@ -18,6 +22,7 @@ Files:
 - `simulation/create_testing_specific_angles_scene.py`
 - `simulation/run_testing_specific_angles_eval.py`
 - `simulation/README.md`
+- frontend beamforming-weight UI files touched by the merge
 
 Subset run used:
 - `python -m beamforming.benchmark.export_simulation_to_collection --input-path simulation/simulations/configs/testing_specific_angles --out-dir beamforming/benchmark/testing_specific_angles_simulated_collection --scene-ids testing_specific_angles_k2_scene00 testing_specific_angles_k2_scene12 testing_specific_angles_k2_scene24 testing_specific_angles_k2_scene36 testing_specific_angles_k2_scene48 testing_specific_angles_k2_scene60 testing_specific_angles_k2_scene72 testing_specific_angles_k2_scene84`
@@ -32,4 +37,5 @@ Artifacts:
 
 Validation:
 - `python -m py_compile beamforming/benchmark/data_collection_benchmark.py beamforming/benchmark/export_simulation_to_collection.py simulation/create_testing_specific_angles_scene.py simulation/run_testing_specific_angles_eval.py`
-- Verified subset benchmark completed and emitted GT-overlaid speaker direction plots for all 8 simulated recordings.
+- `npm test -- --run src/components/SpeakerStage.test.tsx`
+- `npm test -- --run src/App.test.tsx`

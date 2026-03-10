@@ -1,14 +1,19 @@
 import { useState } from "react";
 
-import type { MonitorSource, ProcessingMode } from "../types/contracts";
+import type { AlgorithmMode, MonitorSource } from "../types/contracts";
 
 export type InputSource = "simulation" | "respeaker_live";
 
 export type SessionLaunchConfig = {
   inputSource: InputSource;
+  algorithmMode: AlgorithmMode;
+  localizationHopMs: number;
+  localizationWindowMs: number;
   scenePath: string;
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
+  useGroundTruthLocation: boolean;
+  useGroundTruthSpeakerSources: boolean;
   audioDeviceQuery: string;
   monitorSource: MonitorSource;
   sampleRateHz: number;
@@ -29,11 +34,17 @@ type Props = {
   canDownloadWav: boolean;
   latencyMs: number;
   onLatencyMsChange: (latencyMs: number) => void;
-  processingMode: ProcessingMode;
-  onProcessingModeChange: (mode: ProcessingMode) => void;
   monitorSource: MonitorSource;
   onMonitorSourceChange: (source: MonitorSource) => void;
 };
+
+const ALGORITHM_OPTIONS: Array<{ value: AlgorithmMode; label: string }> = [
+  { value: "localization_only", label: "Localization only" },
+  { value: "spatial_baseline", label: "Spatial baseline" },
+  { value: "speaker_tracking", label: "Speaker tracking" },
+  { value: "speaker_tracking_long_memory", label: "Speaker tracking + long memory" },
+  { value: "single_dominant_no_separator", label: "Single dominant no-separator" },
+];
 
 export function SceneLauncher({
   status,
@@ -49,15 +60,18 @@ export function SceneLauncher({
   canDownloadWav,
   latencyMs,
   onLatencyMsChange,
-  processingMode,
-  onProcessingModeChange,
   monitorSource,
   onMonitorSourceChange,
 }: Props) {
   const [inputSource, setInputSource] = useState<InputSource | null>(null);
+  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>("single_dominant_no_separator");
+  const [localizationHopMs, setLocalizationHopMs] = useState(10);
+  const [localizationWindowMs, setLocalizationWindowMs] = useState(160);
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
+  const [useGroundTruthLocation, setUseGroundTruthLocation] = useState(false);
+  const [useGroundTruthSpeakerSources, setUseGroundTruthSpeakerSources] = useState(false);
   const [audioDeviceQuery, setAudioDeviceQuery] = useState("ReSpeaker");
   const [sampleRateHz, setSampleRateHz] = useState(48000);
   const [channelMap, setChannelMap] = useState("0,1,2,3");
@@ -65,6 +79,8 @@ export function SceneLauncher({
   const showSimulationSettings = inputSource === "simulation";
   const showLiveSettings = inputSource === "respeaker_live";
   const canStart = inputSource !== null && !isBusy;
+  const supportsGroundTruthSpeakerSources =
+    algorithmMode !== "localization_only" && algorithmMode !== "single_dominant_no_separator";
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
@@ -108,6 +124,54 @@ export function SceneLauncher({
         <p className="launcher-hint">Choose a mode to reveal the relevant session settings.</p>
       ) : (
         <div className="launcher-settings">
+          <label htmlFor="algorithm-mode">Algorithm mode</label>
+          <select
+            id="algorithm-mode"
+            aria-label="Algorithm mode"
+            value={algorithmMode}
+            disabled={isBusy}
+            onChange={(e) => setAlgorithmMode(e.target.value as AlgorithmMode)}
+          >
+            {ALGORITHM_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <label htmlFor="localization-hop-ms">Localization hop (ms)</label>
+          <input
+            id="localization-hop-ms"
+            aria-label="Localization hop (ms)"
+            type="number"
+            min={10}
+            max={500}
+            step={10}
+            value={localizationHopMs}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextHop = Math.max(10, Math.min(500, Number(e.target.value) || 10));
+              setLocalizationHopMs(nextHop);
+              setLocalizationWindowMs((prev) => Math.max(prev, nextHop));
+            }}
+          />
+
+          <label htmlFor="localization-window-ms">Localization window (ms)</label>
+          <input
+            id="localization-window-ms"
+            aria-label="Localization window (ms)"
+            type="number"
+            min={20}
+            max={2000}
+            step={10}
+            value={localizationWindowMs}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextWindow = Math.min(2000, Number(e.target.value) || 160);
+              setLocalizationWindowMs(Math.max(Math.max(20, localizationHopMs), nextWindow));
+            }}
+          />
+
           {showSimulationSettings && (
             <>
               <label htmlFor="scene">Scene config path</label>
@@ -137,6 +201,31 @@ export function SceneLauncher({
                 value={backgroundNoiseGain}
                 onChange={(e) => setBackgroundNoiseGain(Math.max(0, Math.min(2, Number(e.target.value))))}
               />
+              <label className="checkbox-row" htmlFor="gt-location">
+                <input
+                  id="gt-location"
+                  aria-label="Use ground truth location"
+                  type="checkbox"
+                  checked={useGroundTruthLocation}
+                  disabled={isBusy}
+                  onChange={(e) => setUseGroundTruthLocation(e.target.checked)}
+                />
+                <span>Location: use ground truth</span>
+              </label>
+              <label className="checkbox-row" htmlFor="gt-speaker-sources">
+                <input
+                  id="gt-speaker-sources"
+                  aria-label="Use ground truth speaker sources"
+                  type="checkbox"
+                  checked={useGroundTruthSpeakerSources}
+                  disabled={isBusy || !supportsGroundTruthSpeakerSources}
+                  onChange={(e) => setUseGroundTruthSpeakerSources(e.target.checked)}
+                />
+                <span>Speaker sources: use ground truth</span>
+              </label>
+              {!supportsGroundTruthSpeakerSources && (
+                <p className="launcher-hint">This algorithm does not use separate speaker-source streams.</p>
+              )}
             </>
           )}
 
@@ -191,19 +280,6 @@ export function SceneLauncher({
             onChange={(e) => applyLatency(Number(e.target.value))}
           />
 
-          <label htmlFor="processing-mode">Beamforming mode</label>
-          <select
-            id="processing-mode"
-            aria-label="Beamforming mode"
-            value={processingMode}
-            disabled={isBusy}
-            onChange={(e) => onProcessingModeChange(e.target.value as ProcessingMode)}
-          >
-            <option value="specific_speaker_enhancement">Specific speaker enhancement</option>
-            <option value="localize_and_beamform">Localize and beamform</option>
-            <option value="beamform_from_ground_truth">Beamform from ground truth</option>
-          </select>
-
           <label htmlFor="monitor-source">Monitor output</label>
           <select
             id="monitor-source"
@@ -221,9 +297,15 @@ export function SceneLauncher({
                 inputSource &&
                 onStart({
                   inputSource,
+                  algorithmMode,
+                  localizationHopMs,
+                  localizationWindowMs,
                   scenePath,
                   backgroundNoisePath,
                   backgroundNoiseGain,
+                  useGroundTruthLocation: showSimulationSettings ? useGroundTruthLocation : false,
+                  useGroundTruthSpeakerSources:
+                    showSimulationSettings && supportsGroundTruthSpeakerSources ? useGroundTruthSpeakerSources : false,
                   audioDeviceQuery,
                   monitorSource,
                   sampleRateHz,
