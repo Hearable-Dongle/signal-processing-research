@@ -105,6 +105,31 @@ Artifacts include:
 - `sanity_checks.csv`
 - waveform/spectrogram/ranking plots under `visualizations/`
 
+## Data Collection Offline Benchmark
+
+Run the realtime beamforming stack over raw multichannel recordings exported from the Data Collection UI:
+
+```bash
+python -m beamforming.benchmark.data_collection_benchmark \
+  --input-path path/to/dataset-set-001.zip \
+  --out-dir beamforming/benchmark/data_collection_run \
+  --methods mvdr_fd
+```
+
+You can pass either:
+- a Data Collection zip export
+- an extracted export root containing `collection.json`
+- a specific recording directory under `recordings/<recordingId>`
+- a specific `raw/` WAV directory
+
+Artifacts include:
+- `scene_metrics.csv`
+- `summary_by_method.csv`
+- per-recording method outputs under `runs/<recording>/<method>/`
+- waveform, spectrogram, and speaker-direction plots under each run's `visualizations/`
+
+Because Data Collection recordings do not include clean-reference target speech, this utility reports runtime and blind/relative diagnostics rather than SI-SDR/STOI/SII.
+
 Run only one scene family:
 
 ```bash
