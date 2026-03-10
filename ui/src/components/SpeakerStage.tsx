@@ -21,6 +21,7 @@ function polarToXY(directionDeg: number): { x: number; y: number } {
 
 export function SpeakerStage({ speakers, beamforming, groundTruth, processingMode, selectedSpeakerId, onSpeakerTap }: Props) {
   const activeSpeakers = speakers.filter((speaker) => speaker.active);
+  const displayedSpeakers = processingMode === "localize_and_beamform" ? activeSpeakers : speakers;
   const showTrackedRoom = processingMode !== "beamform_from_ground_truth";
   const showGroundTruthBlock = true;
 
@@ -29,9 +30,12 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
       <h2>Speaker Stage</h2>
       {showTrackedRoom && (
         <>
+          <p className="launcher-hint" data-testid="active-doa-count">
+            Active DOAs: {displayedSpeakers.length}
+          </p>
           <div className="room" data-testid="speaker-stage">
             <div className="mic-center" />
-            {(processingMode === "localize_and_beamform" ? activeSpeakers : speakers).map((speaker) => {
+            {displayedSpeakers.map((speaker) => {
               const { x, y } = polarToXY(speaker.direction_degrees);
               const selected = selectedSpeakerId === speaker.speaker_id;
               if (processingMode === "specific_speaker_enhancement") {

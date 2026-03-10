@@ -43,6 +43,7 @@ test("speaker tap opens popover", async () => {
   expect(screen.getByTestId("ground-truth-stage")).toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();
   expect(screen.getByTestId("beamformer-viz")).toBeInTheDocument();
+  expect(screen.getByTestId("active-doa-count")).toHaveTextContent("Active DOAs: 1");
   expect(screen.getByTestId("beam-weight-4")).toHaveTextContent("Weight 1.00");
   expect(screen.getByTestId("beam-mic-0")).toHaveTextContent("|w| 0.250");
 
@@ -82,6 +83,7 @@ test("localize and beamform shows active speakers only without numbered speaker 
   );
 
   expect(screen.getByTestId("speaker-stage")).toBeInTheDocument();
+  expect(screen.getByTestId("active-doa-count")).toHaveTextContent("Active DOAs: 1");
   expect(screen.getByTestId("active-speaker-1")).toBeInTheDocument();
   expect(screen.queryByTestId("active-speaker-2")).not.toBeInTheDocument();
   expect(screen.queryByTestId("speaker-1")).not.toBeInTheDocument();
@@ -113,6 +115,7 @@ test("beamform from ground truth shows ground truth only", () => {
   );
 
   expect(screen.queryByTestId("speaker-stage")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("active-doa-count")).not.toBeInTheDocument();
   expect(screen.queryByTestId("beamformer-viz")).not.toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-stage")).toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();

@@ -28,6 +28,7 @@ from simulation.target_policy import iter_target_source_indices
 
 from .mode_presets import (
     METHOD_LOCALIZATION_ONLY,
+    get_localization_smoothing_preset,
     get_simulation_algorithm_preset,
 )
 from .models import (
@@ -135,6 +136,27 @@ def _inject_background_noise_source(
             classification="noise",
         )
     )
+
+
+def _stable_ui_speakers(
+    speaker_map: list[Any],
+    *,
+    min_confidence: float,
+) -> list[SpeakerStateItem]:
+    speakers = [
+        SpeakerStateItem(
+            speaker_id=int(v.speaker_id),
+            direction_degrees=float(v.direction_degrees),
+            confidence=float(v.confidence),
+            active=bool(v.active),
+            activity_confidence=float(v.activity_confidence),
+            gain_weight=float(v.gain_weight),
+        )
+        for v in speaker_map
+        if float(v.confidence) >= float(min_confidence) and (bool(v.active) or float(v.gain_weight) > 0.05)
+    ]
+    speakers.sort(key=lambda item: (-float(item.gain_weight), -float(item.confidence), int(item.speaker_id)))
+    return speakers
 
 
 class DemoSession:
@@ -357,17 +379,11 @@ class DemoSession:
         if pipe is None:
             return
         speaker_map = pipe.shared_state.get_speaker_map_snapshot()
-        speakers = [
-            SpeakerStateItem(
-                speaker_id=int(v.speaker_id),
-                direction_degrees=float(v.direction_degrees),
-                confidence=float(v.confidence),
-                active=bool(v.active),
-                activity_confidence=float(v.activity_confidence),
-                gain_weight=float(v.gain_weight),
-            )
-            for v in speaker_map.values()
-        ]
+        smoothing = get_localization_smoothing_preset(self.req.localization_smoothing)
+        speakers = _stable_ui_speakers(
+            list(speaker_map.values()),
+            min_confidence=float(smoothing.live_display_min_confidence),
+        )
         with self._lock:
             ground_truth = list(self._ground_truth_speakers)
         msg = SpeakerStateMessage(timestamp_ms=_now_ms(), speakers=speakers, ground_truth=ground_truth).model_dump()
@@ -503,6 +519,7 @@ class DemoSession:
             )
             mic_audio, mic_pos, source_signals = run_simulation(sim_cfg)
             algorithm = get_simulation_algorithm_preset(self.req.algorithm_mode)
+            smoothing = get_localization_smoothing_preset(self.req.localization_smoothing)
             speech_source_ids = _speech_source_indices(sim_cfg)
             doa_by_source_idx = {int(item["source_id"]): float(item["direction_degrees"]) for item in _ground_truth_from_scene(sim_cfg)}
             with self._lock:
@@ -542,6 +559,23 @@ class DemoSession:
                 control_mode=str(algorithm.control_mode),
                 fast_path_reference_mode=str(algorithm.fast_path_reference_mode),
                 localization_window_ms=max(int(self.req.localization_window_ms), max(10, int(self.req.localization_hop_ms))),
+                srp_peak_min_score=float(smoothing.srp_peak_min_score),
+                localization_min_relative_peak_score=float(smoothing.localization_min_relative_peak_score),
+                localization_min_peak_contrast=float(smoothing.localization_min_peak_contrast),
+                localization_max_assoc_distance_deg=float(smoothing.localization_max_assoc_distance_deg),
+                localization_track_hold_frames=int(smoothing.localization_track_hold_frames),
+                localization_track_kill_frames=int(smoothing.localization_track_kill_frames),
+                localization_new_track_min_confidence=float(smoothing.localization_new_track_min_confidence),
+                localization_track_confidence_decay=float(smoothing.localization_track_confidence_decay),
+                localization_velocity_alpha=float(smoothing.localization_velocity_alpha),
+                localization_angle_alpha=float(smoothing.localization_angle_alpha),
+                direction_stable_confidence_threshold=float(smoothing.direction_stable_confidence_threshold),
+                direction_large_change_persist_chunks=int(smoothing.direction_large_change_persist_chunks),
+                direction_history_window_chunks=int(smoothing.direction_history_window_chunks),
+                speaker_map_min_confidence_for_refresh=float(smoothing.speaker_map_min_confidence_for_refresh),
+                speaker_map_hold_ms=float(smoothing.speaker_map_hold_ms),
+                doa_ema_alpha=float(smoothing.doa_ema_alpha),
+                doa_max_step_deg_per_frame=float(smoothing.doa_max_step_deg_per_frame),
                 direction_long_memory_enabled=bool(algorithm.direction_long_memory_enabled),
                 direction_long_memory_window_ms=float(algorithm.direction_long_memory_window_ms),
                 output_normalization_enabled=bool(self.req.output_normalization_enabled),

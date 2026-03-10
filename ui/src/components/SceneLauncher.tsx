@@ -9,6 +9,7 @@ export type SessionLaunchConfig = {
   algorithmMode: AlgorithmMode;
   localizationHopMs: number;
   localizationWindowMs: number;
+  localizationSmoothing: number;
   scenePath: string;
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
@@ -67,6 +68,7 @@ export function SceneLauncher({
   const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>("single_dominant_no_separator");
   const [localizationHopMs, setLocalizationHopMs] = useState(10);
   const [localizationWindowMs, setLocalizationWindowMs] = useState(160);
+  const [localizationSmoothing, setLocalizationSmoothing] = useState(0.5);
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
@@ -169,6 +171,22 @@ export function SceneLauncher({
             onChange={(e) => {
               const nextWindow = Math.min(2000, Number(e.target.value) || 160);
               setLocalizationWindowMs(Math.max(Math.max(20, localizationHopMs), nextWindow));
+            }}
+          />
+
+          <label htmlFor="localization-smoothing">Localization smoothing (0-1)</label>
+          <input
+            id="localization-smoothing"
+            aria-label="Localization smoothing (0-1)"
+            type="number"
+            min={0}
+            max={1}
+            step={0.05}
+            value={localizationSmoothing}
+            disabled={isBusy}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              setLocalizationSmoothing(Math.max(0, Math.min(1, Number.isFinite(next) ? next : 0.5)));
             }}
           />
 
@@ -300,6 +318,7 @@ export function SceneLauncher({
                   algorithmMode,
                   localizationHopMs,
                   localizationWindowMs,
+                  localizationSmoothing,
                   scenePath,
                   backgroundNoisePath,
                   backgroundNoiseGain,

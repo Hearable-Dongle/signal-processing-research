@@ -254,6 +254,7 @@ export function RealtimeDemoPage({
       algorithmMode: nextAlgorithmMode,
       localizationHopMs,
       localizationWindowMs,
+      localizationSmoothing,
       scenePath,
       backgroundNoisePath,
       backgroundNoiseGain,
@@ -285,6 +286,7 @@ export function RealtimeDemoPage({
           algorithm_mode: nextAlgorithmMode,
           localization_hop_ms: localizationHopMs,
           localization_window_ms: localizationWindowMs,
+          localization_smoothing: localizationSmoothing,
           input_source: inputSource,
           scene_config_path: scenePath,
           processing_mode: "specific_speaker_enhancement",
@@ -426,7 +428,7 @@ export function RealtimeDemoPage({
       return;
     }
     stopOutputPlayback();
-    let blob: Blob;
+    let blob: Blob | null = null;
     if (source === "beamformed_output") {
       if (sessionId) {
         blob = await fetchSessionWav(`/api/session/${sessionId}/processed-wav`);

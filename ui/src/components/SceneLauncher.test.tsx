@@ -39,6 +39,7 @@ test("mode picker gates launcher settings and latency controls invoke callback",
   expect(screen.getByLabelText("Algorithm mode")).toHaveValue("single_dominant_no_separator");
   expect(screen.getByLabelText("Localization hop (ms)")).toHaveValue(10);
   expect(screen.getByLabelText("Localization window (ms)")).toHaveValue(160);
+  expect(screen.getByLabelText("Localization smoothing (0-1)")).toHaveValue(0.5);
   await user.clear(screen.getByLabelText("Playback latency number"));
   await user.type(screen.getByLabelText("Playback latency number"), "240");
   await user.click(slider);
@@ -51,9 +52,11 @@ test("mode picker gates launcher settings and latency controls invoke callback",
   await user.selectOptions(screen.getByLabelText("Algorithm mode"), "speaker_tracking");
   fireEvent.change(screen.getByLabelText("Localization hop (ms)"), { target: { value: "50" } });
   fireEvent.change(screen.getByLabelText("Localization window (ms)"), { target: { value: "200" } });
+  fireEvent.change(screen.getByLabelText("Localization smoothing (0-1)"), { target: { value: "0.8" } });
   expect(screen.getByLabelText("Algorithm mode")).toHaveValue("speaker_tracking");
   expect(screen.getByLabelText("Localization hop (ms)")).toHaveValue(50);
   expect(screen.getByLabelText("Localization window (ms)")).toHaveValue(200);
+  expect(screen.getByLabelText("Localization smoothing (0-1)")).toHaveValue(0.8);
 });
 
 test("simulation shows ground-truth toggles and disables oracle speaker sources when irrelevant", async () => {
@@ -89,6 +92,7 @@ test("simulation shows ground-truth toggles and disables oracle speaker sources 
   await user.selectOptions(screen.getByLabelText("Algorithm mode"), "speaker_tracking");
   fireEvent.change(screen.getByLabelText("Localization hop (ms)"), { target: { value: "50" } });
   fireEvent.change(screen.getByLabelText("Localization window (ms)"), { target: { value: "200" } });
+  fireEvent.change(screen.getByLabelText("Localization smoothing (0-1)"), { target: { value: "0.8" } });
   expect(screen.getByLabelText("Use ground truth speaker sources")).not.toBeDisabled();
   await user.click(screen.getByLabelText("Use ground truth location"));
   await user.click(screen.getByLabelText("Use ground truth speaker sources"));
@@ -99,6 +103,7 @@ test("simulation shows ground-truth toggles and disables oracle speaker sources 
       algorithmMode: "speaker_tracking",
       localizationHopMs: 50,
       localizationWindowMs: 200,
+      localizationSmoothing: 0.8,
       useGroundTruthLocation: true,
       useGroundTruthSpeakerSources: true,
     })
@@ -135,6 +140,7 @@ test("live mode reveals only ReSpeaker-specific settings", async () => {
   expect(screen.getByLabelText("Sample rate (Hz)")).toBeInTheDocument();
   expect(screen.getByLabelText("Algorithm mode")).toBeInTheDocument();
   expect(screen.getByLabelText("Algorithm mode")).toHaveValue("single_dominant_no_separator");
+  expect(screen.getByLabelText("Localization smoothing (0-1)")).toHaveValue(0.5);
   expect(screen.queryByLabelText("Scene config path")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Background noise audio path")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Use ground truth location")).not.toBeInTheDocument();

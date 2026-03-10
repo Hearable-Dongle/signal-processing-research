@@ -24,6 +24,7 @@ from mic_array_forwarder.ws_codec import encode_audio_chunk
 from mic_array_forwarder.mode_presets import (
     METHOD_LOCALIZATION_ONLY,
     METHOD_SINGLE_DOMINANT_NO_SEPARATOR,
+    get_localization_smoothing_preset,
     get_live_algorithm_preset,
 )
 from realtime_pipeline.contracts import SpeakerGainDirection
@@ -114,6 +115,7 @@ class LiveDemoSession:
         self._mic_geometry_xyz = _mic_geometry_from_profile(str(req.mic_array_profile))
         self._channel_map = self._normalize_channel_map(req.channel_map, int(req.channel_count))
         self._algorithm = get_live_algorithm_preset(req.algorithm_mode)
+        self._smoothing = get_localization_smoothing_preset(req.localization_smoothing)
 
     @staticmethod
     def _normalize_channel_map(raw: list[int] | None, channel_count: int) -> list[int] | None:
@@ -298,12 +300,14 @@ class LiveDemoSession:
         matched: set[int] = set()
 
         for angle_deg, score in zip(peaks, scores_eff):
+            conf = _clip01(score)
+            if conf < float(self._smoothing.live_display_min_score):
+                continue
             sid = self._match_speaker_id(angle_deg, matched)
             if sid is None:
                 sid = self._next_speaker_id
                 self._next_speaker_id += 1
             matched.add(sid)
-            conf = _clip01(score)
             next_tracks[sid] = SpeakerGainDirection(
                 speaker_id=int(sid),
                 direction_degrees=float(_normalize_angle_deg(angle_deg)),
@@ -321,6 +325,8 @@ class LiveDemoSession:
             if age_ms > float(self._algorithm.inactive_hold_ms):
                 continue
             conf = _clip01(float(item.confidence) * 0.85)
+            if conf < float(self._smoothing.live_display_min_confidence):
+                continue
             next_tracks[sid] = SpeakerGainDirection(
                 speaker_id=int(item.speaker_id),
                 direction_degrees=float(item.direction_degrees),
@@ -342,7 +348,12 @@ class LiveDemoSession:
                 gain_weight=float(item.gain_weight),
             )
             for item in sorted(
-                next_tracks.values(),
+                (
+                    item
+                    for item in next_tracks.values()
+                    if float(item.confidence) >= float(self._smoothing.live_display_min_confidence)
+                    and (bool(item.active) or float(item.gain_weight) > 0.05)
+                ),
                 key=lambda item: (-float(item.active), -float(item.confidence), int(item.speaker_id)),
             )
         ]
@@ -458,19 +469,28 @@ class LiveDemoSession:
                     else max(1, min(int(self._algorithm.max_sources), channel_count))
                 ),
                 prior_enabled=True,
-                min_score=0.03,
+                min_score=float(self._smoothing.srp_peak_min_score),
                 ema_alpha=0.35,
-                hysteresis_margin=0.05,
-                match_tolerance_deg=20.0,
-                hold_frames=6,
-                max_step_deg=12.0,
-                score_decay=0.9,
+                hysteresis_margin=0.05 + (0.05 * float(self.req.localization_smoothing)),
+                match_tolerance_deg=float(self._algorithm.match_angle_threshold_deg),
+                hold_frames=int(self._smoothing.localization_track_hold_frames),
+                max_step_deg=float(self._smoothing.doa_max_step_deg_per_frame),
+                score_decay=float(self._smoothing.localization_track_confidence_decay),
                 backend=str(self.req.localization_backend),
                 grid_size=72,
                 min_peak_separation_deg=15.0,
                 small_aperture_bias=True,
                 tracking_mode=str(self.req.tracking_mode),
                 max_tracks=max(1, min(int(self._algorithm.max_sources), 3)),
+                max_assoc_distance_deg=float(self._smoothing.localization_max_assoc_distance_deg),
+                track_hold_frames=int(self._smoothing.localization_track_hold_frames),
+                track_kill_frames=int(self._smoothing.localization_track_kill_frames),
+                new_track_min_confidence=float(self._smoothing.localization_new_track_min_confidence),
+                track_confidence_decay=float(self._smoothing.localization_track_confidence_decay),
+                velocity_alpha=float(self._smoothing.localization_velocity_alpha),
+                angle_alpha=float(self._smoothing.localization_angle_alpha),
+                min_relative_peak_score=float(self._smoothing.localization_min_relative_peak_score),
+                min_peak_contrast=float(self._smoothing.localization_min_peak_contrast),
                 single_source_motion_filter_enabled=True,
             )
 
