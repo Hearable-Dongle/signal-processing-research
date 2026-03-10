@@ -110,13 +110,31 @@ Artifacts include:
 Run the realtime beamforming stack over raw multichannel recordings exported from the Data Collection UI:
 
 ```bash
-python -m beamforming.benchmark.data_collection_benchmark \
+python3 -m beamforming.benchmark.data_collection_benchmark \
   --input-path path/to/dataset-set-001.zip \
   --out-dir beamforming/benchmark/data_collection_run \
   --methods mvdr_fd
 ```
 
-You can pass either:
+Run against an already-unzipped Data Collection export directory:
+
+```bash
+python3 -m beamforming.benchmark.data_collection_benchmark \
+  --input-path ../data-collection/fifth-floor-sun-mar-9/ \
+  --out-dir ../data-collection/fifth-floor-sun-mar-9/mvd_fr_output \
+  --methods mvdr_fd
+```
+
+Run only one extracted recording directory:
+
+```bash
+python3 -m beamforming.benchmark.data_collection_benchmark \
+  --input-path ../data-collection/fifth-floor-sun-mar-9/recordings/recording-08s1khx4/ \
+  --out-dir ../data-collection/fifth-floor-sun-mar-9/mvd_fr_output \
+  --methods mvdr_fd
+```
+
+Accepted `--input-path` forms:
 - a Data Collection zip export
 - an extracted export root containing `collection.json`
 - a specific recording directory under `recordings/<recordingId>`

@@ -1,13 +1,17 @@
-Single-dominant no-separator benchmark
+Add offline benchmark for Data Collection recordings
 
 What changed:
-- Added a low-latency benchmark mode that skips ConvTasNet and treats each 2s analysis window as one dominant speaker stream.
-- Kept speaker tracking based on the window’s voice features plus recent direction history.
-- Wired the mode through the fixed 30s benchmark and summary output as `single_dominant_no_separator`.
-- Added smoke coverage for the new benchmark path.
+- Added `beamforming.benchmark.data_collection_benchmark` to run the realtime beamforming stack over Data Collection raw-channel exports.
+- Added `realtime_pipeline.recording_runner` so offline recordings can reuse the realtime pipeline and emit `enhanced_fast_path.wav`, traces, metrics, and DOA visualizations.
+- Fixed the benchmark module entrypoint so `python -m beamforming.benchmark.data_collection_benchmark ...` actually runs.
+- Added explicit pipeline shutdown/join checks so worker threads are stopped before the process exits.
+- Documented exact commands for running the utility on an extracted dataset directory or a single recording in `beamforming/README.md`.
+
+How to run:
+- Whole extracted dataset:
+  `python3 -m beamforming.benchmark.data_collection_benchmark --input-path ../data-collection/fifth-floor-sun-mar-9/ --out-dir ../data-collection/fifth-floor-sun-mar-9/mvd_fr_output --methods mvdr_fd`
+- Single recording:
+  `python3 -m beamforming.benchmark.data_collection_benchmark --input-path ../data-collection/fifth-floor-sun-mar-9/recordings/recording-08s1khx4/ --out-dir ../data-collection/fifth-floor-sun-mar-9/mvd_fr_output --methods mvdr_fd`
 
 Validation:
-- `PYTHONPATH=. pytest -q tests/test_realtime_pipeline_integration_mock.py -k 'fixed_speaker_scene_generator_emits_expected_metadata or fixed_speaker_benchmark_smoke_with_mock_separation or fixed_speaker_benchmark_target_first_identified_smoke or fixed_speaker_benchmark_single_dominant_no_separator_smoke'`
-
-Run command:
-- `PYTHONPATH=. python -m realtime_pipeline.fixed_speaker_benchmark --out-dir realtime_pipeline/output/fixed_speaker_benchmark_noise0p0x_no_separator --noise-scale 0.0 --identity-backend mfcc_legacy --single-dominant-no-separator`
+- `python3 -m py_compile realtime_pipeline/recording_runner.py beamforming/benchmark/data_collection_benchmark.py`

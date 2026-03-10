@@ -10,15 +10,38 @@ import zipfile
 from collections import defaultdict
 from pathlib import Path
 
-import matplotlib
+try:
+    import numpy as np
+except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific dependency guard
+    missing = exc.name or "numpy"
+    raise SystemExit(
+        f"Missing dependency '{missing}'. Install the beamforming benchmark dependencies first, "
+        f"for example: `python3 -m pip install -r beamforming/requirements.txt`."
+    ) from exc
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
-import soundfile as sf
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific dependency guard
+    missing = exc.name or "matplotlib"
+    raise SystemExit(
+        f"Missing dependency '{missing}'. Install the beamforming benchmark dependencies first, "
+        f"for example: `python3 -m pip install -r beamforming/requirements.txt`."
+    ) from exc
 
 from realtime_pipeline.recording_runner import run_recording_pipeline
 from simulation.mic_array_profiles import mic_positions_xyz
+
+try:
+    import soundfile as sf
+except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific dependency guard
+    missing = exc.name or "soundfile"
+    raise SystemExit(
+        f"Missing dependency '{missing}'. Install the beamforming benchmark dependencies first, "
+        f"for example: `python3 -m pip install -r beamforming/requirements.txt`."
+    ) from exc
 
 
 CHANNEL_RE = re.compile(r"(\d+)")
@@ -318,15 +341,36 @@ def main() -> None:
         resolved_root, recordings = _discover_recordings(extracted_root.resolve())
         mic_geometry_xyz = mic_positions_xyz(str(args.mic_array_profile)).T
 
+        print(
+            json.dumps(
+                {
+                    "status": "starting",
+                    "input_path": str(input_path),
+                    "resolved_input_root": str(resolved_root),
+                    "out_dir": str(out_dir),
+                    "n_recordings": len(recordings),
+                    "methods": list(args.methods),
+                    "separation_mode": str(args.separation_mode),
+                },
+                indent=2,
+            ),
+            flush=True,
+        )
+
         scene_rows: list[dict] = []
         summary_by_method: dict[str, list[dict]] = defaultdict(list)
 
-        for recording_id, recording_dir in recordings:
+        for recording_idx, (recording_id, recording_dir) in enumerate(recordings, start=1):
             raw_dir = recording_dir / "raw" if (recording_dir / "raw").is_dir() else recording_dir
             mic_audio, sample_rate_hz, channel_filenames = _load_multichannel_wavs(raw_dir)
             raw_mix = np.mean(np.asarray(mic_audio, dtype=np.float64), axis=1)
 
-            for method in args.methods:
+            for method_idx, method in enumerate(args.methods, start=1):
+                print(
+                    f"[{recording_idx}/{len(recordings)}] recording={recording_id} "
+                    f"[{method_idx}/{len(args.methods)}] method={method}",
+                    flush=True,
+                )
                 method_slug = _slug(method)
                 run_dir = out_dir / "runs" / _slug(recording_id) / method_slug
                 summary = run_recording_pipeline(
@@ -429,3 +473,7 @@ def main() -> None:
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()
+
+
+if __name__ == "__main__":
+    main()

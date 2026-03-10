@@ -182,7 +182,18 @@ def run_recording_pipeline(
         separation_backend=sep,
     )
     pipe_holder["pipe"] = pipe
-    pipe.run_blocking()
+    try:
+        pipe.start()
+        pipe.join()
+    finally:
+        pipe.stop()
+        pipe.join(timeout=5.0)
+        fast_alive = bool(getattr(pipe, "_fast", None) and pipe._fast.is_alive())
+        slow_alive = bool(getattr(pipe, "_slow", None) and pipe._slow.is_alive())
+        if fast_alive or slow_alive:
+            raise RuntimeError(
+                f"Pipeline threads did not terminate cleanly: fast_alive={fast_alive}, slow_alive={slow_alive}"
+            )
 
     enhanced = np.concatenate(enhanced_parts)[: mic_audio.shape[0]] if enhanced_parts else np.zeros(mic_audio.shape[0], dtype=np.float32)
     raw_mix_mean = np.mean(np.asarray(mic_audio, dtype=np.float64), axis=1).astype(np.float32, copy=False)
