@@ -1,31 +1,35 @@
-Update offline Data Collection benchmarking defaults and diagnostics.
+Add simulated Data Collection benchmark support and parallelize offline runs.
 
 What changed:
-- Set offline recording benchmark defaults to:
-  - localization hop `50 ms`
-  - localization window `200 ms`
-  - speaker relation window `2000 ms`
-  - speaker relation hop `1000 ms`
-- Propagated `fast_frame_ms` into recording summaries.
-- Fixed offline speaker-direction plots to use the actual frame step instead of assuming `10 ms`.
+- Added `beamforming.benchmark.export_simulation_to_collection` to render simulation scene configs into a Data Collection-style export with `collection.json` and per-recording `raw/channel_XXX.wav` files.
+- Extended `beamforming.benchmark.data_collection_benchmark` with:
+  - `--workers` for parallel recording/method execution
+  - simulated-scene ground-truth overlays in `speaker_directions.png`
+  - distinct colors for each GT speaker
+  - GT drawn above predicted speaker traces
+- Added the new testing-angle simulation scene generator and eval entrypoints:
+  - `simulation/create_testing_specific_angles_scene.py`
+  - `simulation/run_testing_specific_angles_eval.py`
+- Updated `simulation/README.md` with the new commands.
 
 Files:
-- `realtime_pipeline/recording_runner.py`
 - `beamforming/benchmark/data_collection_benchmark.py`
+- `beamforming/benchmark/export_simulation_to_collection.py`
+- `simulation/create_testing_specific_angles_scene.py`
+- `simulation/run_testing_specific_angles_eval.py`
+- `simulation/README.md`
 
-Run used:
-- `python -m beamforming.benchmark.data_collection_benchmark --input-path . --out-dir beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200 --methods mvdr_fd --separation-mode single_dominant_no_separator --control-mode speaker_tracking_mode --fast-path-reference-mode speaker_map`
+Subset run used:
+- `python -m beamforming.benchmark.export_simulation_to_collection --input-path simulation/simulations/configs/testing_specific_angles --out-dir beamforming/benchmark/testing_specific_angles_simulated_collection --scene-ids testing_specific_angles_k2_scene00 testing_specific_angles_k2_scene12 testing_specific_angles_k2_scene24 testing_specific_angles_k2_scene36 testing_specific_angles_k2_scene48 testing_specific_angles_k2_scene60 testing_specific_angles_k2_scene72 testing_specific_angles_k2_scene84`
+- `python -m beamforming.benchmark.data_collection_benchmark --input-path beamforming/benchmark/testing_specific_angles_simulated_collection --out-dir beamforming/benchmark/testing_specific_angles_simulated_mvdr_single_dom --methods mvdr_fd --separation-mode single_dominant_no_separator --control-mode speaker_tracking_mode --fast-path-reference-mode speaker_map --workers 8`
 
 Artifacts:
-- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/report.json`
-- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/scene_metrics.csv`
-- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/summary_by_method.csv`
+- `beamforming/benchmark/testing_specific_angles_simulated_collection/`
+- `beamforming/benchmark/testing_specific_angles_simulated_mvdr_single_dom/report.json`
+- `beamforming/benchmark/testing_specific_angles_simulated_mvdr_single_dom/scene_metrics.csv`
+- `beamforming/benchmark/testing_specific_angles_simulated_mvdr_single_dom/summary_by_method.csv`
+- `beamforming/benchmark/testing_specific_angles_simulated_mvdr_single_dom/runs/.../visualizations/speaker_directions.png`
 
-Observed on `fifth-floor-sun-mar-9`:
-- mean `fast_rtf`: `2.45`
-- mean `slow_rtf`: `0.124`
-- mean final speaker count: `0.33`
-- mean dominant confidence: `0.283`
-
-Validation / rerun:
-- `python -m beamforming.benchmark.data_collection_benchmark --input-path . --out-dir beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200 --methods mvdr_fd --separation-mode single_dominant_no_separator --control-mode speaker_tracking_mode --fast-path-reference-mode speaker_map`
+Validation:
+- `python -m py_compile beamforming/benchmark/data_collection_benchmark.py beamforming/benchmark/export_simulation_to_collection.py simulation/create_testing_specific_angles_scene.py simulation/run_testing_specific_angles_eval.py`
+- Verified subset benchmark completed and emitted GT-overlaid speaker direction plots for all 8 simulated recordings.
