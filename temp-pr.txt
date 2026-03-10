@@ -1,31 +1,11 @@
-Update offline Data Collection benchmarking defaults and diagnostics.
+Show per-microphone beamforming weights in UI
 
 What changed:
-- Set offline recording benchmark defaults to:
-  - localization hop `50 ms`
-  - localization window `200 ms`
-  - speaker relation window `2000 ms`
-  - speaker relation hop `1000 ms`
-- Propagated `fast_frame_ms` into recording summaries.
-- Fixed offline speaker-direction plots to use the actual frame step instead of assuming `10 ms`.
+- Extended the realtime demo frontend contract to carry beamforming metadata.
+- Updated the realtime page and speaker stage to keep the latest beamforming snapshot in UI state.
+- Expanded the Beamforming Weights panel to show per-microphone rows with magnitude, phase, and delay when available.
+- Added UI test coverage for the microphone-weight rows.
 
-Files:
-- `realtime_pipeline/recording_runner.py`
-- `beamforming/benchmark/data_collection_benchmark.py`
-
-Run used:
-- `python -m beamforming.benchmark.data_collection_benchmark --input-path . --out-dir beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200 --methods mvdr_fd --separation-mode single_dominant_no_separator --control-mode speaker_tracking_mode --fast-path-reference-mode speaker_map`
-
-Artifacts:
-- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/report.json`
-- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/scene_metrics.csv`
-- `beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200/summary_by_method.csv`
-
-Observed on `fifth-floor-sun-mar-9`:
-- mean `fast_rtf`: `2.45`
-- mean `slow_rtf`: `0.124`
-- mean final speaker count: `0.33`
-- mean dominant confidence: `0.283`
-
-Validation / rerun:
-- `python -m beamforming.benchmark.data_collection_benchmark --input-path . --out-dir beamforming/benchmark/fifth_floor_sun_mar_9_no_sep_50_200 --methods mvdr_fd --separation-mode single_dominant_no_separator --control-mode speaker_tracking_mode --fast-path-reference-mode speaker_map`
+Validation:
+- `npm test -- --run src/components/SpeakerStage.test.tsx`
+- `npm test -- --run src/App.test.tsx`
