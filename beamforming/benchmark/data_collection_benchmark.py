@@ -215,13 +215,14 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str) -> None:
     trace = list(summary.get("speaker_map_trace", []))
     if not trace:
         return
+    frame_step_s = float(summary.get("fast_frame_ms", 10.0)) / 1000.0
     fig, ax = plt.subplots(figsize=(14, 4))
     xs: list[float] = []
     ys: list[float] = []
     ss: list[float] = []
     cs: list[float] = []
     for row in trace:
-        x = float(row.get("frame_index", 0)) * 0.01
+        x = float(row.get("frame_index", 0)) * frame_step_s
         for speaker in row.get("speakers", []):
             xs.append(x)
             ys.append(float(speaker.get("direction_degrees", 0.0)))
@@ -316,7 +317,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Realtime path backend to use before beamforming",
     )
     parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_cross_0640"], default="respeaker_v3_0457")
-    parser.add_argument("--slow-chunk-ms", type=int, default=200)
+    parser.add_argument("--fast-frame-ms", type=int, default=50)
+    parser.add_argument("--localization-window-ms", type=int, default=200)
+    parser.add_argument("--slow-chunk-ms", type=int, default=2000)
+    parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
     parser.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"], default="weighted_srp_dp")
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
@@ -380,13 +384,16 @@ def main() -> None:
                     out_dir=run_dir,
                     input_recording_path=recording_dir,
                     separation_mode=str(args.separation_mode),
+                    fast_frame_ms=int(args.fast_frame_ms),
                     slow_chunk_ms=int(args.slow_chunk_ms),
+                    slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                     beamforming_mode=str(method),
                     fast_path_reference_mode=str(args.fast_path_reference_mode),
                     output_normalization_enabled=not bool(args.disable_output_normalization),
                     output_allow_amplification=bool(args.allow_output_amplification),
                     capture_trace=True,
                     localization_backend=str(args.localization_backend),
+                    localization_window_ms=int(args.localization_window_ms),
                     tracking_mode=str(args.tracking_mode),
                     control_mode=str(args.control_mode),
                     direction_long_memory_enabled=not bool(args.disable_direction_long_memory),
@@ -463,6 +470,10 @@ def main() -> None:
             "recordings": [recording_id for recording_id, _recording_dir in recordings],
             "methods": list(args.methods),
             "separation_mode": str(args.separation_mode),
+            "fast_frame_ms": int(args.fast_frame_ms),
+            "localization_window_ms": int(args.localization_window_ms),
+            "slow_chunk_ms": int(args.slow_chunk_ms),
+            "slow_chunk_hop_ms": int(args.slow_chunk_hop_ms),
             "mic_array_profile": str(args.mic_array_profile),
             "note": "Real Data Collection recordings do not have clean-reference speech, so this benchmark reports runtime and blind/relative diagnostics instead of SI-SDR/STOI/SII.",
         }
