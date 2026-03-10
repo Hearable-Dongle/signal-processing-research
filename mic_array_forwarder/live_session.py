@@ -21,6 +21,11 @@ from mic_array_forwarder.models import (
 )
 from mic_array_forwarder.session import _wav_bytes_from_mono_float32
 from mic_array_forwarder.ws_codec import encode_audio_chunk
+from mic_array_forwarder.mode_presets import (
+    METHOD_LOCALIZATION_ONLY,
+    METHOD_SINGLE_DOMINANT_NO_SEPARATOR,
+    get_live_algorithm_preset,
+)
 from realtime_pipeline.contracts import SpeakerGainDirection
 from realtime_pipeline.fast_path import delay_and_sum_frame
 from realtime_pipeline.srp_tracker import SRPPeakTracker
@@ -97,6 +102,7 @@ class LiveDemoSession:
         self._event_seq = 0
         self._raw_mix_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._raw_multichannel_parts: deque[np.ndarray] = deque(maxlen=4500)
+        self._processed_audio_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._raw_mix_sample_rate_hz = int(req.sample_rate_hz)
         self._speaker_tracks: dict[int, SpeakerGainDirection] = {}
         self._next_speaker_id = 1
@@ -107,6 +113,7 @@ class LiveDemoSession:
         self._monitor_source = str(req.monitor_source)
         self._mic_geometry_xyz = _mic_geometry_from_profile(str(req.mic_array_profile))
         self._channel_map = self._normalize_channel_map(req.channel_map, int(req.channel_count))
+        self._algorithm = get_live_algorithm_preset(req.algorithm_mode)
 
     @staticmethod
     def _normalize_channel_map(raw: list[int] | None, channel_count: int) -> list[int] | None:
@@ -175,6 +182,14 @@ class LiveDemoSession:
             if not self._raw_mix_parts:
                 return b""
             raw = np.concatenate(list(self._raw_mix_parts), axis=0)
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
+        return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
+
+    def get_processed_wav_bytes(self) -> bytes:
+        with self._lock:
+            if not self._processed_audio_parts:
+                return b""
+            raw = np.concatenate(list(self._processed_audio_parts), axis=0)
             sample_rate_hz = int(self._raw_mix_sample_rate_hz)
         return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
 
@@ -249,6 +264,7 @@ class LiveDemoSession:
     def _publish_audio_chunk(self, processed: np.ndarray, raw_mixed: np.ndarray) -> None:
         with self._lock:
             source = str(self._monitor_source)
+            self._processed_audio_parts.append(np.asarray(processed, dtype=np.float32, copy=True))
         if source == "raw_mixed":
             frame = raw_mixed
         else:
@@ -265,10 +281,10 @@ class LiveDemoSession:
         for sid, item in self._speaker_tracks.items():
             if sid in matched:
                 continue
-            if now_ms - float(item.updated_at_ms) > 1500.0:
+            if now_ms - float(item.updated_at_ms) > float(self._algorithm.stale_track_ms):
                 continue
             err = _angle_error_deg(angle_deg, float(item.direction_degrees))
-            if err > 25.0:
+            if err > float(self._algorithm.match_angle_threshold_deg):
                 continue
             if best_err is None or err < best_err:
                 best_err = err
@@ -302,7 +318,7 @@ class LiveDemoSession:
             if sid in next_tracks:
                 continue
             age_ms = now_ms - float(item.updated_at_ms)
-            if age_ms > 1200.0:
+            if age_ms > float(self._algorithm.inactive_hold_ms):
                 continue
             conf = _clip01(float(item.confidence) * 0.85)
             next_tracks[sid] = SpeakerGainDirection(
@@ -376,7 +392,7 @@ class LiveDemoSession:
                 if int(item.speaker_id) == int(selected):
                     return float(item.direction_degrees)
             return None
-        if self.req.processing_mode in {"localize_and_beamform", "beamform_from_ground_truth"}:
+        if self.req.processing_mode in {"localize_and_beamform", "beamform_from_ground_truth"} or self.req.algorithm_mode == METHOD_LOCALIZATION_ONLY:
             best = max(items, key=lambda item: (float(item.activity_confidence), float(item.confidence)))
             return float(best.direction_degrees)
         if selected is not None and gains.get(selected):
@@ -416,7 +432,7 @@ class LiveDemoSession:
             audio_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
             sample_rate_hz = int(self.req.sample_rate_hz)
             channel_count = int(self.req.channel_count)
-            frame_samples = max(1, sample_rate_hz // 100)
+            frame_samples = max(1, int(sample_rate_hz * max(10, int(self.req.localization_hop_ms)) / 1000))
 
             device_idx = _find_input_device(sd, self.req.audio_device_query, channel_count)
             if device_idx is None:
@@ -431,11 +447,16 @@ class LiveDemoSession:
             tracker = SRPPeakTracker(
                 mic_pos=self._mic_geometry_xyz.T,
                 fs=sample_rate_hz,
-                window_ms=80 if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else 160,
+                window_ms=max(int(self.req.localization_window_ms), max(10, int(self.req.localization_hop_ms))),
                 nfft=512,
                 overlap=0.5,
                 freq_range=(300, 3000) if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else (200, 3000),
-                max_sources=1 if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else max(1, min(int(self.req.max_speakers_hint), channel_count)),
+                max_sources=(
+                    1
+                    if self.req.algorithm_mode in {METHOD_LOCALIZATION_ONLY, METHOD_SINGLE_DOMINANT_NO_SEPARATOR}
+                    or str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"}
+                    else max(1, min(int(self._algorithm.max_sources), channel_count))
+                ),
                 prior_enabled=True,
                 min_score=0.03,
                 ema_alpha=0.35,
@@ -449,7 +470,7 @@ class LiveDemoSession:
                 min_peak_separation_deg=15.0,
                 small_aperture_bias=True,
                 tracking_mode=str(self.req.tracking_mode),
-                max_tracks=max(1, min(int(self.req.max_speakers_hint), 3)),
+                max_tracks=max(1, min(int(self._algorithm.max_sources), 3)),
                 single_source_motion_filter_enabled=True,
             )
 
