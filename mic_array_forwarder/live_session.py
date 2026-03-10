@@ -102,6 +102,7 @@ class LiveDemoSession:
         self._event_seq = 0
         self._raw_mix_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._raw_multichannel_parts: deque[np.ndarray] = deque(maxlen=4500)
+        self._processed_audio_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._raw_mix_sample_rate_hz = int(req.sample_rate_hz)
         self._speaker_tracks: dict[int, SpeakerGainDirection] = {}
         self._next_speaker_id = 1
@@ -184,6 +185,14 @@ class LiveDemoSession:
             sample_rate_hz = int(self._raw_mix_sample_rate_hz)
         return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
 
+    def get_processed_wav_bytes(self) -> bytes:
+        with self._lock:
+            if not self._processed_audio_parts:
+                return b""
+            raw = np.concatenate(list(self._processed_audio_parts), axis=0)
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
+        return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
+
     def get_raw_channel_count(self) -> int:
         return int(self.req.channel_count)
 
@@ -255,6 +264,7 @@ class LiveDemoSession:
     def _publish_audio_chunk(self, processed: np.ndarray, raw_mixed: np.ndarray) -> None:
         with self._lock:
             source = str(self._monitor_source)
+            self._processed_audio_parts.append(np.asarray(processed, dtype=np.float32, copy=True))
         if source == "raw_mixed":
             frame = raw_mixed
         else:
@@ -422,7 +432,7 @@ class LiveDemoSession:
             audio_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
             sample_rate_hz = int(self.req.sample_rate_hz)
             channel_count = int(self.req.channel_count)
-            frame_samples = max(1, sample_rate_hz // 100)
+            frame_samples = max(1, int(sample_rate_hz * max(10, int(self.req.localization_hop_ms)) / 1000))
 
             device_idx = _find_input_device(sd, self.req.audio_device_query, channel_count)
             if device_idx is None:
@@ -437,7 +447,7 @@ class LiveDemoSession:
             tracker = SRPPeakTracker(
                 mic_pos=self._mic_geometry_xyz.T,
                 fs=sample_rate_hz,
-                window_ms=80 if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else 160,
+                window_ms=max(int(self.req.localization_window_ms), max(10, int(self.req.localization_hop_ms))),
                 nfft=512,
                 overlap=0.5,
                 freq_range=(300, 3000) if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else (200, 3000),

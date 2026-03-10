@@ -88,6 +88,18 @@ function apiUrl(path: string): string {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
+async function fetchSessionWav(path: string): Promise<Blob | null> {
+  try {
+    const resp = await fetch(apiUrl(path));
+    if (!resp.ok) {
+      return null;
+    }
+    return await resp.blob();
+  } catch {
+    return null;
+  }
+}
+
 type Props = {
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
@@ -140,6 +152,30 @@ export function RealtimeDemoPage({
   const rawMixedTotalSamplesRef = useRef(0);
   const outputPlaybackRef = useRef<HTMLAudioElement | null>(null);
   const outputPlaybackUrlRef = useRef<string | null>(null);
+
+  async function refreshStoredWaveforms(nextSessionId: string, inputSource: SessionLaunchConfig["inputSource"]): Promise<void> {
+    const processedBlob = await fetchSessionWav(`/api/session/${nextSessionId}/processed-wav`);
+    if (processedBlob) {
+      const parsed = parsePcm16MonoWav(await processedBlob.arrayBuffer());
+      if (parsed) {
+        totalSamplesRef.current = parsed.samples.length;
+        setWaveformBins(computeWaveformBinsFromPcm16(parsed.samples, WAVEFORM_BINS));
+        setAudioSampleRateHz(parsed.sampleRateHz);
+      }
+    }
+
+    const rawBlob = await fetchSessionWav(`/api/session/${nextSessionId}/raw-mix-wav`);
+    if (rawBlob) {
+      const parsed = parsePcm16MonoWav(await rawBlob.arrayBuffer());
+      if (parsed) {
+        rawMixedTotalSamplesRef.current = parsed.samples.length;
+        setRawWaveformBins(computeWaveformBinsFromPcm16(parsed.samples, WAVEFORM_BINS));
+        if (inputSource !== "respeaker_live") {
+          setAudioSampleRateHz(parsed.sampleRateHz);
+        }
+      }
+    }
+  }
 
   function stopOutputPlayback(): void {
     const player = outputPlaybackRef.current;
@@ -212,6 +248,8 @@ export function RealtimeDemoPage({
     const {
       inputSource,
       algorithmMode: nextAlgorithmMode,
+      localizationHopMs,
+      localizationWindowMs,
       scenePath,
       backgroundNoisePath,
       backgroundNoiseGain,
@@ -241,6 +279,8 @@ export function RealtimeDemoPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           algorithm_mode: nextAlgorithmMode,
+          localization_hop_ms: localizationHopMs,
+          localization_window_ms: localizationWindowMs,
           input_source: inputSource,
           scene_config_path: scenePath,
           processing_mode: "specific_speaker_enhancement",
@@ -267,30 +307,15 @@ export function RealtimeDemoPage({
     }
     const payload = (await resp.json()) as { session_id: string };
     setSessionId(payload.session_id);
-    if (inputSource === "simulation") {
-      void (async () => {
-        try {
-          for (let i = 0; i < 30; i += 1) {
-            const rawResp = await fetch(apiUrl(`/api/session/${payload.session_id}/raw-mix-wav`));
-            if (rawResp.ok && typeof rawResp.arrayBuffer === "function") {
-              const parsed = parsePcm16MonoWav(await rawResp.arrayBuffer());
-              if (parsed) {
-                rawMixedTotalSamplesRef.current = parsed.samples.length;
-                setRawWaveformBins(computeWaveformBinsFromPcm16(parsed.samples, WAVEFORM_BINS));
-                setAudioSampleRateHz(parsed.sampleRateHz);
-              }
-              break;
-            }
-            if (rawResp.ok) {
-              break;
-            }
-            await new Promise((r) => setTimeout(r, 100));
-          }
-        } catch {
-          // Raw mixed waveform visualization is best-effort.
+    void (async () => {
+      for (let i = 0; i < 30; i += 1) {
+        await refreshStoredWaveforms(payload.session_id, inputSource);
+        if (totalSamplesRef.current > 0 || rawMixedTotalSamplesRef.current > 0) {
+          break;
         }
-      })();
-    }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    })();
     audioRef.current.setTargetLatencyMs(latencyMs);
     await audioRef.current.start(playbackSampleRateHz);
     setPlaybackStats(audioRef.current.getStats());
@@ -352,17 +377,25 @@ export function RealtimeDemoPage({
   }
 
   function downloadWav(): void {
-    if (!capturedAudioRef.current.length) {
-      return;
-    }
-    const blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const suffix = sessionId ? sessionId : "session";
-    a.href = url;
-    a.download = `realtime-output-${suffix}.wav`;
-    a.click();
-    URL.revokeObjectURL(url);
+    void (async () => {
+      let blob: Blob | null = null;
+      if (sessionId) {
+        blob = await fetchSessionWav(`/api/session/${sessionId}/processed-wav`);
+      }
+      if (!blob && capturedAudioRef.current.length) {
+        blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
+      }
+      if (!blob) {
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const suffix = sessionId ? sessionId : "session";
+      a.href = url;
+      a.download = `realtime-output-${suffix}.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+    })();
   }
 
   function onMonitorSourceChange(nextSource: MonitorSource): void {
@@ -391,19 +424,23 @@ export function RealtimeDemoPage({
     stopOutputPlayback();
     let blob: Blob;
     if (source === "beamformed_output") {
-      if (!capturedAudioRef.current.length) {
-        return;
+      if (sessionId) {
+        blob = await fetchSessionWav(`/api/session/${sessionId}/processed-wav`);
       }
-      blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
+      if (!blob && capturedAudioRef.current.length) {
+        blob = createWavBlobFromFloat32Chunks(capturedAudioRef.current, audioSampleRateHz);
+      }
     } else {
-      if (!sessionId || activeInputSource !== "simulation") {
+      if (!sessionId) {
         return;
       }
-      const resp = await fetch(apiUrl(`/api/session/${sessionId}/raw-mix-wav`));
-      if (!resp.ok) {
+      blob = await fetchSessionWav(`/api/session/${sessionId}/raw-mix-wav`);
+      if (!blob) {
         return;
       }
-      blob = await resp.blob();
+    }
+    if (!blob) {
+      return;
     }
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
@@ -437,8 +474,8 @@ export function RealtimeDemoPage({
 
   const totalDurationMs = (totalSamplesRef.current / audioSampleRateHz) * 1000;
   const rawMixedDurationMs = (rawMixedTotalSamplesRef.current / audioSampleRateHz) * 1000;
-  const canPlayBeamformed = capturedAudioRef.current.length > 0;
-  const canPlayRawMixed = Boolean(sessionId) && activeInputSource === "simulation";
+  const canPlayBeamformed = Boolean(sessionId) || capturedAudioRef.current.length > 0;
+  const canPlayRawMixed = Boolean(sessionId);
 
   return (
     <main className="app-shell">

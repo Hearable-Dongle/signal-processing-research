@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import App from "./App";
@@ -83,6 +83,8 @@ test("speaker interaction emits select and adjust messages", async () => {
   const startBody = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
   expect(startBody.algorithm_mode).toBe("single_dominant_no_separator");
   expect(startBody.processing_mode).toBe("specific_speaker_enhancement");
+  expect(startBody.localization_hop_ms).toBe(10);
+  expect(startBody.localization_window_ms).toBe(160);
 
   const ws = MockWebSocket.instances[0];
   ws.onmessage?.({
@@ -142,6 +144,8 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.sample_rate_hz).toBe(48000);
   expect(body.channel_map).toEqual([0, 1, 2, 3]);
   expect(body.algorithm_mode).toBe("single_dominant_no_separator");
+  expect(body.localization_hop_ms).toBe(10);
+  expect(body.localization_window_ms).toBe(160);
 });
 
 test("simulation start sends algorithm mode plus ground-truth toggles", async () => {
@@ -157,6 +161,8 @@ test("simulation start sends algorithm mode plus ground-truth toggles", async ()
 
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
   await user.selectOptions(screen.getByLabelText("Algorithm mode"), "speaker_tracking_long_memory");
+  fireEvent.change(screen.getByLabelText("Localization hop (ms)"), { target: { value: "50" } });
+  fireEvent.change(screen.getByLabelText("Localization window (ms)"), { target: { value: "200" } });
   await user.click(screen.getByLabelText("Use ground truth location"));
   await user.click(screen.getByLabelText("Use ground truth speaker sources"));
   await user.click(screen.getByRole("button", { name: "Start" }));
@@ -167,6 +173,8 @@ test("simulation start sends algorithm mode plus ground-truth toggles", async ()
   );
   const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
   expect(body.algorithm_mode).toBe("speaker_tracking_long_memory");
+  expect(body.localization_hop_ms).toBe(50);
+  expect(body.localization_window_ms).toBe(200);
   expect(body.use_ground_truth_location).toBe(true);
   expect(body.use_ground_truth_speaker_sources).toBe(true);
   expect(body.processing_mode).toBe("specific_speaker_enhancement");

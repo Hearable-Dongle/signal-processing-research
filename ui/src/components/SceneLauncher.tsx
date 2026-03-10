@@ -7,6 +7,8 @@ export type InputSource = "simulation" | "respeaker_live";
 export type SessionLaunchConfig = {
   inputSource: InputSource;
   algorithmMode: AlgorithmMode;
+  localizationHopMs: number;
+  localizationWindowMs: number;
   scenePath: string;
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
@@ -63,6 +65,8 @@ export function SceneLauncher({
 }: Props) {
   const [inputSource, setInputSource] = useState<InputSource | null>(null);
   const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>("single_dominant_no_separator");
+  const [localizationHopMs, setLocalizationHopMs] = useState(10);
+  const [localizationWindowMs, setLocalizationWindowMs] = useState(160);
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
@@ -134,6 +138,39 @@ export function SceneLauncher({
               </option>
             ))}
           </select>
+
+          <label htmlFor="localization-hop-ms">Localization hop (ms)</label>
+          <input
+            id="localization-hop-ms"
+            aria-label="Localization hop (ms)"
+            type="number"
+            min={10}
+            max={500}
+            step={10}
+            value={localizationHopMs}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextHop = Math.max(10, Math.min(500, Number(e.target.value) || 10));
+              setLocalizationHopMs(nextHop);
+              setLocalizationWindowMs((prev) => Math.max(prev, nextHop));
+            }}
+          />
+
+          <label htmlFor="localization-window-ms">Localization window (ms)</label>
+          <input
+            id="localization-window-ms"
+            aria-label="Localization window (ms)"
+            type="number"
+            min={20}
+            max={2000}
+            step={10}
+            value={localizationWindowMs}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextWindow = Math.min(2000, Number(e.target.value) || 160);
+              setLocalizationWindowMs(Math.max(Math.max(20, localizationHopMs), nextWindow));
+            }}
+          />
 
           {showSimulationSettings && (
             <>
@@ -261,6 +298,8 @@ export function SceneLauncher({
                 onStart({
                   inputSource,
                   algorithmMode,
+                  localizationHopMs,
+                  localizationWindowMs,
                   scenePath,
                   backgroundNoisePath,
                   backgroundNoiseGain,

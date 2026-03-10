@@ -27,6 +27,8 @@ class SessionStartRequest(BaseModel):
     background_noise_gain: float = 0.15
     use_ground_truth_location: bool = False
     use_ground_truth_speaker_sources: bool = False
+    localization_hop_ms: int = 10
+    localization_window_ms: int = 160
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4

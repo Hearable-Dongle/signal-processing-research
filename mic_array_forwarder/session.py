@@ -169,6 +169,7 @@ class DemoSession:
         self._ground_truth_focus_direction_deg: float | None = None
         self._raw_mix_mono: np.ndarray | None = None
         self._raw_multichannel: np.ndarray | None = None
+        self._processed_audio_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._raw_mix_sample_rate_hz: int = 16000
         self._monitor_source = str(req.monitor_source)
         self._raw_frame_q: deque[np.ndarray] = deque(maxlen=256)
@@ -230,6 +231,14 @@ class DemoSession:
             sample_rate_hz = int(self._raw_mix_sample_rate_hz)
         if raw is None:
             return b""
+        return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
+
+    def get_processed_wav_bytes(self) -> bytes:
+        with self._lock:
+            if not self._processed_audio_parts:
+                return b""
+            raw = np.concatenate(list(self._processed_audio_parts), axis=0)
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
         return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
 
     def get_raw_channel_count(self) -> int:
@@ -303,6 +312,7 @@ class DemoSession:
         with self._lock:
             source = str(self._monitor_source)
             raw_frame = self._raw_frame_q.popleft() if self._raw_frame_q else None
+            self._processed_audio_parts.append(np.asarray(frame_mono, dtype=np.float32, copy=True))
         if source == "raw_mixed" and raw_frame is not None:
             frame = raw_frame
         else:
@@ -514,7 +524,7 @@ class DemoSession:
 
             cfg = PipelineConfig(
                 sample_rate_hz=int(sim_cfg.audio.fs),
-                fast_frame_ms=10,
+                fast_frame_ms=max(10, int(self.req.localization_hop_ms)),
                 slow_chunk_ms=int(self.req.slow_chunk_ms),
                 max_speakers_hint=max(int(self.req.max_speakers_hint), len(list(iter_target_source_indices(sim_cfg))), 1),
                 convtasnet_model_name=str(self.req.convtasnet_model_name),
@@ -531,6 +541,7 @@ class DemoSession:
                 tracking_mode=str(self.req.tracking_mode),
                 control_mode=str(algorithm.control_mode),
                 fast_path_reference_mode=str(algorithm.fast_path_reference_mode),
+                localization_window_ms=max(int(self.req.localization_window_ms), max(10, int(self.req.localization_hop_ms))),
                 direction_long_memory_enabled=bool(algorithm.direction_long_memory_enabled),
                 direction_long_memory_window_ms=float(algorithm.direction_long_memory_window_ms),
                 output_normalization_enabled=bool(self.req.output_normalization_enabled),
