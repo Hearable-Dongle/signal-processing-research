@@ -141,23 +141,6 @@ export function SceneLauncher({
                 value={backgroundNoiseGain}
                 onChange={(e) => setBackgroundNoiseGain(Math.max(0, Math.min(2, Number(e.target.value))))}
               />
-              <label htmlFor="separation-mode">Speaker stream mode</label>
-              <select
-                id="separation-mode"
-                aria-label="Speaker stream mode"
-                value={effectiveSeparationMode}
-                disabled={isBusy || processingMode === "localize_and_beamform"}
-                onChange={(e) => setSeparationMode(e.target.value as SeparationMode)}
-              >
-                <option value="single_dominant_no_separator">No separator (single dominant speaker)</option>
-                <option value="auto">Auto separator</option>
-                <option value="mock">Mock separator</option>
-              </select>
-              {processingMode === "localize_and_beamform" && (
-                <p className="launcher-hint">
-                  Localize and beamform uses the single-dominant no-separator path for realtime direction tracking.
-                </p>
-              )}
             </>
           )}
 
@@ -191,6 +174,25 @@ export function SceneLauncher({
                 onChange={(e) => setSampleRateHz(Math.max(8000, Math.min(96000, Number(e.target.value))))}
               />
             </>
+          )}
+
+          <label htmlFor="separation-mode">Speaker stream mode</label>
+          <select
+            id="separation-mode"
+            aria-label="Speaker stream mode"
+            value={effectiveSeparationMode}
+            disabled={isBusy || processingMode === "localize_and_beamform"}
+            onChange={(e) => setSeparationMode(e.target.value as SeparationMode)}
+          >
+            <option value="single_dominant_no_separator">Realtime dominant speaker (no separator)</option>
+            <option value="auto">Auto separator (includes ConvTasNet path)</option>
+            <option value="mock">Mock separator</option>
+          </select>
+          {processingMode === "localize_and_beamform" && (
+            <p className="launcher-hint">
+              Localize and beamform locks to the realtime dominant-speaker path: it skips source separation,
+              assumes one dominant speaker in each analysis window, and trades overlap handling for lower latency.
+            </p>
           )}
 
           <label htmlFor="latency-range">Playback latency (ms)</label>

@@ -168,4 +168,5 @@ Important request fields:
 - `sample_rate_hz`: defaults to `16000`
 - `processing_mode`: same UI processing modes as before
 
-The current UI still sends `separation_mode="mock"` by default for predictable startup.
+The current UI defaults to `separation_mode="single_dominant_no_separator"`, and `processing_mode="localize_and_beamform"`
+locks that realtime path to the no-separator dominant-speaker strategy instead of implying ConvTasNet is required.

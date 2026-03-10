@@ -158,6 +158,8 @@ test("localize and beamform starts with the no-separator realtime strategy", asy
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
   await user.selectOptions(screen.getByLabelText("Processing mode"), "localize_and_beamform");
   expect(screen.getByLabelText("Speaker stream mode")).toBeDisabled();
+  expect(screen.getByText(/no-separator dominant-speaker path/i)).toBeInTheDocument();
+  expect(screen.getByText(/trades overlap handling for lower latency/i)).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Start" }));
 
   await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());

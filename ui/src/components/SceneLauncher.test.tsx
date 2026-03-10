@@ -82,7 +82,7 @@ test("localize and beamform locks speaker stream mode to no-separator", async ()
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
   expect(screen.getByLabelText("Speaker stream mode")).toHaveValue("single_dominant_no_separator");
   expect(screen.getByLabelText("Speaker stream mode")).toBeDisabled();
-  expect(screen.getByText(/uses the single-dominant no-separator path/i)).toBeInTheDocument();
+  expect(screen.getByText(/skips source separation/i)).toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: "Start" }));
   expect(onStart).toHaveBeenCalledWith(
@@ -122,6 +122,8 @@ test("live mode reveals only ReSpeaker-specific settings", async () => {
   expect(screen.getByLabelText("Audio device query")).toBeInTheDocument();
   expect(screen.getByLabelText("Channel map (optional)")).toBeInTheDocument();
   expect(screen.getByLabelText("Sample rate (Hz)")).toBeInTheDocument();
+  expect(screen.getByLabelText("Speaker stream mode")).toBeInTheDocument();
+  expect(screen.getByLabelText("Speaker stream mode")).toHaveValue("single_dominant_no_separator");
   expect(screen.queryByLabelText("Scene config path")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Background noise audio path")).not.toBeInTheDocument();
 });

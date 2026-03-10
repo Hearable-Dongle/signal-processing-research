@@ -451,6 +451,12 @@ export function RealtimeDemoPage({
   return (
     <main className="app-shell">
       <h1>Realtime Speaker UI Demo</h1>
+      {processingMode === "localize_and_beamform" && (
+        <p className="launcher-hint">
+          Realtime localize and beamform follows the no-separator dominant-speaker path. It tracks the current speaker
+          with lower latency, but it is less robust when multiple people overlap.
+        </p>
+      )}
       <div className={`layout ${metricsExpanded ? "" : "metrics-collapsed"}`.trim()}>
         <SceneLauncher
           status={status}
