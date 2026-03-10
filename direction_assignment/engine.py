@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from .config import DirectionAssignmentConfig
@@ -49,6 +51,9 @@ class DirectionAssignmentEngine:
 
     def reset(self) -> None:
         self._states.clear()
+
+    def get_state_snapshot(self) -> dict[int, SpeakerDirectionState]:
+        return {int(sid): replace(st) for sid, st in self._states.items()}
 
     def _validate_input(self, payload: DirectionAssignmentInput) -> None:
         if payload.raw_mic_chunk.ndim != 2:
@@ -110,6 +115,12 @@ class DirectionAssignmentEngine:
                     speaker_id=int(speaker_id),
                     doa_deg=float(doa),
                     confidence=float(conf),
+                    identity_confidence=float(payload.per_stream_identity_confidence.get(int(stream_idx), 0.0)),
+                    activity_confidence=float(payload.per_speaker_activity_confidence.get(int(speaker_id), 0.0)),
+                    identity_maturity=str(
+                        payload.speaker_identity_metadata.get(int(speaker_id), {}).get("identity_maturity", "unknown")
+                    ),
+                    last_separator_stream_index=int(stream_idx),
                 )
             )
 
@@ -128,7 +139,7 @@ class DirectionAssignmentEngine:
             states=self._states,
             aggregated_obs=aggregated,
             timestamp_ms=payload.timestamp_ms,
-            cfg=self.cfg,
+            cfg=replace(self.cfg, control_mode=str(payload.control_mode or self.cfg.control_mode)),
             srp_peaks_deg=payload.srp_doa_peaks_deg,
             srp_peak_scores=payload.srp_peak_scores,
         )

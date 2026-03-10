@@ -17,6 +17,10 @@ class SpeakerGainDirection:
     predicted_direction_deg: float | None = None
     angular_velocity_deg_per_chunk: float = 0.0
     last_separator_stream_index: int | None = None
+    anchor_direction_deg: float | None = None
+    anchor_confidence: float = 0.0
+    anchor_locked: bool = False
+    anchor_last_confirmed_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +129,15 @@ class PipelineConfig:
     direction_large_change_persist_chunks: int = 3
     direction_identity_hold_margin: float = 0.08
     direction_stable_confidence_threshold: float = 0.55
+    direction_long_memory_enabled: bool = True
+    direction_long_memory_window_ms: float = 60000.0
+    direction_long_memory_min_observations: int = 4
+    direction_long_memory_anchor_lock_confidence: float = 0.6
+    direction_long_memory_max_anchor_spread_deg: float = 20.0
+    direction_long_memory_soft_prior_margin_deg: float = 18.0
+    direction_long_memory_relock_persist_chunks: int = 4
+    direction_long_memory_decay: float = 0.995
+    direction_long_memory_stale_timeout_ms: float = 60000.0
     speaker_map_min_confidence_for_refresh: float = 0.2
     speaker_map_hold_ms: float = 300.0
     speaker_map_confidence_decay: float = 0.9

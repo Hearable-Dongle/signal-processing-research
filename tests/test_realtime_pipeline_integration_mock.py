@@ -222,6 +222,8 @@ def test_realtime_pipeline_speaker_tracking_mode_publishes_metadata(tmp_path: Pa
         assert "identity_confidence" in row
         assert "identity_maturity" in row
         assert "predicted_direction_deg" in row
+        assert "anchor_direction_deg" in row
+        assert "anchor_confidence" in row
 
 
 @pytest.mark.filterwarnings("ignore::UserWarning")

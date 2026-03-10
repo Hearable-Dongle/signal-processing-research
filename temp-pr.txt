@@ -1,117 +1,47 @@
-Restaurant meeting simulation set and first localization results
+Realtime speaker tracking + long-memory update
 
 What changed:
-- Added a `restaurant_meeting` conversation preset tuned for low overlap, minimal interruptions/backchannels, and stronger restaurant-style background noise.
-- Added `simulation/create_restaurant_meeting_scene.py` to generate `restaurant_meeting_k{k}_scene{i:02d}.json` configs under `simulation/simulations/configs/restaurant_meeting_scene/`.
-- The wrapper reuses the realistic-conversations scheduler/rendering path, enforces requested speaker count `k=2..5`, rejects scenes with too much overlap, and keeps generated segment assets under a separate asset root.
+- Added `control_mode` split:
+  - `spatial_peak_mode`
+  - `speaker_tracking_mode`
+- Added richer published speaker state:
+  - identity confidence / maturity
+  - predicted direction
+  - angular velocity
+  - long-memory anchor direction / confidence / lock state
+- Added 60s comparison runner with stable method IDs:
+  - `localization_only`
+  - `spatial_baseline`
+  - `speaker_tracking`
+  - `speaker_tracking_long_memory`
+- Added active-speaker GT vs predicted direction plots and scene-layout plots.
+- Added a fast-path `srp_peak` steering baseline to isolate localization+beamforming from speaker-map tracking.
 
-Dataset behavior:
-- Speaker counts: `k=2..5`
-- Turn taking is mostly single-speaker with short phrase-end overlaps only.
-- Background noise is intentionally stronger than the older restaurant configs.
-- If a requested high-`k` scene would be too short to realize all speakers under the low-overlap rules, the generator floors the effective duration upward.
+Defaults:
+- localization: `weighted_srp_dp`
+- beamforming: `mvdr_fd`
+- postfilter floor: `0.22`
 
 Validation:
-- `PYTHONPATH=. pytest -q tests/test_realistic_conversations.py tests/test_restaurant_meeting_scene_generator.py`
-- Result: `5 passed`
-- CLI smoke generation with `k=2` and `k=5` succeeded and produced valid configs plus scene assets/metadata.
+- `PYTHONPATH=. pytest -q tests/test_compare_realtime_methods.py tests/test_realtime_pipeline_integration_mock.py tests/test_direction_assignment_tracking_robustness.py tests/test_realtime_pipeline_shared_state.py -k 'compare_realtime_methods or speaker_tracking_mode_publishes_metadata or srp_peak_reference_mode_executes or shared_state or tracking_robustness'`
+- `PYTHONPATH=. pytest -q tests/test_realtime_demo_server_models.py tests/test_realtime_pipeline_integration_mock.py -k 'models_roundtrip_and_schema_version or simulation_mock_end_to_end or speaker_tracking_mode_publishes_metadata'`
 
-Representative localization results on generated `restaurant_meeting` scenes:
-- Evaluated one generated scene each for `k=2,3,4,5` with `SRP-PHAT`, `GMDA`, and `SSZ`.
-- Conversation realism metrics for the sample scenes:
-  - `k=2`: overlap ratio `0.0033`, mean frame SNR `-15.28 dB`
-  - `k=5`: overlap ratio `0.0`, mean frame SNR `-22.36 dB`
+Comparison run command:
+- `PYTHONPATH=. python -m realtime_pipeline.compare_realtime_methods --out-dir realtime_pipeline/output/control_mode_compare_60s_noise0p4x --duration-sec 60 --noise-scale 0.4 --mock-separation --methods localization_only spatial_baseline speaker_tracking speaker_tracking_long_memory`
 
-Per-scene localization:
-- `restaurant_meeting_k2_scene00`
-  - `SRP-PHAT`: MAE `21.00 deg`
-  - `GMDA`: MAE `26.75 deg`
-  - `SSZ`: MAE `1.00 deg`
-- `restaurant_meeting_k3_scene00`
-  - `SRP-PHAT`: MAE `45.00 deg`
-  - `GMDA`: MAE `61.17 deg`
-  - `SSZ`: MAE `59.83 deg`
-- `restaurant_meeting_k4_scene00`
-  - `SRP-PHAT`: MAE `28.00 deg`
-  - `GMDA`: MAE `16.83 deg`, `1` miss
-  - `SSZ`: MAE `13.00 deg`
-- `restaurant_meeting_k5_scene00`
-  - `SRP-PHAT`: MAE `8.00 deg`, `1` miss
-  - `GMDA`: MAE `54.00 deg`
-  - `SSZ`: MAE `29.90 deg`
+Latest completed run:
+- output root: `/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/output/control_mode_compare_60s_noise0p4x`
+- scene: `restaurant_meeting_seq_k2_noise0p4x_60s`
+- overlap ratio: `0.0`
+- mean SNR: `-11.73 dB`
+- mock separation used for turnaround
 
-Method-level summary over the `k=2..5` sample:
-- `SRP-PHAT`: mean MAE `25.50 deg`, total misses `1`, mean runtime `0.80 s`, mean `RTF 0.067`
-- `GMDA`: mean MAE `39.69 deg`, total misses `1`, mean runtime `2.77 s`, mean `RTF 0.231`
-- `SSZ`: mean MAE `25.93 deg`, total misses `0`, mean runtime `1.05 s`, mean `RTF 0.087`
+RTF:
+- `localization_only`: fast `5.09`, slow `0.182`
+- `spatial_baseline`: fast `6.04`, slow `0.181`
+- `speaker_tracking`: fast `6.09`, slow `0.175`
+- `speaker_tracking_long_memory`: fast `5.74`, slow `0.171`
 
-Realtime pipeline notes:
-- The realistic meeting scenes are materially heavier for the realtime pipeline because each speaker/noise track is rendered as sparse segment assets, so the same baseline/robust pipeline sweep is slower than on the older static scenes.
-- One representative baseline pipeline run completed on `restaurant_meeting_k2_scene00`:
-  - speaker-map MAE `66.80 deg`
-  - mismatch rate `1.00`
-  - map churn `0.23 deg`
-  - fast-path RTF `8.27`
-- Higher-`k` pipeline runs did not complete in time during this pass, so the current evidence is:
-  - offline localization methods still work on the new scenes
-  - the realtime pipeline path degrades badly and is substantially slower on the segmented meeting-style configs
-
-Current takeaway:
-- The new meeting scenes are meaningfully harder and more realistic than the older always-on static-source restaurant scenes.
-- Offline localization quality is mixed by `k`, with `SSZ` strongest on `k=2` and `k=4`, and `SRP-PHAT` relatively better on the sampled `k=5` scene.
-- The current realtime pipeline does not transfer cleanly to these segmented meeting scenes yet; it needs dedicated optimization/tuning if this dataset is going to be a primary validation target.
-
-Separator/grouping + direction-assignment follow-up using oracle localization:
-- Re-ran the meeting-scene separator comparison with estimated localization removed from the loop.
-- The evaluator now feeds oracle per-chunk DOAs from `frame_ground_truth.json` directly into direction tracking, so the remaining metrics reflect separator quality, grouping stability, and speaker-to-direction assignment only.
-- On `restaurant_meeting_k2_scene00`:
-  - `Libri2Mix 8k`: mismatch `0.0448`, MAE `8.06 deg`, grouping switch rate `0.0909`, stability `0.769`, slow RTF `0.277`
-  - `Libri3Mix 8k`: mismatch `0.0706`, MAE `12.71 deg`, grouping switch rate `0.3125`, stability `0.778`, slow RTF `0.267`
-- On `restaurant_meeting_k3_scene00`:
-  - `Libri2Mix 8k`: mismatch `0.7381`, MAE `85.14 deg`, grouping switch rate `0.75`, stability `0.571`, slow RTF `0.258`
-  - `Libri3Mix 8k`: mismatch `0.2391`, MAE `26.61 deg`, grouping switch rate `0.4`, stability `0.667`, slow RTF `0.272`
-- Interpretation:
-  - `Libri2Mix 8k` is better on the sampled `k=2` scene.
-  - `Libri3Mix 8k` is substantially better on the sampled `k=3` scene and is the stronger general separator choice for the meeting-style setup overall.
-  - Decision for the current branch: standardize on `JorisCos/ConvTasNet_Libri3Mix_sepnoisy_8k` as the default separator for this workflow.
-
-Speaker identity grouping follow-up:
-- Added a new `speaker_embed_session` backend on top of the existing `mfcc_legacy` grouper.
-- The new path keeps MFCC/Hungarian matching for short-term chunk stability, then adds causal rolling audio buffers and a session-local exact-cosine voiceprint registry for lookup/merge.
-
-CPU speaker-embedding benchmark on this machine:
-- WavLM speaker-verification variants benchmarked on CPU with real 16 kHz meeting-scene speech:
-  - `microsoft/wavlm-base-sv`
-    - load: `706.58 ms`
-    - `200 ms`: fails
-    - `400 ms`: mean `75.11 ms`, `RTF 0.188`
-    - `600 ms`: mean `77.50 ms`, `RTF 0.129`
-    - `1000 ms`: mean `94.46 ms`, `RTF 0.094`
-    - `2000 ms`: mean `108.78 ms`, `RTF 0.054`
-  - `microsoft/wavlm-base-plus-sv`
-    - load: `552.69 ms`
-    - `200 ms`: fails
-    - `400 ms`: mean `63.88 ms`, `RTF 0.160`
-    - `600 ms`: mean `70.41 ms`, `RTF 0.117`
-    - `1000 ms`: mean `79.56 ms`, `RTF 0.080`
-    - `2000 ms`: mean `109.39 ms`, `RTF 0.055`
-  - Decision: default the learned grouping path to `wavlm_base_plus_sv`
-- `ecapa_voxceleb`:
-  - did not complete a valid benchmark on this machine
-  - current `speechbrain`/checkpoint path fails during model fetch/load (`custom.py` lookup failure against the upstream repo layout), so this backend is not usable yet in the active env
-
-Grouping baseline on `restaurant_meeting` with oracle localization and `Libri3Mix 8k` separator:
-- `mfcc_legacy`
-  - `k=2`: switch rate `0.3125`, stability `0.7778`, assignment confidence `0.1433`, direction mismatch `0.0706`, direction MAE `12.71 deg`, grouping avg `2.14 ms/chunk`, slow RTF `0.282`
-  - `k=3`: switch rate `0.4`, stability `0.6667`, assignment confidence `0.0996`, direction mismatch `0.2391`, direction MAE `26.61 deg`, grouping avg `1.89 ms/chunk`, slow RTF `0.256`
-- `speaker_embed_session` with `wavlm_base_plus_sv`
-  - `k=2`: switch rate `0.25`, stability `0.6111`, assignment confidence `0.1439`, direction mismatch `0.4842`, direction MAE `83.35 deg`, grouping avg `147.54 ms/chunk`, slow RTF `0.981`
-  - `k=3`: switch rate `0.2667`, stability `0.6667`, assignment confidence `0.0952`, direction mismatch `0.0`, direction MAE `1.62 deg`, grouping avg `117.99 ms/chunk`, slow RTF `0.826`
-
-Current takeaway on grouping:
-- `wavlm_base_plus_sv` is the best WavLM option tested here and is still technically within a `200 ms` slow chunk budget on this machine once enough trailing speech is accumulated.
-- It is not a clear replacement for the current grouper yet:
-  - strong improvement on the sampled `k=3` meeting scene
-  - clear regression on the sampled `k=2` meeting scene
-- `mfcc_legacy` remains the safer baseline today.
-- If we keep pushing learned grouping, the next work should be on the session-merge/match thresholds rather than assuming the first learned backend is globally better.
+Artifacts:
+- summary: `/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/output/control_mode_compare_60s_noise0p4x/comparison_summary.json`
+- GT vs predicted plot: `/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/output/control_mode_compare_60s_noise0p4x/visualizations/active_speaker_direction_compare.png`

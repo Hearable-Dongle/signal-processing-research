@@ -14,6 +14,12 @@ from .separation_backends import SeparationBackend
 from .shared_state import SharedPipelineState, Timer
 
 
+def _identity_maturity_label(*, backend: str, sample_count: int, provisional: bool) -> str:
+    if backend == "speaker_embed_session":
+        return "provisional" if provisional else "stable"
+    return "stable" if int(sample_count) >= 3 else "provisional"
+
+
 class SlowPathWorker(threading.Thread):
     def __init__(
         self,
@@ -60,6 +66,7 @@ class SlowPathWorker(threading.Thread):
         self._direction = DirectionAssignmentEngine(
             mic_geometry=np.asarray(mic_geometry_xy, dtype=float),
             config=DirectionAssignmentConfig(
+                control_mode=config.control_mode,
                 sample_rate=config.sample_rate_hz,
                 chunk_ms=config.slow_chunk_ms,
                 focus_gain_db=config.direction_focus_gain_db,
@@ -70,6 +77,20 @@ class SlowPathWorker(threading.Thread):
                 hold_confidence_decay=config.direction_hold_confidence_decay,
                 stale_confidence_decay=config.direction_stale_confidence_decay,
                 min_persist_confidence=config.direction_min_persist_confidence,
+                speaker_tracking_small_change_deg=config.direction_small_change_deg,
+                speaker_tracking_medium_change_deg=config.direction_medium_change_deg,
+                speaker_tracking_large_change_persist_chunks=config.direction_large_change_persist_chunks,
+                speaker_tracking_identity_hold_margin=config.direction_identity_hold_margin,
+                speaker_tracking_stable_confidence_threshold=config.direction_stable_confidence_threshold,
+                long_memory_enabled=config.direction_long_memory_enabled,
+                long_memory_window_ms=config.direction_long_memory_window_ms,
+                long_memory_min_observations=config.direction_long_memory_min_observations,
+                long_memory_anchor_lock_confidence=config.direction_long_memory_anchor_lock_confidence,
+                long_memory_max_anchor_spread_deg=config.direction_long_memory_max_anchor_spread_deg,
+                long_memory_soft_prior_margin_deg=config.direction_long_memory_soft_prior_margin_deg,
+                long_memory_relock_persist_chunks=config.direction_long_memory_relock_persist_chunks,
+                long_memory_decay=config.direction_long_memory_decay,
+                long_memory_stale_timeout_ms=config.direction_long_memory_stale_timeout_ms,
             ),
         )
         self._published_map: dict[int, SpeakerGainDirection] = {}
@@ -109,20 +130,6 @@ class SlowPathWorker(threading.Thread):
             )
             identity_ms += (perf_counter() - t0) * 1000.0
 
-            payload, _ = build_direction_assignment_input(
-                chunk_id=self._chunk_id,
-                timestamp_ms=ts_ms,
-                raw_mic_chunk=raw_chunk_mc,
-                separated_streams=separated,
-                stream_to_speaker=identity_out.stream_to_speaker,
-                active_speakers=identity_out.active_speakers,
-                srp_doa_peaks_deg=list(srp.peaks_deg),
-                srp_peak_scores=None if srp.peak_scores is None else list(srp.peak_scores),
-            )
-            t0 = perf_counter()
-            direction_out = self._direction.update(payload)
-            direction_ms += (perf_counter() - t0) * 1000.0
-            t0 = perf_counter()
             speaker_activity: dict[int, float] = {}
             for stream_idx, speaker_id in identity_out.stream_to_speaker.items():
                 if speaker_id is None:
@@ -133,11 +140,53 @@ class SlowPathWorker(threading.Thread):
                 rms = float(np.sqrt(np.mean(stream**2) + 1e-12))
                 speaker_activity[int(speaker_id)] = max(speaker_activity.get(int(speaker_id), 0.0), rms)
 
+            speaker_activity_confidence = {
+                int(sid): float(np.clip((rms - 0.005) / 0.03, 0.0, 1.0))
+                for sid, rms in speaker_activity.items()
+            }
+            identity_state = self._identity.get_state()
+            speaker_identity_metadata = {
+                int(sid): {
+                    "identity_confidence": float(np.clip(state.last_confidence, 0.0, 1.0)),
+                    "identity_maturity": _identity_maturity_label(
+                        backend=self._cfg.identity_backend,
+                        sample_count=state.sample_count,
+                        provisional=state.provisional,
+                    ),
+                    "last_seen_timestamp_ms": float(state.last_seen_timestamp_ms),
+                    "last_separator_stream_index": None if state.last_stream_index is None else int(state.last_stream_index),
+                    "sample_count": int(state.sample_count),
+                    "speech_support_ms": float(state.speech_support_ms),
+                }
+                for sid, state in identity_state.items()
+            }
+
+            payload, _ = build_direction_assignment_input(
+                chunk_id=self._chunk_id,
+                timestamp_ms=ts_ms,
+                raw_mic_chunk=raw_chunk_mc,
+                separated_streams=separated,
+                stream_to_speaker=identity_out.stream_to_speaker,
+                active_speakers=identity_out.active_speakers,
+                srp_doa_peaks_deg=list(srp.peaks_deg),
+                srp_peak_scores=None if srp.peak_scores is None else list(srp.peak_scores),
+                control_mode=self._cfg.control_mode,
+                per_stream_identity_confidence=identity_out.per_stream_confidence,
+                speaker_identity_metadata=speaker_identity_metadata,
+                per_speaker_activity_confidence=speaker_activity_confidence,
+            )
+            t0 = perf_counter()
+            direction_out = self._direction.update(payload)
+            direction_ms += (perf_counter() - t0) * 1000.0
+            t0 = perf_counter()
+            direction_state = self._direction.get_state_snapshot()
+
             gain_by_id = {sid: float(w) for sid, w in zip(direction_out.target_speaker_ids, direction_out.target_weights)}
             speaker_map: dict[int, SpeakerGainDirection] = {}
             for sid, doa in direction_out.speaker_directions_deg.items():
-                activity_rms = speaker_activity.get(int(sid), 0.0)
-                activity_conf = float(np.clip((activity_rms - 0.005) / 0.03, 0.0, 1.0))
+                identity_meta = speaker_identity_metadata.get(int(sid), {})
+                track_state = direction_state.get(int(sid))
+                activity_conf = float(speaker_activity_confidence.get(int(sid), 0.0))
                 speaker_map[int(sid)] = SpeakerGainDirection(
                     speaker_id=int(sid),
                     direction_degrees=float(doa),
@@ -146,6 +195,27 @@ class SlowPathWorker(threading.Thread):
                     active=bool(activity_conf >= 0.5),
                     activity_confidence=activity_conf,
                     updated_at_ms=ts_ms,
+                    identity_confidence=float(identity_meta.get("identity_confidence", getattr(track_state, "identity_confidence", 0.0))),
+                    identity_maturity=str(identity_meta.get("identity_maturity", getattr(track_state, "identity_maturity", "unknown"))),
+                    predicted_direction_deg=(
+                        None
+                        if track_state is None or track_state.predicted_direction_deg is None
+                        else float(track_state.predicted_direction_deg)
+                    ),
+                    angular_velocity_deg_per_chunk=0.0 if track_state is None else float(track_state.velocity_deg_per_chunk),
+                    last_separator_stream_index=(
+                        identity_meta.get("last_separator_stream_index")
+                        if identity_meta.get("last_separator_stream_index") is not None
+                        else (None if track_state is None else track_state.last_separator_stream_index)
+                    ),
+                    anchor_direction_deg=(
+                        None
+                        if track_state is None or track_state.anchor_direction_deg is None
+                        else float(track_state.anchor_direction_deg)
+                    ),
+                    anchor_confidence=0.0 if track_state is None else float(track_state.anchor_confidence),
+                    anchor_locked=False if track_state is None else bool(track_state.anchor_locked),
+                    anchor_last_confirmed_ms=0.0 if track_state is None else float(track_state.anchor_last_confirmed_ms),
                 )
 
             speaker_map = self._merge_with_published_map(speaker_map, ts_ms)
@@ -219,6 +289,11 @@ class SlowPathWorker(threading.Thread):
                 active=bool(prev.active),
                 activity_confidence=float(np.clip(prev.activity_confidence * activity_decay, 0.0, 1.0)),
                 updated_at_ms=prev.updated_at_ms,
+                identity_confidence=prev.identity_confidence,
+                identity_maturity=prev.identity_maturity,
+                predicted_direction_deg=prev.predicted_direction_deg,
+                angular_velocity_deg_per_chunk=prev.angular_velocity_deg_per_chunk,
+                last_separator_stream_index=prev.last_separator_stream_index,
             )
 
         for sid, prev in self._published_map.items():
@@ -235,6 +310,11 @@ class SlowPathWorker(threading.Thread):
                 active=bool(prev.active),
                 activity_confidence=float(np.clip(prev.activity_confidence * activity_decay, 0.0, 1.0)),
                 updated_at_ms=prev.updated_at_ms,
+                identity_confidence=prev.identity_confidence,
+                identity_maturity=prev.identity_maturity,
+                predicted_direction_deg=prev.predicted_direction_deg,
+                angular_velocity_deg_per_chunk=prev.angular_velocity_deg_per_chunk,
+                last_separator_stream_index=prev.last_separator_stream_index,
             )
 
         self._published_map = dict(out)

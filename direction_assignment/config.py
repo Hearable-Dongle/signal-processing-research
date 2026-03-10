@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 @dataclass
 class DirectionAssignmentConfig:
+    control_mode: str = "spatial_peak_mode"
+
     # Audio/STFT settings
     sample_rate: int = 16000
     chunk_ms: int = 200
@@ -41,6 +43,20 @@ class DirectionAssignmentConfig:
     prediction_alpha: float = 0.35
     history_switch_penalty_deg: float = 12.0
     max_angular_velocity_deg_per_chunk: float = 18.0
+    speaker_tracking_small_change_deg: float = 12.0
+    speaker_tracking_medium_change_deg: float = 30.0
+    speaker_tracking_large_change_persist_chunks: int = 3
+    speaker_tracking_identity_hold_margin: float = 0.08
+    speaker_tracking_stable_confidence_threshold: float = 0.55
+    long_memory_enabled: bool = True
+    long_memory_window_ms: float = 60000.0
+    long_memory_min_observations: int = 4
+    long_memory_anchor_lock_confidence: float = 0.6
+    long_memory_max_anchor_spread_deg: float = 20.0
+    long_memory_soft_prior_margin_deg: float = 18.0
+    long_memory_relock_persist_chunks: int = 4
+    long_memory_decay: float = 0.995
+    long_memory_stale_timeout_ms: float = 60000.0
 
     # Speaker lifecycle
     speaker_stale_timeout_ms: float = 2000.0

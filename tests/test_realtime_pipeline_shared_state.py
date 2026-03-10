@@ -23,6 +23,9 @@ def test_shared_state_snapshot_publish_and_read() -> None:
     assert srp.peaks_deg == (10.0, 80.0)
     assert set(smap.keys()) == {1, 2}
     assert smap[1].direction_degrees == 45.0
+    assert smap[1].identity_maturity == "unknown"
+    assert smap[1].anchor_direction_deg is None
+    assert smap[1].anchor_locked is False
 
 
 def test_shared_state_concurrent_read_write_does_not_break() -> None:

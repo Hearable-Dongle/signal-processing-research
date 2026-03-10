@@ -44,6 +44,21 @@ def build_target_weights(
         w[:] = non_focus_gain
         w[nearest_idx] = focus_gain
 
+    if str(cfg.control_mode) == "speaker_tracking_mode":
+        for i, sid in enumerate(candidate_ids):
+            st = states[sid]
+            confidence_gate = float(
+                np.clip(
+                    0.55 * float(getattr(st, "confidence", 0.0))
+                    + 0.3 * float(getattr(st, "identity_confidence", 0.0))
+                    + 0.15 * float(getattr(st, "activity_confidence", 0.0)),
+                    0.0,
+                    1.0,
+                )
+            )
+            maturity_scale = 1.0 if str(getattr(st, "identity_maturity", "unknown")) == "stable" else 0.75
+            w[i] *= max(0.1, confidence_gate * maturity_scale)
+
     w = np.maximum(w, 0.0)
     if not np.all(np.isfinite(w)) or float(np.sum(w)) <= 1e-12:
         w[:] = 1.0

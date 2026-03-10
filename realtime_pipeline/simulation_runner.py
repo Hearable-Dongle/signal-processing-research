@@ -41,6 +41,8 @@ def run_simulation_pipeline(
     localization_backend: str = "weighted_srp_dp",
     tracking_mode: str = "multi_peak_v2",
     control_mode: str = "spatial_peak_mode",
+    direction_long_memory_enabled: bool = True,
+    direction_long_memory_window_ms: float = 60000.0,
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k",
     convtasnet_model_sample_rate_hz: int = 16000,
     convtasnet_input_sample_rate_hz: int = 16000,
@@ -69,6 +71,8 @@ def run_simulation_pipeline(
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
         control_mode=str(control_mode),
+        direction_long_memory_enabled=bool(direction_long_memory_enabled),
+        direction_long_memory_window_ms=float(direction_long_memory_window_ms),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
         output_normalization_enabled=bool(output_normalization_enabled),
@@ -95,6 +99,7 @@ def run_simulation_pipeline(
 
     enhanced_parts: list[np.ndarray] = []
     speaker_map_trace: list[dict] = []
+    srp_trace: list[dict] = []
     pipe_holder: dict[str, RealtimeSpeakerPipeline] = {}
 
     def _sink(x: np.ndarray) -> None:
@@ -104,6 +109,17 @@ def run_simulation_pipeline(
         pipe = pipe_holder.get("pipe")
         if pipe is None:
             return
+        srp = pipe.shared_state.get_srp_snapshot()
+        srp_trace.append(
+            {
+                "frame_index": len(enhanced_parts) - 1,
+                "timestamp_ms": float(srp.timestamp_ms),
+                "peaks_deg": [float(v) for v in srp.peaks_deg],
+                "peak_scores": None if srp.peak_scores is None else [float(v) for v in srp.peak_scores],
+                "raw_peaks_deg": [float(v) for v in srp.raw_peaks_deg],
+                "raw_peak_scores": None if srp.raw_peak_scores is None else [float(v) for v in srp.raw_peak_scores],
+            }
+        )
         snapshot = pipe.shared_state.get_speaker_map_snapshot()
         speaker_map_trace.append(
             {
@@ -122,6 +138,10 @@ def run_simulation_pipeline(
                         "predicted_direction_deg": None if v.predicted_direction_deg is None else float(v.predicted_direction_deg),
                         "angular_velocity_deg_per_chunk": float(v.angular_velocity_deg_per_chunk),
                         "last_separator_stream_index": None if v.last_separator_stream_index is None else int(v.last_separator_stream_index),
+                        "anchor_direction_deg": None if v.anchor_direction_deg is None else float(v.anchor_direction_deg),
+                        "anchor_confidence": float(v.anchor_confidence),
+                        "anchor_locked": bool(v.anchor_locked),
+                        "anchor_last_confirmed_ms": float(v.anchor_last_confirmed_ms),
                     }
                     for v in snapshot.values()
                 ],
@@ -168,6 +188,10 @@ def run_simulation_pipeline(
             "predicted_direction_deg": None if v.predicted_direction_deg is None else float(v.predicted_direction_deg),
             "angular_velocity_deg_per_chunk": float(v.angular_velocity_deg_per_chunk),
             "last_separator_stream_index": None if v.last_separator_stream_index is None else int(v.last_separator_stream_index),
+            "anchor_direction_deg": None if v.anchor_direction_deg is None else float(v.anchor_direction_deg),
+            "anchor_confidence": float(v.anchor_confidence),
+            "anchor_locked": bool(v.anchor_locked),
+            "anchor_last_confirmed_ms": float(v.anchor_last_confirmed_ms),
         }
         for v in final_speaker_map.values()
     ]
@@ -210,9 +234,12 @@ def run_simulation_pipeline(
         "localization_backend": str(cfg.localization_backend),
         "tracking_mode": str(cfg.tracking_mode),
         "control_mode": str(cfg.control_mode),
+        "direction_long_memory_enabled": bool(cfg.direction_long_memory_enabled),
+        "direction_long_memory_window_ms": float(cfg.direction_long_memory_window_ms),
     }
     if capture_trace:
         summary["speaker_map_trace"] = speaker_map_trace
+        summary["srp_trace"] = srp_trace
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
@@ -234,6 +261,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"], default="weighted_srp_dp")
     p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
     p.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
+    p.add_argument("--disable-direction-long-memory", action="store_true")
+    p.add_argument("--direction-long-memory-window-ms", type=float, default=60000.0)
     p.add_argument("--convtasnet-model-name", default="JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k")
     p.add_argument("--convtasnet-model-sample-rate-hz", type=int, default=16000)
     p.add_argument("--convtasnet-input-sample-rate-hz", type=int, default=16000)
@@ -268,6 +297,8 @@ def main() -> None:
         localization_backend=str(args.localization_backend),
         tracking_mode=str(args.tracking_mode),
         control_mode=str(args.control_mode),
+        direction_long_memory_enabled=not bool(args.disable_direction_long_memory),
+        direction_long_memory_window_ms=float(args.direction_long_memory_window_ms),
         convtasnet_model_name=str(args.convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(args.convtasnet_model_sample_rate_hz),
         convtasnet_input_sample_rate_hz=int(args.convtasnet_input_sample_rate_hz),
