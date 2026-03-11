@@ -489,7 +489,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
     parser.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src", "snr_weighted_srp_phat", "peak_confidence_srp_phat", "particle_filter_tracker", "neural_mask_gcc_phat", "ipd_regressor"], default="weighted_srp_dp")
-    parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
+    parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
     parser.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     parser.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")
     parser.add_argument("--disable-output-normalization", action="store_true")

@@ -317,7 +317,12 @@ class FastPathWorker(threading.Thread):
         self._slow_queue = slow_queue
         self._mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=float)
         self._stop = stop_event
-        single_source_backend = config.localization_backend in {"music_1src", "gcc_tdoa_1src"} or bool(config.single_source_mode_enabled)
+        dominant_lock_mode = str(config.tracking_mode).strip().lower() == "dominant_lock_v1"
+        single_source_backend = (
+            config.localization_backend in {"music_1src", "gcc_tdoa_1src"}
+            or bool(config.single_source_mode_enabled)
+            or dominant_lock_mode
+        )
         tracker_window_ms = config.single_source_window_ms if single_source_backend else config.localization_window_ms
         tracker_grid = config.single_source_grid_size if single_source_backend else config.localization_grid_size
         tracker_freq = (
@@ -359,6 +364,18 @@ class FastPathWorker(threading.Thread):
             min_relative_peak_score=config.localization_min_relative_peak_score,
             min_peak_contrast=config.localization_min_peak_contrast,
             single_source_motion_filter_enabled=config.single_source_motion_filter_enabled,
+            dominant_lock_acquire_min_score=config.dominant_lock_acquire_min_score,
+            dominant_lock_acquire_confirm_frames=config.dominant_lock_acquire_confirm_frames,
+            dominant_lock_stay_radius_deg=config.dominant_lock_stay_radius_deg,
+            dominant_lock_update_alpha=config.dominant_lock_update_alpha,
+            dominant_lock_max_step_deg=config.dominant_lock_max_step_deg,
+            dominant_lock_hold_missing_frames=config.dominant_lock_hold_missing_frames,
+            dominant_lock_unlock_after_missing_frames=config.dominant_lock_unlock_after_missing_frames,
+            dominant_lock_challenger_min_score=config.dominant_lock_challenger_min_score,
+            dominant_lock_challenger_margin=config.dominant_lock_challenger_margin,
+            dominant_lock_challenger_consistency_deg=config.dominant_lock_challenger_consistency_deg,
+            dominant_lock_switch_confirm_frames=config.dominant_lock_switch_confirm_frames,
+            dominant_lock_switch_min_confidence=config.dominant_lock_switch_min_confidence,
         )
         self._frame_idx = 0
         self._rms_gain_ema = 1.0

@@ -42,6 +42,20 @@ class _TrackedPeak:
     last_seen_frame: int
 
 
+@dataclass
+class _DominantLockState:
+    locked_angle_deg: float | None = None
+    locked_confidence: float = 0.0
+    locked_velocity_deg_per_s: float = 0.0
+    missing_frames: int = 0
+    challenger_angle_deg: float | None = None
+    challenger_confidence: float = 0.0
+    challenger_hits: int = 0
+    acquire_angle_deg: float | None = None
+    acquire_hits: int = 0
+    last_update_frame: int = -1
+
+
 class SRPPeakTracker:
     def __init__(
         self,
@@ -78,6 +92,18 @@ class SRPPeakTracker:
         min_relative_peak_score: float = 0.28,
         min_peak_contrast: float = 0.08,
         single_source_motion_filter_enabled: bool = True,
+        dominant_lock_acquire_min_score: float = 0.45,
+        dominant_lock_acquire_confirm_frames: int = 2,
+        dominant_lock_stay_radius_deg: float = 12.0,
+        dominant_lock_update_alpha: float = 0.15,
+        dominant_lock_max_step_deg: float = 6.0,
+        dominant_lock_hold_missing_frames: int = 20,
+        dominant_lock_unlock_after_missing_frames: int = 80,
+        dominant_lock_challenger_min_score: float = 0.55,
+        dominant_lock_challenger_margin: float = 0.08,
+        dominant_lock_challenger_consistency_deg: float = 10.0,
+        dominant_lock_switch_confirm_frames: int = 4,
+        dominant_lock_switch_min_confidence: float = 0.60,
     ):
         self._fs = int(fs)
         self._window_samples = max(1, int(window_ms * fs / 1000))
@@ -147,6 +173,19 @@ class SRPPeakTracker:
         self._single_source_backends = {"music_1src", "gcc_tdoa_1src"}
         self._single_state_x: np.ndarray | None = None
         self._single_state_p: np.ndarray | None = None
+        self._dominant_lock = _DominantLockState()
+        self._dominant_lock_acquire_min_score = float(dominant_lock_acquire_min_score)
+        self._dominant_lock_acquire_confirm_frames = int(max(1, dominant_lock_acquire_confirm_frames))
+        self._dominant_lock_stay_radius_deg = float(max(1.0, dominant_lock_stay_radius_deg))
+        self._dominant_lock_update_alpha = float(np.clip(dominant_lock_update_alpha, 0.0, 1.0))
+        self._dominant_lock_max_step_deg = float(max(0.1, dominant_lock_max_step_deg))
+        self._dominant_lock_hold_missing_frames = int(max(0, dominant_lock_hold_missing_frames))
+        self._dominant_lock_unlock_after_missing_frames = int(max(self._dominant_lock_hold_missing_frames + 1, dominant_lock_unlock_after_missing_frames))
+        self._dominant_lock_challenger_min_score = float(dominant_lock_challenger_min_score)
+        self._dominant_lock_challenger_margin = float(max(0.0, dominant_lock_challenger_margin))
+        self._dominant_lock_challenger_consistency_deg = float(max(1.0, dominant_lock_challenger_consistency_deg))
+        self._dominant_lock_switch_confirm_frames = int(max(1, dominant_lock_switch_confirm_frames))
+        self._dominant_lock_switch_min_confidence = float(dominant_lock_switch_min_confidence)
 
     def _unwrap_measurement(self, meas_deg: float, ref_deg: float) -> float:
         return float(ref_deg + _angular_diff_deg(meas_deg, ref_deg))
@@ -218,6 +257,204 @@ class SRPPeakTracker:
         if float(np.linalg.norm(vv)) < 1e-12:
             return float(new_deg % 360.0)
         return float(np.degrees(np.arctan2(vv[1], vv[0])) % 360.0)
+
+    def _dominant_lock_debug(self, decision: str, raw_peaks: list[float], raw_scores: list[float], extra_debug: dict, **kwargs: object) -> dict:
+        state = self._dominant_lock
+        return {
+            "backend": self._backend_name,
+            "raw_peaks_deg": list(raw_peaks),
+            "raw_peak_scores": list(raw_scores),
+            "tracked_peaks_deg": [] if state.locked_angle_deg is None else [float(state.locked_angle_deg)],
+            "tracked_peak_scores": [] if state.locked_angle_deg is None else [float(state.locked_confidence)],
+            "held_tracks": int(kwargs.get("held_tracks", 0)),
+            "dominant_mode_decision": str(decision),
+            "lock_state": {
+                "locked_angle_deg": None if state.locked_angle_deg is None else float(state.locked_angle_deg),
+                "locked_confidence": float(state.locked_confidence),
+                "locked_velocity_deg_per_s": float(state.locked_velocity_deg_per_s),
+                "missing_frames": int(state.missing_frames),
+            },
+            "challenger_state": {
+                "challenger_angle_deg": None if state.challenger_angle_deg is None else float(state.challenger_angle_deg),
+                "challenger_confidence": float(state.challenger_confidence),
+                "challenger_hits": int(state.challenger_hits),
+                "acquire_angle_deg": None if state.acquire_angle_deg is None else float(state.acquire_angle_deg),
+                "acquire_hits": int(state.acquire_hits),
+            },
+            **{k: v for k, v in kwargs.items() if k != "held_tracks"},
+            **extra_debug,
+        }
+
+    def _clear_challenger(self) -> None:
+        self._dominant_lock.challenger_angle_deg = None
+        self._dominant_lock.challenger_confidence = 0.0
+        self._dominant_lock.challenger_hits = 0
+
+    def _clear_acquire(self) -> None:
+        self._dominant_lock.acquire_angle_deg = None
+        self._dominant_lock.acquire_hits = 0
+
+    def _update_dominant_lock(self, candidates: list[PeakCandidate], extra_debug: dict) -> tuple[list[float], list[float] | None, dict]:
+        state = self._dominant_lock
+        raw_peaks = [float(c.angle_deg) for c in candidates]
+        raw_scores = [float(c.score) for c in candidates]
+        primary = candidates[0] if candidates else None
+        challenger = candidates[1] if len(candidates) > 1 else None
+
+        if state.locked_angle_deg is None:
+            if primary is None or float(primary.score) < self._dominant_lock_acquire_min_score:
+                self._clear_acquire()
+                self._clear_challenger()
+                self._frame_idx += 1
+                return [], None, self._dominant_lock_debug(
+                    "no_lock_no_acquire",
+                    raw_peaks,
+                    raw_scores,
+                    extra_debug,
+                    switch_block_reason="acquire_min_score",
+                )
+            if state.acquire_angle_deg is not None and _angular_dist_deg(primary.angle_deg, state.acquire_angle_deg) <= self._dominant_lock_challenger_consistency_deg:
+                state.acquire_hits += 1
+                state.acquire_angle_deg = self._ema_angle(state.acquire_angle_deg, primary.angle_deg)
+            else:
+                state.acquire_angle_deg = float(primary.angle_deg)
+                state.acquire_hits = 1
+            if state.acquire_hits >= self._dominant_lock_acquire_confirm_frames:
+                state.locked_angle_deg = float(primary.angle_deg)
+                state.locked_confidence = float(primary.score)
+                state.locked_velocity_deg_per_s = 0.0
+                state.missing_frames = 0
+                state.last_update_frame = int(self._frame_idx)
+                self._clear_acquire()
+                self._clear_challenger()
+                self._frame_idx += 1
+                return [float(state.locked_angle_deg)], [float(state.locked_confidence)], self._dominant_lock_debug(
+                    "acquire_lock",
+                    raw_peaks,
+                    raw_scores,
+                    extra_debug,
+                )
+            self._frame_idx += 1
+            return [], None, self._dominant_lock_debug(
+                "acquire_pending",
+                raw_peaks,
+                raw_scores,
+                extra_debug,
+            )
+
+        assert state.locked_angle_deg is not None
+        if primary is None:
+            state.missing_frames += 1
+            state.locked_confidence *= self._score_decay
+            held = int(state.missing_frames <= self._dominant_lock_hold_missing_frames)
+            if state.missing_frames > self._dominant_lock_unlock_after_missing_frames:
+                state.locked_angle_deg = None
+                state.locked_confidence = 0.0
+                state.locked_velocity_deg_per_s = 0.0
+                self._clear_challenger()
+                self._clear_acquire()
+                self._frame_idx += 1
+                return [], None, self._dominant_lock_debug(
+                    "unlock_missing",
+                    raw_peaks,
+                    raw_scores,
+                    extra_debug,
+                    held_tracks=0,
+                    unlock_reason="missing_timeout",
+                )
+            self._frame_idx += 1
+            peaks = [float(state.locked_angle_deg)] if held else []
+            scores = [float(state.locked_confidence)] if held else None
+            return peaks, scores, self._dominant_lock_debug(
+                "hold_missing",
+                raw_peaks,
+                raw_scores,
+                extra_debug,
+                held_tracks=held,
+            )
+
+        dist_to_lock = _angular_dist_deg(primary.angle_deg, state.locked_angle_deg)
+        if dist_to_lock <= self._dominant_lock_stay_radius_deg:
+            limited = self._step_limit(state.locked_angle_deg, primary.angle_deg)
+            prev_angle = float(state.locked_angle_deg)
+            updated_angle = self._ema_angle(prev_angle, limited)
+            velocity = _angular_diff_deg(updated_angle, prev_angle) / self._update_interval_s
+            state.locked_velocity_deg_per_s = ((1.0 - self._velocity_alpha) * state.locked_velocity_deg_per_s) + (self._velocity_alpha * velocity)
+            state.locked_angle_deg = float(updated_angle)
+            state.locked_confidence = float(max(primary.score, (1.0 - self._dominant_lock_update_alpha) * state.locked_confidence + self._dominant_lock_update_alpha * primary.score))
+            state.missing_frames = 0
+            state.last_update_frame = int(self._frame_idx)
+            self._clear_challenger()
+            self._clear_acquire()
+            self._frame_idx += 1
+            return [float(state.locked_angle_deg)], [float(state.locked_confidence)], self._dominant_lock_debug(
+                "stay_update",
+                raw_peaks,
+                raw_scores,
+                extra_debug,
+            )
+
+        best_challenger = primary
+        if challenger is not None and challenger.score > best_challenger.score:
+            best_challenger = challenger
+        if float(best_challenger.score) < self._dominant_lock_challenger_min_score:
+            state.missing_frames = 0
+            self._clear_challenger()
+            self._frame_idx += 1
+            return [float(state.locked_angle_deg)], [float(state.locked_confidence)], self._dominant_lock_debug(
+                "block_challenger_weak",
+                raw_peaks,
+                raw_scores,
+                extra_debug,
+                held_tracks=1,
+                switch_block_reason="challenger_min_score",
+            )
+        if float(best_challenger.score) < float(state.locked_confidence + self._dominant_lock_challenger_margin):
+            self._clear_challenger()
+            self._frame_idx += 1
+            return [float(state.locked_angle_deg)], [float(state.locked_confidence)], self._dominant_lock_debug(
+                "block_challenger_margin",
+                raw_peaks,
+                raw_scores,
+                extra_debug,
+                held_tracks=1,
+                switch_block_reason="confidence_margin",
+            )
+
+        if state.challenger_angle_deg is not None and _angular_dist_deg(best_challenger.angle_deg, state.challenger_angle_deg) <= self._dominant_lock_challenger_consistency_deg:
+            state.challenger_hits += 1
+            state.challenger_angle_deg = self._ema_angle(state.challenger_angle_deg, best_challenger.angle_deg)
+        else:
+            state.challenger_angle_deg = float(best_challenger.angle_deg)
+            state.challenger_hits = 1
+        state.challenger_confidence = float(best_challenger.score)
+
+        if state.challenger_hits >= self._dominant_lock_switch_confirm_frames and state.challenger_confidence >= self._dominant_lock_switch_min_confidence:
+            prev_angle = float(state.locked_angle_deg)
+            state.locked_angle_deg = float(state.challenger_angle_deg)
+            state.locked_confidence = float(state.challenger_confidence)
+            state.locked_velocity_deg_per_s = _angular_diff_deg(state.locked_angle_deg, prev_angle) / self._update_interval_s
+            state.missing_frames = 0
+            state.last_update_frame = int(self._frame_idx)
+            self._clear_challenger()
+            self._clear_acquire()
+            self._frame_idx += 1
+            return [float(state.locked_angle_deg)], [float(state.locked_confidence)], self._dominant_lock_debug(
+                "switch_lock",
+                raw_peaks,
+                raw_scores,
+                extra_debug,
+            )
+
+        self._frame_idx += 1
+        return [float(state.locked_angle_deg)], [float(state.locked_confidence)], self._dominant_lock_debug(
+            "challenger_pending",
+            raw_peaks,
+            raw_scores,
+            extra_debug,
+            held_tracks=1,
+            switch_block_reason="challenger_confirm",
+        )
 
     def _extract_candidates(self, spectrum: np.ndarray | None) -> tuple[list[PeakCandidate], dict]:
         if spectrum is None:
@@ -570,6 +807,8 @@ class SRPPeakTracker:
             candidates = [PeakCandidate(angle_deg=float(a), score=float(s if i < len(legacy_scores) else 1.0), raw_score=float(s if i < len(legacy_scores) else 1.0)) for i, (a, s) in enumerate(zip(legacy_peaks, legacy_scores or [1.0] * len(legacy_peaks)))]
             extractor_debug["selected_peaks_deg"] = [float(c.angle_deg) for c in candidates]
         extra_debug = {**dict(backend_result.debug), **extractor_debug, "tracking_mode": self._tracking_mode}
+        if self._tracking_mode == "dominant_lock_v1":
+            return self._update_dominant_lock(candidates, extra_debug)
         if self._backend_name in self._single_source_backends:
             if not legacy_peaks and backend_result.score_spectrum is not None:
                 spec = np.asarray(backend_result.score_spectrum, dtype=np.float64)

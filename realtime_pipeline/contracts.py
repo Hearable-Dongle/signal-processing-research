@@ -48,7 +48,7 @@ class PipelineConfig:
     slow_chunk_hop_ms: int | None = None
     fast_path_reference_mode: str = "speaker_map"  # one of: speaker_map, srp_peak
     localization_backend: str = "weighted_srp_dp"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy, music_1src, gcc_tdoa_1src, snr_weighted_srp_phat, peak_confidence_srp_phat, particle_filter_tracker, neural_mask_gcc_phat, ipd_regressor
-    tracking_mode: str = "multi_peak_v2"  # one of: legacy, multi_peak_v2
+    tracking_mode: str = "multi_peak_v2"  # one of: legacy, multi_peak_v2, dominant_lock_v1
     control_mode: str = "spatial_peak_mode"  # one of: spatial_peak_mode, speaker_tracking_mode
     localization_window_ms: int = 160
     localization_hop_ms: int = 50
@@ -68,6 +68,18 @@ class PipelineConfig:
     localization_track_confidence_decay: float = 0.88
     localization_velocity_alpha: float = 0.35
     localization_angle_alpha: float = 0.30
+    dominant_lock_acquire_min_score: float = 0.45
+    dominant_lock_acquire_confirm_frames: int = 2
+    dominant_lock_stay_radius_deg: float = 12.0
+    dominant_lock_update_alpha: float = 0.15
+    dominant_lock_max_step_deg: float = 6.0
+    dominant_lock_hold_missing_frames: int = 20
+    dominant_lock_unlock_after_missing_frames: int = 80
+    dominant_lock_challenger_min_score: float = 0.55
+    dominant_lock_challenger_margin: float = 0.08
+    dominant_lock_challenger_consistency_deg: float = 10.0
+    dominant_lock_switch_confirm_frames: int = 4
+    dominant_lock_switch_min_confidence: float = 0.60
     single_source_mode_enabled: bool = False
     single_source_window_ms: int = 80
     single_source_hop_ms: int = 20

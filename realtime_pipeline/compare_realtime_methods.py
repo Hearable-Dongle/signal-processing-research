@@ -149,6 +149,60 @@ def _load_json(path: str | Path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _extract_speaker_doa_from_metadata(meta: dict, mic_center_xy: np.ndarray) -> dict[int, float]:
+    doa_by_speaker: dict[int, float] = {}
+
+    for row in meta.get("assets", {}).get("render_segments", []):
+        if row.get("classification") != "speech" or "speaker_id" not in row:
+            continue
+        sid = int(row["speaker_id"])
+        pos = np.asarray(row.get("position_m", row.get("loc", [0.0, 0.0]))[:2], dtype=float)
+        delta = pos - mic_center_xy
+        doa_by_speaker[sid] = _normalize_angle_deg(np.degrees(np.arctan2(delta[1], delta[0])))
+
+    for row in meta.get("assets", {}).get("speech", []):
+        if "speaker_id" not in row:
+            continue
+        sid = int(row["speaker_id"])
+        if "angle_deg" in row:
+            doa_by_speaker[sid] = _normalize_angle_deg(float(row["angle_deg"]))
+            continue
+        pos = np.asarray(row.get("position_m", row.get("loc", [0.0, 0.0]))[:2], dtype=float)
+        delta = pos - mic_center_xy
+        doa_by_speaker[sid] = _normalize_angle_deg(np.degrees(np.arctan2(delta[1], delta[0])))
+
+    return doa_by_speaker
+
+
+def _extract_speech_events(meta: dict) -> list[dict[str, float | int]]:
+    events = [
+        {
+            "speaker_id": int(row["speaker_id"]),
+            "start_sec": float(row.get("start_sec", 0.0)),
+            "end_sec": float(row.get("end_sec", 0.0)),
+        }
+        for row in meta.get("assets", {}).get("speech_events", [])
+        if "speaker_id" in row
+    ]
+    if events:
+        return sorted(events, key=lambda row: (float(row["start_sec"]), float(row["end_sec"])))
+
+    for row in meta.get("assets", {}).get("speech", []):
+        if "speaker_id" not in row:
+            continue
+        active_window = row.get("active_window_sec")
+        if not isinstance(active_window, list) or len(active_window) < 2:
+            continue
+        events.append(
+            {
+                "speaker_id": int(row["speaker_id"]),
+                "start_sec": float(active_window[0]),
+                "end_sec": float(active_window[1]),
+            }
+        )
+    return sorted(events, key=lambda row: (float(row["start_sec"]), float(row["end_sec"])))
+
+
 def build_active_speaker_ground_truth(
     *,
     scene_config_path: str | Path,
@@ -159,19 +213,8 @@ def build_active_speaker_ground_truth(
     meta = _load_json(scenario_metadata_path)
     mic_center = np.asarray(scene_cfg.microphone_array.mic_center[:2], dtype=float)
 
-    doa_by_speaker: dict[int, float] = {}
-    for row in meta.get("assets", {}).get("render_segments", []):
-        if row.get("classification") != "speech" or "speaker_id" not in row:
-            continue
-        sid = int(row["speaker_id"])
-        pos = np.asarray(row.get("position_m", row.get("loc", [0.0, 0.0]))[:2], dtype=float)
-        delta = pos - mic_center
-        doa_by_speaker[sid] = _normalize_angle_deg(np.degrees(np.arctan2(delta[1], delta[0])))
-
-    speech_events = sorted(
-        meta.get("assets", {}).get("speech_events", []),
-        key=lambda row: (float(row.get("start_sec", 0.0)), float(row.get("end_sec", 0.0))),
-    )
+    doa_by_speaker = _extract_speaker_doa_from_metadata(meta, mic_center)
+    speech_events = _extract_speech_events(meta)
     duration_s = float(meta.get("config", {}).get("render", {}).get("duration_sec", scene_cfg.audio.duration))
     num_frames = max(1, int(round(duration_s * 1000.0 / max(float(frame_step_ms), 1.0))))
     time_s = np.arange(num_frames, dtype=np.float64) * (float(frame_step_ms) / 1000.0)

@@ -371,6 +371,26 @@ def run_simulation_pipeline(
     with (out_root / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
+    if str(cfg.tracking_mode).strip().lower() == "dominant_lock_v1":
+        (out_root / "dominant_lock_tradeoffs.txt").write_text(
+            "\n".join(
+                [
+                    "dominant_lock_v1 tradeoffs",
+                    "single dominant only",
+                    "hold last lock during short uncertainty",
+                    "very conservative switching",
+                    "intended for low-motion scenes",
+                    "fallback knobs for tomorrow morning:",
+                    "- reduce dominant_lock_switch_confirm_frames",
+                    "- reduce dominant_lock_challenger_margin",
+                    "- reduce dominant_lock_hold_missing_frames",
+                    "- increase dominant_lock_update_alpha",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     return summary
 
 
@@ -401,7 +421,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ],
         default="weighted_srp_dp",
     )
-    p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
+    p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
     p.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     p.add_argument("--disable-direction-long-memory", action="store_true")
     p.add_argument("--direction-long-memory-window-ms", type=float, default=60000.0)

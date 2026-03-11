@@ -54,6 +54,24 @@ def _tracker(**overrides: float) -> SRPPeakTracker:
     return tracker
 
 
+def _dominant_lock_tracker(**overrides: float) -> SRPPeakTracker:
+    mic_pos = mic_positions_xyz("respeaker_v3_0457").T
+    tracker = SRPPeakTracker(
+        mic_pos=mic_pos,
+        fs=16000,
+        window_ms=20,
+        nfft=64,
+        overlap=0.5,
+        freq_range=(300, 2500),
+        max_sources=1,
+        backend="tiny_dp_ipd",
+        tracking_mode="dominant_lock_v1",
+        min_peak_separation_deg=18.0,
+        **overrides,
+    )
+    return tracker
+
+
 def test_multipeak_extractor_keeps_separated_strong_peaks() -> None:
     tracker = _tracker(min_peak_contrast=0.0, min_relative_peak_score=0.25)
     spec = np.zeros(72, dtype=np.float64)
@@ -132,3 +150,95 @@ def test_single_source_filter_smooths_jittery_measurements() -> None:
     raw_span = max(raw) - min(raw)
     filt_span = max(filtered) - min(filtered)
     assert filt_span < raw_span
+
+
+def test_dominant_lock_acquires_after_consistent_observations() -> None:
+    tracker = _dominant_lock_tracker()
+    spectra = []
+    for idx in [8, 8, 8]:
+        spec = np.zeros(72, dtype=np.float64)
+        spec[idx] = 1.0
+        spectra.append(spec)
+    tracker._backend = _StubBackend(spectra)
+    frame = np.zeros((320, 4), dtype=np.float32)
+    peaks1, _scores1, debug1 = tracker.update(frame)
+    peaks2, _scores2, debug2 = tracker.update(frame)
+    assert peaks1 == []
+    assert debug1["dominant_mode_decision"] == "acquire_pending"
+    assert peaks2
+    assert debug2["dominant_mode_decision"] == "acquire_lock"
+
+
+def test_dominant_lock_holds_on_missing_then_unlocks() -> None:
+    tracker = _dominant_lock_tracker(
+        dominant_lock_hold_missing_frames=1,
+        dominant_lock_unlock_after_missing_frames=2,
+    )
+    spectra = []
+    locked = np.zeros(72, dtype=np.float64)
+    locked[10] = 1.0
+    spectra.extend([locked, locked, np.zeros(72, dtype=np.float64), np.zeros(72, dtype=np.float64), np.zeros(72, dtype=np.float64)])
+    tracker._backend = _StubBackend(spectra)
+    frame = np.zeros((320, 4), dtype=np.float32)
+    tracker.update(frame)
+    tracker.update(frame)
+    peaks3, _scores3, debug3 = tracker.update(frame)
+    peaks4, _scores4, debug4 = tracker.update(frame)
+    peaks5, _scores5, debug5 = tracker.update(frame)
+    assert peaks3
+    assert debug3["dominant_mode_decision"] == "hold_missing"
+    assert peaks4 == []
+    assert debug4["dominant_mode_decision"] == "hold_missing"
+    assert peaks5 == []
+    assert debug5["dominant_mode_decision"] == "unlock_missing"
+
+
+def test_dominant_lock_requires_repeated_challenger_before_switch() -> None:
+    tracker = _dominant_lock_tracker(
+        dominant_lock_switch_confirm_frames=3,
+        dominant_lock_challenger_margin=0.0,
+    )
+    spectra = []
+    for bins in [(8,), (8,), (30, 8), (30, 8), (30, 8)]:
+        spec = np.zeros(72, dtype=np.float64)
+        if len(bins) == 1:
+            spec[bins[0]] = 1.0
+        else:
+            spec[bins[0]] = 1.0
+            spec[bins[1]] = 0.6
+        spectra.append(spec)
+    tracker._backend = _StubBackend(spectra)
+    frame = np.zeros((320, 4), dtype=np.float32)
+    tracker.update(frame)
+    tracker.update(frame)
+    peaks3, _scores3, debug3 = tracker.update(frame)
+    peaks4, _scores4, debug4 = tracker.update(frame)
+    peaks5, _scores5, debug5 = tracker.update(frame)
+    assert round(peaks3[0]) == 40
+    assert debug3["dominant_mode_decision"] == "challenger_pending"
+    assert round(peaks4[0]) == 40
+    assert debug4["dominant_mode_decision"] == "challenger_pending"
+    assert round(peaks5[0]) == 150
+    assert debug5["dominant_mode_decision"] == "switch_lock"
+
+
+def test_dominant_lock_handles_wraparound_challenger_consistently() -> None:
+    tracker = _dominant_lock_tracker(
+        dominant_lock_switch_confirm_frames=2,
+        dominant_lock_challenger_margin=0.01,
+    )
+    spectra = []
+    for idx in [71, 71, 1, 1]:
+        spec = np.zeros(72, dtype=np.float64)
+        spec[idx] = 1.0
+        spectra.append(spec)
+    tracker._backend = _StubBackend(spectra)
+    frame = np.zeros((320, 4), dtype=np.float32)
+    tracker.update(frame)
+    tracker.update(frame)
+    peaks3, _scores3, debug3 = tracker.update(frame)
+    peaks4, _scores4, debug4 = tracker.update(frame)
+    assert peaks3
+    assert debug3["dominant_mode_decision"] == "stay_update"
+    assert peaks4
+    assert debug4["dominant_mode_decision"] == "stay_update"
