@@ -9,6 +9,7 @@ from realtime_pipeline.compare_realtime_methods import (
     METHOD_SPEAKER_TRACKING_LONG_MEMORY,
     METHOD_SPATIAL_BASELINE,
     build_active_speaker_ground_truth,
+    build_framewise_speech_ground_truth,
     get_method_preset,
 )
 
@@ -129,3 +130,40 @@ def test_build_active_speaker_ground_truth_supports_testing_specific_angles_meta
     assert out["active_directions_deg"][5:] == [45.0, 45.0, 45.0, 45.0, 45.0]
     assert out["doa_by_speaker"]["0"] == 0.0
     assert out["doa_by_speaker"]["1"] == 45.0
+
+
+def test_build_framewise_speech_ground_truth_tracks_all_active_targets(tmp_path: Path) -> None:
+    scene = {
+        "room": {"dimensions": [5.0, 4.0, 3.0], "absorption": 0.25},
+        "microphone_array": {"mic_center": [2.5, 2.0, 1.5], "mic_radius": 0.05, "mic_count": 4, "mic_positions": None},
+        "audio": {
+            "sources": [
+                {"loc": [3.5, 2.0, 1.5], "audio": "spk0.wav", "gain": 1.0, "classification": "speech"},
+                {"loc": [2.5, 3.0, 1.5], "audio": "spk1.wav", "gain": 1.0, "classification": "speech"},
+            ],
+            "duration": 3.0,
+            "fs": 16000,
+        },
+    }
+    scene_path = tmp_path / "scene.json"
+    scene_path.write_text(json.dumps(scene), encoding="utf-8")
+    metadata = {
+        "config": {"render": {"duration_sec": 3.0}},
+        "assets": {
+            "speech": [
+                {"speaker_id": 0, "active_window_sec": [0.0, 2.0], "position_m": [3.5, 2.0, 1.5], "angle_deg": 0},
+                {"speaker_id": 1, "active_window_sec": [1.0, 3.0], "position_m": [2.5, 3.0, 1.5], "angle_deg": 90},
+            ]
+        },
+    }
+    metadata_path = tmp_path / "scenario_metadata.json"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    out = build_framewise_speech_ground_truth(
+        scene_config_path=scene_path,
+        scenario_metadata_path=metadata_path,
+        frame_step_ms=1000.0,
+    )
+    assert out["active_target_speaker_ids"] == [[0], [0, 1], [1]]
+    assert out["active_target_directions_deg"] == [[0.0], [0.0, 90.0], [90.0]]
+    assert out["active_speaker_ids"] == [0, 1, 1]

@@ -232,8 +232,9 @@ class LocalizationBackendBase:
 
 
 class LegacySRPBackend(LocalizationBackendBase):
-    def __init__(self, **kwargs):
+    def __init__(self, *, backend_name: str = "srp_phat_legacy", **kwargs):
         super().__init__(**kwargs)
+        self.backend_name = str(backend_name)
         self._localizer = SRPPHATLocalization(
             mic_pos=self.mic_pos,
             fs=self.fs,
@@ -259,7 +260,7 @@ class LegacySRPBackend(LocalizationBackendBase):
             peaks_deg=peaks_deg,
             peak_scores=scores,
             score_spectrum=spec,
-            debug={"backend": "srp_phat_legacy", "spectrum_bins": int(np.asarray(p_theta).size if p_theta is not None else 0)},
+            debug={"backend": self.backend_name, "spectrum_bins": int(np.asarray(p_theta).size if p_theta is not None else 0)},
         )
 
 
@@ -855,8 +856,8 @@ def build_localization_backend(
         small_aperture_bias=bool(small_aperture_bias),
     )
     name = str(backend).strip().lower()
-    if name == "srp_phat_legacy":
-        return LegacySRPBackend(**common)
+    if name in {"srp_phat_legacy", "srp_phat_localization"}:
+        return LegacySRPBackend(backend_name=name, **common)
     if name == "weighted_srp_dp":
         return WeightedSRPDPBackend(**common)
     if name == "tiny_dp_ipd":

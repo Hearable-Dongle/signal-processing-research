@@ -137,11 +137,18 @@ def main() -> None:
     args = _parse_args()
     cfg = _load_cfg(Path(args.config))
 
+    scene_roots = cfg["scene_roots"]
+    if any(str(scene_type).strip().lower() == "testing_specific_angles" for scene_type in scene_roots):
+        raise NotImplementedError(
+            "localization/benchmark is a scene-level benchmark and is not valid for "
+            "testing_specific_angles framewise active-speaker evaluation. "
+            "Use `python -m realtime_pipeline.run_framewise_localization_benchmark` instead."
+        )
+
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.out_root) / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    scene_roots = cfg["scene_roots"]
     methods_cfg = cfg["methods"]
     preset_cfg = cfg["presets"][args.preset]
 

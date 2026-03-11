@@ -244,6 +244,56 @@ def build_active_speaker_ground_truth(
     }
 
 
+def build_framewise_speech_ground_truth(
+    *,
+    scene_config_path: str | Path,
+    scenario_metadata_path: str | Path,
+    frame_step_ms: float,
+) -> dict[str, object]:
+    scene_cfg = SimulationConfig.from_file(scene_config_path)
+    meta = _load_json(scenario_metadata_path)
+    mic_center = np.asarray(scene_cfg.microphone_array.mic_center[:2], dtype=float)
+
+    doa_by_speaker = _extract_speaker_doa_from_metadata(meta, mic_center)
+    speech_events = _extract_speech_events(meta)
+    duration_s = float(meta.get("config", {}).get("render", {}).get("duration_sec", scene_cfg.audio.duration))
+    num_frames = max(1, int(round(duration_s * 1000.0 / max(float(frame_step_ms), 1.0))))
+    time_s = np.arange(num_frames, dtype=np.float64) * (float(frame_step_ms) / 1000.0)
+
+    active_speaker_ids = np.full(num_frames, -1, dtype=np.int32)
+    active_directions_deg = np.full(num_frames, np.nan, dtype=np.float64)
+    active_target_speaker_ids: list[list[int]] = []
+    active_target_directions_deg: list[list[float]] = []
+
+    for t_sec in time_s:
+        active_rows = [
+            row
+            for row in speech_events
+            if float(row.get("start_sec", 0.0)) <= float(t_sec) < float(row.get("end_sec", 0.0))
+        ]
+        active_rows.sort(key=lambda row: (int(row.get("speaker_id", -1)), float(row.get("start_sec", 0.0)), float(row.get("end_sec", 0.0))))
+        speaker_ids = [int(row["speaker_id"]) for row in active_rows]
+        doas = [float(doa_by_speaker.get(sid, np.nan)) for sid in speaker_ids]
+        active_target_speaker_ids.append(speaker_ids)
+        active_target_directions_deg.append(doas)
+
+    for idx, speaker_ids in enumerate(active_target_speaker_ids):
+        if not speaker_ids:
+            continue
+        chosen_sid = int(speaker_ids[-1])
+        active_speaker_ids[idx] = chosen_sid
+        active_directions_deg[idx] = float(doa_by_speaker.get(chosen_sid, np.nan))
+
+    return {
+        "time_s": time_s.tolist(),
+        "active_speaker_ids": active_speaker_ids.tolist(),
+        "active_directions_deg": active_directions_deg.tolist(),
+        "active_target_speaker_ids": active_target_speaker_ids,
+        "active_target_directions_deg": active_target_directions_deg,
+        "doa_by_speaker": {str(k): float(v) for k, v in sorted(doa_by_speaker.items())},
+    }
+
+
 def _prediction_from_summary(summary: dict, active_gt: dict[str, object], *, method_id: str) -> list[float]:
     active_speaker_ids = np.asarray(active_gt["active_speaker_ids"], dtype=int)
     active_directions = np.asarray(active_gt["active_directions_deg"], dtype=float)
