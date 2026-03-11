@@ -1,0 +1,19 @@
+{
+  "run_id": "20260310_230026",
+  "profile": "respeaker_v3_0457",
+  "duration_min": 60.0,
+  "methods": [
+    "SRP-PHAT",
+    "GMDA",
+    "SSZ"
+  ],
+  "scenes_root": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles",
+  "assets_root": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles",
+  "benchmark_config": "/home/mkeller/mkeller/signal-processing-research/localization/benchmark/configs/default.json",
+  "python_bin": "/home/mkeller/mkeller/signal-processing-research/beamforming/beamforming-sim-env/bin/python",
+  "method_workers": {
+    "SRP-PHAT": 10,
+    "GMDA": 8,
+    "SSZ": 6
+  }
+}

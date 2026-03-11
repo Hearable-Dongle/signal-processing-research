@@ -1,0 +1,24 @@
+{
+  "method": "SSZ",
+  "trial_number": 111,
+  "balanced_score": 0.48061941499835714,
+  "mae_deg_matched_mean": 58.057291666666664,
+  "acc_within_10deg_mean": 0.3541666666666667,
+  "recall_mean": 0.953125,
+  "misses_mean": 0.09375,
+  "false_alarms_mean": 0.0,
+  "runtime_seconds_mean": 1.6075877126907774,
+  "angle_mae_std": 4.868716458841821,
+  "layout_mae_std": 0.5312500000000036,
+  "method_cfg": {
+    "nfft": 3600,
+    "overlap": 0.5,
+    "epsilon": 0.0884515814058056,
+    "d_freq": 1,
+    "freq_range": [
+      1100,
+      1600
+    ],
+    "window_ms": 225
+  }
+}

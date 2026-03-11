@@ -1,0 +1,5 @@
+{
+  "method": "GMDA",
+  "study_name": "respeaker_v3_gmda",
+  "storage_url": "sqlite:////home/mkeller/mkeller/signal-processing-research/localization/tuning/results/respeaker_v3_optuna_launches/20260310_225541/gmda/20260310_225542/gmda/study.db"
+}

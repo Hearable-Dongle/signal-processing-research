@@ -1,0 +1,26 @@
+[
+  {
+    "method": "GMDA",
+    "trial_number": 200,
+    "balanced_score": 0.49408552317945936,
+    "mae_deg_matched_mean": 41.3671875,
+    "acc_within_10deg_mean": 0.390625,
+    "recall_mean": 1.0,
+    "misses_mean": 0.0,
+    "false_alarms_mean": 0.0,
+    "runtime_seconds_mean": 1.765717026772715,
+    "angle_mae_std": 2.9008300996313254,
+    "layout_mae_std": 6.03515625,
+    "method_cfg": {
+      "nfft": 3440,
+      "overlap": 0.9,
+      "freq_range": [
+        1100,
+        3800
+      ],
+      "power_thresh_percentile": 96,
+      "mdl_beta": 1.1036711463337165,
+      "window_ms": 215
+    }
+  }
+]

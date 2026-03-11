@@ -18,6 +18,8 @@ AI localization modules/configs were removed. Valid `localization.type` values a
 - Benchmark framework:
   - `python -m localization.benchmark.run`
   - `python -m localization.benchmark.report`
+  - `python -m localization.benchmark.rank_respeaker_v3_methods`
+  - `python -m localization.tuning.run_optuna_respeaker_v3`
 
 ## Run A Single Localization Config
 
@@ -81,6 +83,35 @@ Each run writes to `localization/benchmark/results/<run_id>/`:
 - `k_trends.png`
 
 The symlink `localization/benchmark/results/latest` points to the newest run.
+
+## ReSpeaker V3 Ranking And Tuning
+
+Ranking on the `testing_specific_angles` scenes:
+
+```bash
+python -m localization.benchmark.rank_respeaker_v3_methods \
+  --profile respeaker_v3_0457 \
+  --workers 10
+```
+
+This writes ranked method summaries and angle/layout heatmaps under
+`localization/benchmark/results/respeaker_v3_testing_specific_angles/<run_id>/`.
+
+Optuna tuning for `SRP-PHAT`, `GMDA`, and `SSZ`:
+
+```bash
+python -m localization.tuning.run_optuna_respeaker_v3 \
+  --profile respeaker_v3_0457 \
+  --duration-min 60 \
+  --subset-per-bucket 1 \
+  --srp-workers 10 \
+  --gmda-workers 8 \
+  --ssz-workers 6
+```
+
+This writes per-method SQLite studies under
+`localization/tuning/results/respeaker_v3_optuna/<run_id>/` and includes
+`dashboard_commands.txt` with live `optuna-dashboard` commands for each study DB.
 
 ## Implemented Benchmark Components
 

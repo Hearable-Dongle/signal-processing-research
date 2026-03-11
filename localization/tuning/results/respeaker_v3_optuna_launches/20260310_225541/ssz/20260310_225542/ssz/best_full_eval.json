@@ -1,0 +1,127 @@
+[
+  {
+    "trial_number": 111,
+    "value_subset": 0.4662278577482911,
+    "method_cfg": {
+      "nfft": 3600,
+      "overlap": 0.5,
+      "epsilon": 0.0884515814058056,
+      "d_freq": 1,
+      "freq_range": [
+        1100,
+        1600
+      ],
+      "window_ms": 225
+    },
+    "n_scenes": 96,
+    "mae_deg_matched_mean": 58.057291666666664,
+    "acc_within_10deg_mean": 0.3541666666666667,
+    "recall_mean": 0.953125,
+    "misses_mean": 0.09375,
+    "false_alarms_mean": 0.0,
+    "runtime_seconds_mean": 1.6075877126907774,
+    "angle_mae_std": 4.868716458841821,
+    "layout_mae_std": 0.5312500000000036,
+    "balanced_score": 0.48061941499835714
+  },
+  {
+    "trial_number": 114,
+    "value_subset": 0.46645785099430964,
+    "method_cfg": {
+      "nfft": 3680,
+      "overlap": 0.5,
+      "epsilon": 0.025970392916277445,
+      "d_freq": 1,
+      "freq_range": [
+        1050,
+        1600
+      ],
+      "window_ms": 230
+    },
+    "n_scenes": 96,
+    "mae_deg_matched_mean": 58.890625,
+    "acc_within_10deg_mean": 0.359375,
+    "recall_mean": 0.9479166666666666,
+    "misses_mean": 0.10416666666666667,
+    "false_alarms_mean": 0.0,
+    "runtime_seconds_mean": 1.8239356737952523,
+    "angle_mae_std": 5.330441008536358,
+    "layout_mae_std": 1.2656250000000036,
+    "balanced_score": 0.4705090615820932
+  },
+  {
+    "trial_number": 89,
+    "value_subset": 0.467642220798863,
+    "method_cfg": {
+      "nfft": 3280,
+      "overlap": 0.7,
+      "epsilon": 0.07341244908311768,
+      "d_freq": 1,
+      "freq_range": [
+        1000,
+        1500
+      ],
+      "window_ms": 205
+    },
+    "n_scenes": 96,
+    "mae_deg_matched_mean": 59.036458333333336,
+    "acc_within_10deg_mean": 0.3385416666666667,
+    "recall_mean": 0.9270833333333334,
+    "misses_mean": 0.14583333333333334,
+    "false_alarms_mean": 0.0,
+    "runtime_seconds_mean": 3.8977459797024494,
+    "angle_mae_std": 3.892960031109933,
+    "layout_mae_std": 0.625,
+    "balanced_score": 0.46795630352318796
+  },
+  {
+    "trial_number": 107,
+    "value_subset": 0.4664790693056904,
+    "method_cfg": {
+      "nfft": 3840,
+      "overlap": 0.45,
+      "epsilon": 0.037269479749056166,
+      "d_freq": 1,
+      "freq_range": [
+        1100,
+        1600
+      ],
+      "window_ms": 240
+    },
+    "n_scenes": 96,
+    "mae_deg_matched_mean": 59.270833333333336,
+    "acc_within_10deg_mean": 0.3645833333333333,
+    "recall_mean": 0.9427083333333334,
+    "misses_mean": 0.11458333333333333,
+    "false_alarms_mean": 0.0,
+    "runtime_seconds_mean": 1.8749460391651762,
+    "angle_mae_std": 4.306809853140851,
+    "layout_mae_std": 2.4687500000000036,
+    "balanced_score": 0.4653746758348986
+  },
+  {
+    "trial_number": 113,
+    "value_subset": 0.466303137115785,
+    "method_cfg": {
+      "nfft": 3920,
+      "overlap": 0.5,
+      "epsilon": 0.03053448772946783,
+      "d_freq": 1,
+      "freq_range": [
+        1050,
+        1600
+      ],
+      "window_ms": 245
+    },
+    "n_scenes": 96,
+    "mae_deg_matched_mean": 57.72916666666666,
+    "acc_within_10deg_mean": 0.3489583333333333,
+    "recall_mean": 0.9322916666666666,
+    "misses_mean": 0.13541666666666666,
+    "false_alarms_mean": 0.0,
+    "runtime_seconds_mean": 1.7568321690099158,
+    "angle_mae_std": 6.139474111119864,
+    "layout_mae_std": 1.3750000000000036,
+    "balanced_score": 0.46062568671666704
+  }
+]

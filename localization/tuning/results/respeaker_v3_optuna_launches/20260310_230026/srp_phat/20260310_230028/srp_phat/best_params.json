@@ -1,0 +1,22 @@
+{
+  "method": "SRP-PHAT",
+  "trial_number": 166,
+  "balanced_score": 0.3294839709257129,
+  "mae_deg_matched_mean": 39.276041666666664,
+  "acc_within_10deg_mean": 0.3125,
+  "recall_mean": 0.546875,
+  "misses_mean": 0.90625,
+  "false_alarms_mean": 0.0,
+  "runtime_seconds_mean": 0.3907200659790154,
+  "angle_mae_std": 8.361279637640367,
+  "layout_mae_std": 6.2890625,
+  "method_cfg": {
+    "nfft": 3520,
+    "overlap": 0.65,
+    "freq_range": [
+      1200,
+      1800
+    ],
+    "window_ms": 220
+  }
+}

@@ -1,0 +1,5094 @@
+[
+  {
+    "trial_number": 0,
+    "state": "COMPLETE",
+    "value": 0.41090236058967594,
+    "params": {
+      "window_ms": 30,
+      "overlap": 0.5,
+      "freq_low_hz": 200,
+      "freq_high_hz": 3000,
+      "epsilon": 0.1,
+      "d_freq": 8
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.56607709641431,
+      "balanced_score": 0.41090236058967594,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.6249999999999893,
+      "mae_deg_matched_mean": 62.187500000000014,
+      "method_cfg": {
+        "nfft": 480,
+        "overlap": 0.5,
+        "epsilon": 0.1,
+        "d_freq": 8,
+        "freq_range": [
+          200,
+          3000
+        ],
+        "window_ms": 30
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 480,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 2.1281538659823127,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 1,
+    "state": "COMPLETE",
+    "value": 0.4057578629359496,
+    "params": {
+      "window_ms": 110,
+      "overlap": 0.75,
+      "freq_low_hz": 500,
+      "freq_high_hz": 2400,
+      "epsilon": 0.280799777948929,
+      "d_freq": 15
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.295299783885206,
+      "balanced_score": 0.4057578629359496,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.687499999999993,
+      "mae_deg_matched_mean": 61.93750000000001,
+      "method_cfg": {
+        "nfft": 1760,
+        "overlap": 0.75,
+        "epsilon": 0.280799777948929,
+        "d_freq": 15,
+        "freq_range": [
+          500,
+          2400
+        ],
+        "window_ms": 110
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 1760,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 2.021006602968555,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 2,
+    "state": "COMPLETE",
+    "value": 0.40588616298354435,
+    "params": {
+      "window_ms": 125,
+      "overlap": 0.45,
+      "freq_low_hz": 900,
+      "freq_high_hz": 5300,
+      "epsilon": 0.28506918963911815,
+      "d_freq": 8
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.47103216961032,
+      "balanced_score": 0.40588616298354435,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.499999999999993,
+      "mae_deg_matched_mean": 62.18750000000001,
+      "method_cfg": {
+        "nfft": 2000,
+        "overlap": 0.45,
+        "epsilon": 0.28506918963911815,
+        "d_freq": 8,
+        "freq_range": [
+          900,
+          5300
+        ],
+        "window_ms": 125
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 2000,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 3.2059431369125377,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 3,
+    "state": "COMPLETE",
+    "value": 0.4205461224093607,
+    "params": {
+      "window_ms": 210,
+      "overlap": 0.6000000000000001,
+      "freq_low_hz": 800,
+      "freq_high_hz": 5500,
+      "epsilon": 0.08185041865917114,
+      "d_freq": 10
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.69063518851085,
+      "balanced_score": 0.4205461224093607,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.812499999999993,
+      "mae_deg_matched_mean": 62.06250000000001,
+      "method_cfg": {
+        "nfft": 3360,
+        "overlap": 0.6000000000000001,
+        "epsilon": 0.08185041865917114,
+        "d_freq": 10,
+        "freq_range": [
+          800,
+          5500
+        ],
+        "window_ms": 210
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3360,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.464359299483476,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 4,
+    "state": "COMPLETE",
+    "value": 0.4248845049800313,
+    "params": {
+      "window_ms": 140,
+      "overlap": 0.9,
+      "freq_low_hz": 900,
+      "freq_high_hz": 2100,
+      "epsilon": 0.42757686791944627,
+      "d_freq": 6
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.383843747758082,
+      "balanced_score": 0.4248845049800313,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.031249999999993,
+      "mae_deg_matched_mean": 60.65625000000001,
+      "method_cfg": {
+        "nfft": 2240,
+        "overlap": 0.9,
+        "epsilon": 0.42757686791944627,
+        "d_freq": 6,
+        "freq_range": [
+          900,
+          2100
+        ],
+        "window_ms": 140
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2240,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 5.7882189280644525,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 5,
+    "state": "COMPLETE",
+    "value": 0.41636225365365453,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.7,
+      "freq_low_hz": 450,
+      "freq_high_hz": 2200,
+      "epsilon": 0.3842155916870193,
+      "d_freq": 12
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 18.578144711932357,
+      "balanced_score": 0.41636225365365453,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.03125,
+      "mae_deg_matched_mean": 62.468750000000014,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.7,
+        "epsilon": 0.3842155916870193,
+        "d_freq": 12,
+        "freq_range": [
+          450,
+          2200
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.0044226118188817,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 6,
+    "state": "COMPLETE",
+    "value": 0.42119838639549584,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.6000000000000001,
+      "freq_low_hz": 250,
+      "freq_high_hz": 2600,
+      "epsilon": 0.33704525316406303,
+      "d_freq": 7
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.618051346408414,
+      "balanced_score": 0.42119838639549584,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.59375,
+      "mae_deg_matched_mean": 62.03125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.6000000000000001,
+        "epsilon": 0.33704525316406303,
+        "d_freq": 7,
+        "freq_range": [
+          250,
+          2600
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.6703731763991527,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 7,
+    "state": "COMPLETE",
+    "value": 0.4157998293247184,
+    "params": {
+      "window_ms": 140,
+      "overlap": 0.75,
+      "freq_low_hz": 350,
+      "freq_high_hz": 2300,
+      "epsilon": 0.4332718254068818,
+      "d_freq": 10
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.61521949756107,
+      "balanced_score": 0.4157998293247184,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.78125,
+      "mae_deg_matched_mean": 62.28125000000001,
+      "method_cfg": {
+        "nfft": 2240,
+        "overlap": 0.75,
+        "epsilon": 0.4332718254068818,
+        "d_freq": 10,
+        "freq_range": [
+          350,
+          2300
+        ],
+        "window_ms": 140
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2240,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.561473019362893,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 8,
+    "state": "COMPLETE",
+    "value": 0.4268644708137506,
+    "params": {
+      "window_ms": 225,
+      "overlap": 0.7,
+      "freq_low_hz": 250,
+      "freq_high_hz": 2100,
+      "epsilon": 0.2355294479411361,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 12.313451739865647,
+      "balanced_score": 0.4268644708137506,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.875,
+      "mae_deg_matched_mean": 59.9375,
+      "method_cfg": {
+        "nfft": 3600,
+        "overlap": 0.7,
+        "epsilon": 0.2355294479411361,
+        "d_freq": 1,
+        "freq_range": [
+          250,
+          2100
+        ],
+        "window_ms": 225
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3600,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 13.898455633665435,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 9,
+    "state": "COMPLETE",
+    "value": 0.43487116343266713,
+    "params": {
+      "window_ms": 180,
+      "overlap": 0.8,
+      "freq_low_hz": 550,
+      "freq_high_hz": 4200,
+      "epsilon": 0.05927648738788492,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.78945337738355,
+      "balanced_score": 0.43487116343266713,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.53125,
+      "mae_deg_matched_mean": 58.21875,
+      "method_cfg": {
+        "nfft": 2880,
+        "overlap": 0.8,
+        "epsilon": 0.05927648738788492,
+        "d_freq": 1,
+        "freq_range": [
+          550,
+          4200
+        ],
+        "window_ms": 180
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2880,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 60.34972316384665,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 10,
+    "state": "COMPLETE",
+    "value": 0.4244758974781436,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.35,
+      "freq_low_hz": 800,
+      "freq_high_hz": 3700,
+      "epsilon": 0.28407639868442003,
+      "d_freq": 9
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.316039319694926,
+      "balanced_score": 0.4244758974781436,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.3124999999999964,
+      "mae_deg_matched_mean": 60.62500000000001,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.35,
+        "epsilon": 0.28407639868442003,
+        "d_freq": 9,
+        "freq_range": [
+          800,
+          3700
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 1.8784842958848458,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 11,
+    "state": "COMPLETE",
+    "value": 0.42032598907102137,
+    "params": {
+      "window_ms": 135,
+      "overlap": 0.45,
+      "freq_low_hz": 250,
+      "freq_high_hz": 2400,
+      "epsilon": 0.3817176537623234,
+      "d_freq": 8
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.623925094820912,
+      "balanced_score": 0.42032598907102137,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.9062500000000036,
+      "mae_deg_matched_mean": 61.78125,
+      "method_cfg": {
+        "nfft": 2160,
+        "overlap": 0.45,
+        "epsilon": 0.3817176537623234,
+        "d_freq": 8,
+        "freq_range": [
+          250,
+          2400
+        ],
+        "window_ms": 135
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2160,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 1.6728294542408548,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 12,
+    "state": "COMPLETE",
+    "value": 0.41443041475929665,
+    "params": {
+      "window_ms": 100,
+      "overlap": 0.9,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 4700,
+      "epsilon": 0.20891521308591904,
+      "d_freq": 11
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.390719429665317,
+      "balanced_score": 0.41443041475929665,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.1874999999999964,
+      "mae_deg_matched_mean": 60.87500000000001,
+      "method_cfg": {
+        "nfft": 1600,
+        "overlap": 0.9,
+        "epsilon": 0.20891521308591904,
+        "d_freq": 11,
+        "freq_range": [
+          1200,
+          4700
+        ],
+        "window_ms": 100
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 1600,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 9.010320050409064,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 13,
+    "state": "COMPLETE",
+    "value": 0.4213118393446687,
+    "params": {
+      "window_ms": 210,
+      "overlap": 0.25,
+      "freq_low_hz": 900,
+      "freq_high_hz": 2500,
+      "epsilon": 0.256368911882922,
+      "d_freq": 13
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.354580490983725,
+      "balanced_score": 0.4213118393446687,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.5624999999999964,
+      "mae_deg_matched_mean": 62.375,
+      "method_cfg": {
+        "nfft": 3360,
+        "overlap": 0.25,
+        "epsilon": 0.256368911882922,
+        "d_freq": 13,
+        "freq_range": [
+          900,
+          2500
+        ],
+        "window_ms": 210
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3360,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 0.8361440890876111,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 14,
+    "state": "COMPLETE",
+    "value": 0.4172864586278127,
+    "params": {
+      "window_ms": 95,
+      "overlap": 0.25,
+      "freq_low_hz": 800,
+      "freq_high_hz": 1900,
+      "epsilon": 0.03233784927232,
+      "d_freq": 14
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.380014472066332,
+      "balanced_score": 0.4172864586278127,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.5312499999999964,
+      "mae_deg_matched_mean": 60.71875,
+      "method_cfg": {
+        "nfft": 1520,
+        "overlap": 0.25,
+        "epsilon": 0.03233784927232,
+        "d_freq": 14,
+        "freq_range": [
+          800,
+          1900
+        ],
+        "window_ms": 95
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 1520,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 0.525499488809146,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 15,
+    "state": "COMPLETE",
+    "value": 0.4407194111929318,
+    "params": {
+      "window_ms": 55,
+      "overlap": 0.9,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 4400,
+      "epsilon": 0.16024193932702194,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 9.784743784969534,
+      "balanced_score": 0.4407194111929318,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.406249999999993,
+      "mae_deg_matched_mean": 62.21875000000001,
+      "method_cfg": {
+        "nfft": 880,
+        "overlap": 0.9,
+        "epsilon": 0.16024193932702194,
+        "d_freq": 1,
+        "freq_range": [
+          1200,
+          4400
+        ],
+        "window_ms": 55
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 880,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 117.02799869515002,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 16,
+    "state": "COMPLETE",
+    "value": 0.434617759388649,
+    "params": {
+      "window_ms": 180,
+      "overlap": 0.25,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 3950,
+      "epsilon": 0.1859094862185092,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.788127965775583,
+      "balanced_score": 0.434617759388649,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.96875,
+      "mae_deg_matched_mean": 57.78125,
+      "method_cfg": {
+        "nfft": 2880,
+        "overlap": 0.25,
+        "epsilon": 0.1859094862185092,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          3950
+        ],
+        "window_ms": 180
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2880,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 4.501386083575198,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 17,
+    "state": "COMPLETE",
+    "value": 0.4279939856930208,
+    "params": {
+      "window_ms": 175,
+      "overlap": 0.9,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 4100,
+      "epsilon": 0.18156057522447394,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 11.780835536476197,
+      "balanced_score": 0.4279939856930208,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.53125,
+      "mae_deg_matched_mean": 58.28125,
+      "method_cfg": {
+        "nfft": 2800,
+        "overlap": 0.9,
+        "epsilon": 0.18156057522447394,
+        "d_freq": 2,
+        "freq_range": [
+          1200,
+          4100
+        ],
+        "window_ms": 175
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2800,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 50.0789337978058,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 18,
+    "state": "COMPLETE",
+    "value": 0.4406430193958263,
+    "params": {
+      "window_ms": 165,
+      "overlap": 0.9,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 4600,
+      "epsilon": 0.18001237821842236,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.510269219225474,
+      "balanced_score": 0.4406430193958263,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.28125,
+      "mae_deg_matched_mean": 56.53125,
+      "method_cfg": {
+        "nfft": 2640,
+        "overlap": 0.9,
+        "epsilon": 0.18001237821842236,
+        "d_freq": 2,
+        "freq_range": [
+          1200,
+          4600
+        ],
+        "window_ms": 165
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2640,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 61.749267189909006,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 19,
+    "state": "COMPLETE",
+    "value": 0.4346248878927578,
+    "params": {
+      "window_ms": 170,
+      "overlap": 0.9,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 3900,
+      "epsilon": 0.1858111667591061,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.800423721205963,
+      "balanced_score": 0.4346248878927578,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.9375,
+      "mae_deg_matched_mean": 57.875,
+      "method_cfg": {
+        "nfft": 2720,
+        "overlap": 0.9,
+        "epsilon": 0.1858111667591061,
+        "d_freq": 3,
+        "freq_range": [
+          1200,
+          3900
+        ],
+        "window_ms": 170
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2720,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 34.282277821330354,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 20,
+    "state": "COMPLETE",
+    "value": 0.4347633504816519,
+    "params": {
+      "window_ms": 180,
+      "overlap": 0.7,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 4000,
+      "epsilon": 0.17322734149629593,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.775529114969755,
+      "balanced_score": 0.4347633504816519,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.71875,
+      "mae_deg_matched_mean": 58.03125,
+      "method_cfg": {
+        "nfft": 2880,
+        "overlap": 0.7,
+        "epsilon": 0.17322734149629593,
+        "d_freq": 1,
+        "freq_range": [
+          1200,
+          4000
+        ],
+        "window_ms": 180
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2880,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 37.33647950235172,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 21,
+    "state": "COMPLETE",
+    "value": 0.4346170875230068,
+    "params": {
+      "window_ms": 185,
+      "overlap": 0.35,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 4200,
+      "epsilon": 0.1777633751320309,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.775197384226745,
+      "balanced_score": 0.4346170875230068,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.96875,
+      "mae_deg_matched_mean": 57.84375,
+      "method_cfg": {
+        "nfft": 2960,
+        "overlap": 0.35,
+        "epsilon": 0.1777633751320309,
+        "d_freq": 1,
+        "freq_range": [
+          1200,
+          4200
+        ],
+        "window_ms": 185
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2960,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 18.36515822345973,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 22,
+    "state": "COMPLETE",
+    "value": 0.42463631846534766,
+    "params": {
+      "window_ms": 175,
+      "overlap": 0.8500000000000001,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 4200,
+      "epsilon": 0.1525806320691056,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.42724810028431,
+      "balanced_score": 0.42463631846534766,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.1875,
+      "mae_deg_matched_mean": 60.6875,
+      "method_cfg": {
+        "nfft": 2800,
+        "overlap": 0.8500000000000001,
+        "epsilon": 0.1525806320691056,
+        "d_freq": 4,
+        "freq_range": [
+          1050,
+          4200
+        ],
+        "window_ms": 175
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2800,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 21.295090101775713,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 23,
+    "state": "COMPLETE",
+    "value": 0.4214922844580452,
+    "params": {
+      "window_ms": 170,
+      "overlap": 0.8,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 3500,
+      "epsilon": 0.14466270111307772,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.569863859220945,
+      "balanced_score": 0.4214922844580452,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.499999999999993,
+      "mae_deg_matched_mean": 62.18750000000001,
+      "method_cfg": {
+        "nfft": 2720,
+        "overlap": 0.8,
+        "epsilon": 0.14466270111307772,
+        "d_freq": 4,
+        "freq_range": [
+          1050,
+          3500
+        ],
+        "window_ms": 170
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2720,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 12.911776947119506,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 24,
+    "state": "COMPLETE",
+    "value": 0.4058319236409096,
+    "params": {
+      "window_ms": 70,
+      "overlap": 0.8,
+      "freq_low_hz": 600,
+      "freq_high_hz": 6000,
+      "epsilon": 0.1308210077530018,
+      "d_freq": 5
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.50630907552734,
+      "balanced_score": 0.4058319236409096,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.5624999999999964,
+      "mae_deg_matched_mean": 62.06250000000001,
+      "method_cfg": {
+        "nfft": 1120,
+        "overlap": 0.8,
+        "epsilon": 0.1308210077530018,
+        "d_freq": 5,
+        "freq_range": [
+          600,
+          6000
+        ],
+        "window_ms": 70
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 1120,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 20.538877427985426,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 25,
+    "state": "COMPLETE",
+    "value": 0.4001691045704291,
+    "params": {
+      "window_ms": 65,
+      "overlap": 0.8,
+      "freq_low_hz": 650,
+      "freq_high_hz": 3300,
+      "epsilon": 0.11988536494468198,
+      "d_freq": 5
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.711601306074805,
+      "balanced_score": 0.4001691045704291,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.96875,
+      "mae_deg_matched_mean": 61.84375000000001,
+      "method_cfg": {
+        "nfft": 1040,
+        "overlap": 0.8,
+        "epsilon": 0.11988536494468198,
+        "d_freq": 5,
+        "freq_range": [
+          650,
+          3300
+        ],
+        "window_ms": 65
+      },
+      "misses_mean": 0.375,
+      "n_scenes": 16,
+      "nfft": 1040,
+      "recall_mean": 0.8125,
+      "runtime_seconds_mean": 12.063586878939532,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 26,
+    "state": "COMPLETE",
+    "value": 0.42472918227136636,
+    "params": {
+      "window_ms": 160,
+      "overlap": 0.8,
+      "freq_low_hz": 600,
+      "freq_high_hz": 4700,
+      "epsilon": 0.1305727913309108,
+      "d_freq": 5
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.40119197369069,
+      "balanced_score": 0.42472918227136636,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.1249999999999964,
+      "mae_deg_matched_mean": 60.75000000000001,
+      "method_cfg": {
+        "nfft": 2560,
+        "overlap": 0.8,
+        "epsilon": 0.1305727913309108,
+        "d_freq": 5,
+        "freq_range": [
+          600,
+          4700
+        ],
+        "window_ms": 160
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2560,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 16.385864305164432,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 27,
+    "state": "COMPLETE",
+    "value": 0.41423253577437724,
+    "params": {
+      "window_ms": 155,
+      "overlap": 0.8,
+      "freq_low_hz": 650,
+      "freq_high_hz": 4700,
+      "epsilon": 0.11818721128291246,
+      "d_freq": 5
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.456256023127885,
+      "balanced_score": 0.41423253577437724,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.343749999999993,
+      "mae_deg_matched_mean": 60.40625000000001,
+      "method_cfg": {
+        "nfft": 2480,
+        "overlap": 0.8,
+        "epsilon": 0.11818721128291246,
+        "d_freq": 5,
+        "freq_range": [
+          650,
+          4700
+        ],
+        "window_ms": 155
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 2480,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 16.48619618068915,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 28,
+    "state": "COMPLETE",
+    "value": 0.42488380651471314,
+    "params": {
+      "window_ms": 200,
+      "overlap": 0.8,
+      "freq_low_hz": 650,
+      "freq_high_hz": 4800,
+      "epsilon": 0.020157531140334112,
+      "d_freq": 5
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.354601156766318,
+      "balanced_score": 0.42488380651471314,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.0312499999999964,
+      "mae_deg_matched_mean": 60.71875000000001,
+      "method_cfg": {
+        "nfft": 3200,
+        "overlap": 0.8,
+        "epsilon": 0.020157531140334112,
+        "d_freq": 5,
+        "freq_range": [
+          650,
+          4800
+        ],
+        "window_ms": 200
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3200,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 9.132439087843522,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 29,
+    "state": "COMPLETE",
+    "value": 0.4209130905458378,
+    "params": {
+      "window_ms": 200,
+      "overlap": 0.65,
+      "freq_low_hz": 600,
+      "freq_high_hz": 4800,
+      "epsilon": 0.0399565273248703,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.587630295441112,
+      "balanced_score": 0.4209130905458378,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.6874999999999964,
+      "mae_deg_matched_mean": 62.12500000000001,
+      "method_cfg": {
+        "nfft": 3200,
+        "overlap": 0.65,
+        "epsilon": 0.0399565273248703,
+        "d_freq": 3,
+        "freq_range": [
+          600,
+          4800
+        ],
+        "window_ms": 200
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3200,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 12.757636154681677,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 30,
+    "state": "COMPLETE",
+    "value": 0.4405821265355855,
+    "params": {
+      "window_ms": 155,
+      "overlap": 0.65,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 4700,
+      "epsilon": 0.041666634298063776,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.470551248341044,
+      "balanced_score": 0.4405821265355855,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.46875,
+      "mae_deg_matched_mean": 56.40625,
+      "method_cfg": {
+        "nfft": 2480,
+        "overlap": 0.65,
+        "epsilon": 0.041666634298063776,
+        "d_freq": 1,
+        "freq_range": [
+          1050,
+          4700
+        ],
+        "window_ms": 155
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2480,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 41.330664195877034,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 31,
+    "state": "COMPLETE",
+    "value": 0.42022255060716235,
+    "params": {
+      "window_ms": 155,
+      "overlap": 0.65,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 4800,
+      "epsilon": 0.06786361758394997,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.6597829569371,
+      "balanced_score": 0.42022255060716235,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.9375,
+      "mae_deg_matched_mean": 62.00000000000001,
+      "method_cfg": {
+        "nfft": 2480,
+        "overlap": 0.65,
+        "epsilon": 0.06786361758394997,
+        "d_freq": 3,
+        "freq_range": [
+          1050,
+          4800
+        ],
+        "window_ms": 155
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2480,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 13.458524198736995,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 32,
+    "state": "COMPLETE",
+    "value": 0.45801382520189754,
+    "params": {
+      "window_ms": 195,
+      "overlap": 0.65,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1500,
+      "epsilon": 0.05355543160926665,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.173682037968742,
+      "balanced_score": 0.45801382520189754,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.968750000000004,
+      "mae_deg_matched_mean": 55.15625,
+      "method_cfg": {
+        "nfft": 3120,
+        "overlap": 0.65,
+        "epsilon": 0.05355543160926665,
+        "d_freq": 2,
+        "freq_range": [
+          1050,
+          1500
+        ],
+        "window_ms": 195
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3120,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 3.1482572395470925,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 33,
+    "state": "COMPLETE",
+    "value": 0.4355887600278596,
+    "params": {
+      "window_ms": 200,
+      "overlap": 0.65,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1700,
+      "epsilon": 0.06740512042364202,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.42453345643082,
+      "balanced_score": 0.4355887600278596,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.999999999999993,
+      "mae_deg_matched_mean": 60.87500000000001,
+      "method_cfg": {
+        "nfft": 3200,
+        "overlap": 0.65,
+        "epsilon": 0.06740512042364202,
+        "d_freq": 3,
+        "freq_range": [
+          1050,
+          1700
+        ],
+        "window_ms": 200
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3200,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 3.306960278569022,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 34,
+    "state": "COMPLETE",
+    "value": 0.458256293432522,
+    "params": {
+      "window_ms": 250,
+      "overlap": 0.55,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1600,
+      "epsilon": 0.06470058868637808,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.119009049371837,
+      "balanced_score": 0.458256293432522,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.28125,
+      "mae_deg_matched_mean": 55.34375,
+      "method_cfg": {
+        "nfft": 4000,
+        "overlap": 0.55,
+        "epsilon": 0.06470058868637808,
+        "d_freq": 3,
+        "freq_range": [
+          1050,
+          1600
+        ],
+        "window_ms": 250
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 4000,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 2.7338487554807216,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 35,
+    "state": "COMPLETE",
+    "value": 0.411466670826332,
+    "params": {
+      "window_ms": 25,
+      "overlap": 0.55,
+      "freq_low_hz": 100,
+      "freq_high_hz": 1500,
+      "epsilon": 0.0642639949514473,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 18.529721690772917,
+      "balanced_score": 0.411466670826332,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.78125,
+      "mae_deg_matched_mean": 63.46875,
+      "method_cfg": {
+        "nfft": 400,
+        "overlap": 0.55,
+        "epsilon": 0.0642639949514473,
+        "d_freq": 3,
+        "freq_range": [
+          100,
+          1500
+        ],
+        "window_ms": 25
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 400,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 5.357628140453016,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 36,
+    "state": "COMPLETE",
+    "value": 0.4243917069646024,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.55,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1700,
+      "epsilon": 0.07469515006641564,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.34390970969657,
+      "balanced_score": 0.4243917069646024,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 1.7812499999999964,
+      "mae_deg_matched_mean": 63.40625,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.55,
+        "epsilon": 0.07469515006641564,
+        "d_freq": 3,
+        "freq_range": [
+          1000,
+          1700
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 3.18152319881483,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 37,
+    "state": "COMPLETE",
+    "value": 0.4514525466725514,
+    "params": {
+      "window_ms": 250,
+      "overlap": 0.55,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1500,
+      "epsilon": 0.08014583127347703,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 13.011863577136062,
+      "balanced_score": 0.4514525466725514,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.187499999999996,
+      "mae_deg_matched_mean": 55.31250000000001,
+      "method_cfg": {
+        "nfft": 4000,
+        "overlap": 0.55,
+        "epsilon": 0.08014583127347703,
+        "d_freq": 3,
+        "freq_range": [
+          1050,
+          1500
+        ],
+        "window_ms": 250
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 4000,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 2.4392001065134536,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 38,
+    "state": "COMPLETE",
+    "value": 0.45249101761211313,
+    "params": {
+      "window_ms": 250,
+      "overlap": 0.5,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1500,
+      "epsilon": 0.09398664214098021,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.685768046811363,
+      "balanced_score": 0.45249101761211313,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.906249999999993,
+      "mae_deg_matched_mean": 57.46875000000001,
+      "method_cfg": {
+        "nfft": 4000,
+        "overlap": 0.5,
+        "epsilon": 0.09398664214098021,
+        "d_freq": 2,
+        "freq_range": [
+          1000,
+          1500
+        ],
+        "window_ms": 250
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 4000,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 3.0144270865421277,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 39,
+    "state": "COMPLETE",
+    "value": 0.4583472648178159,
+    "params": {
+      "window_ms": 250,
+      "overlap": 0.5,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1500,
+      "epsilon": 0.09172715101205689,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.295874301357557,
+      "balanced_score": 0.4583472648178159,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.84375,
+      "mae_deg_matched_mean": 55.65625,
+      "method_cfg": {
+        "nfft": 4000,
+        "overlap": 0.5,
+        "epsilon": 0.09172715101205689,
+        "d_freq": 2,
+        "freq_range": [
+          1100,
+          1500
+        ],
+        "window_ms": 250
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 4000,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 2.4732363019138575,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 40,
+    "state": "COMPLETE",
+    "value": 0.42788070573426695,
+    "params": {
+      "window_ms": 245,
+      "overlap": 0.5,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 2900,
+      "epsilon": 0.10096952013752397,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 11.727330192226205,
+      "balanced_score": 0.42788070573426695,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.78125,
+      "mae_deg_matched_mean": 57.84375,
+      "method_cfg": {
+        "nfft": 3920,
+        "overlap": 0.5,
+        "epsilon": 0.10096952013752397,
+        "d_freq": 2,
+        "freq_range": [
+          1100,
+          2900
+        ],
+        "window_ms": 245
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3920,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 7.593974299641559,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 41,
+    "state": "COMPLETE",
+    "value": 0.40484710860158435,
+    "params": {
+      "window_ms": 245,
+      "overlap": 0.5,
+      "freq_low_hz": 950,
+      "freq_high_hz": 2800,
+      "epsilon": 0.09814406054053118,
+      "d_freq": 16
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 18.611047626342803,
+      "balanced_score": 0.40484710860158435,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.3749999999999964,
+      "mae_deg_matched_mean": 62.0625,
+      "method_cfg": {
+        "nfft": 3920,
+        "overlap": 0.5,
+        "epsilon": 0.09814406054053118,
+        "d_freq": 16,
+        "freq_range": [
+          950,
+          2800
+        ],
+        "window_ms": 245
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 3920,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 1.9453872319427319,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 42,
+    "state": "COMPLETE",
+    "value": 0.4215775409118879,
+    "params": {
+      "window_ms": 250,
+      "overlap": 0.5,
+      "freq_low_hz": 950,
+      "freq_high_hz": 2900,
+      "epsilon": 0.09312768082488322,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.608187672030294,
+      "balanced_score": 0.4215775409118879,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.46875,
+      "mae_deg_matched_mean": 62.34375,
+      "method_cfg": {
+        "nfft": 4000,
+        "overlap": 0.5,
+        "epsilon": 0.09312768082488322,
+        "d_freq": 4,
+        "freq_range": [
+          950,
+          2900
+        ],
+        "window_ms": 250
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 4000,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 4.707358816434862,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 43,
+    "state": "COMPLETE",
+    "value": 0.4145010491637678,
+    "params": {
+      "window_ms": 250,
+      "overlap": 0.45,
+      "freq_low_hz": 950,
+      "freq_high_hz": 2700,
+      "epsilon": 0.0955424009419969,
+      "d_freq": 7
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 18.65159070796644,
+      "balanced_score": 0.4145010491637678,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.53125,
+      "mae_deg_matched_mean": 62.21875,
+      "method_cfg": {
+        "nfft": 4000,
+        "overlap": 0.45,
+        "epsilon": 0.0955424009419969,
+        "d_freq": 7,
+        "freq_range": [
+          950,
+          2700
+        ],
+        "window_ms": 250
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 4000,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.7903897444193717,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 44,
+    "state": "COMPLETE",
+    "value": 0.4215789733693998,
+    "params": {
+      "window_ms": 220,
+      "overlap": 0.45,
+      "freq_low_hz": 750,
+      "freq_high_hz": 1900,
+      "epsilon": 0.09770387889794058,
+      "d_freq": 6
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.480537693408714,
+      "balanced_score": 0.4215789733693998,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.4687499999999964,
+      "mae_deg_matched_mean": 62.59375000000001,
+      "method_cfg": {
+        "nfft": 3520,
+        "overlap": 0.45,
+        "epsilon": 0.09770387889794058,
+        "d_freq": 6,
+        "freq_range": [
+          750,
+          1900
+        ],
+        "window_ms": 220
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3520,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.492175273335306,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 45,
+    "state": "COMPLETE",
+    "value": 0.42159225935464584,
+    "params": {
+      "window_ms": 220,
+      "overlap": 0.5,
+      "freq_low_hz": 750,
+      "freq_high_hz": 1900,
+      "epsilon": 0.04529850778745757,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.573939025890557,
+      "balanced_score": 0.42159225935464584,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.468749999999993,
+      "mae_deg_matched_mean": 62.21875000000001,
+      "method_cfg": {
+        "nfft": 3520,
+        "overlap": 0.5,
+        "epsilon": 0.04529850778745757,
+        "d_freq": 2,
+        "freq_range": [
+          750,
+          1900
+        ],
+        "window_ms": 220
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3520,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 5.245512782596052,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 46,
+    "state": "COMPLETE",
+    "value": 0.45141953094144865,
+    "params": {
+      "window_ms": 245,
+      "overlap": 0.5,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1500,
+      "epsilon": 0.04948547700288261,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 13.329214858722937,
+      "balanced_score": 0.45141953094144865,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.0,
+      "mae_deg_matched_mean": 55.4375,
+      "method_cfg": {
+        "nfft": 3920,
+        "overlap": 0.5,
+        "epsilon": 0.04948547700288261,
+        "d_freq": 2,
+        "freq_range": [
+          1100,
+          1500
+        ],
+        "window_ms": 245
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3920,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 2.2611933078151196,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 47,
+    "state": "COMPLETE",
+    "value": 0.45812601016902993,
+    "params": {
+      "window_ms": 215,
+      "overlap": 0.6000000000000001,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1500,
+      "epsilon": 0.043737297541030805,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.332145129348103,
+      "balanced_score": 0.45812601016902993,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.437500000000004,
+      "mae_deg_matched_mean": 55.4375,
+      "method_cfg": {
+        "nfft": 3440,
+        "overlap": 0.6000000000000001,
+        "epsilon": 0.043737297541030805,
+        "d_freq": 2,
+        "freq_range": [
+          1100,
+          1500
+        ],
+        "window_ms": 215
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3440,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 2.69926368346205,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 48,
+    "state": "COMPLETE",
+    "value": 0.4519037377797991,
+    "params": {
+      "window_ms": 215,
+      "overlap": 0.6000000000000001,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 2000,
+      "epsilon": 0.040728470324488834,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.53183446267945,
+      "balanced_score": 0.4519037377797991,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.25,
+      "mae_deg_matched_mean": 56.375,
+      "method_cfg": {
+        "nfft": 3440,
+        "overlap": 0.6000000000000001,
+        "epsilon": 0.040728470324488834,
+        "d_freq": 1,
+        "freq_range": [
+          1100,
+          2000
+        ],
+        "window_ms": 215
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3440,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 10.411167718790239,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 49,
+    "state": "COMPLETE",
+    "value": 0.43476768514812103,
+    "params": {
+      "window_ms": 220,
+      "overlap": 0.6000000000000001,
+      "freq_low_hz": 850,
+      "freq_high_hz": 2000,
+      "epsilon": 0.047756529554577695,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.793097491223431,
+      "balanced_score": 0.43476768514812103,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.71875,
+      "mae_deg_matched_mean": 57.90625,
+      "method_cfg": {
+        "nfft": 3520,
+        "overlap": 0.6000000000000001,
+        "epsilon": 0.047756529554577695,
+        "d_freq": 1,
+        "freq_range": [
+          850,
+          2000
+        ],
+        "window_ms": 220
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3520,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 12.094098381581716,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 50,
+    "state": "COMPLETE",
+    "value": 0.43483844469768707,
+    "params": {
+      "window_ms": 220,
+      "overlap": 0.6000000000000001,
+      "freq_low_hz": 850,
+      "freq_high_hz": 1900,
+      "epsilon": 0.022339217422939373,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.80336121354847,
+      "balanced_score": 0.43483844469768707,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.59375,
+      "mae_deg_matched_mean": 58.03125,
+      "method_cfg": {
+        "nfft": 3520,
+        "overlap": 0.6000000000000001,
+        "epsilon": 0.022339217422939373,
+        "d_freq": 1,
+        "freq_range": [
+          850,
+          1900
+        ],
+        "window_ms": 220
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3520,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 11.159709238272626,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 51,
+    "state": "COMPLETE",
+    "value": 0.43491235613548584,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.6000000000000001,
+      "freq_low_hz": 850,
+      "freq_high_hz": 2100,
+      "epsilon": 0.02584100166374676,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.812954687016301,
+      "balanced_score": 0.43491235613548584,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.46875,
+      "mae_deg_matched_mean": 58.15625,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.6000000000000001,
+        "epsilon": 0.02584100166374676,
+        "d_freq": 1,
+        "freq_range": [
+          850,
+          2100
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 12.92944660919602,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 52,
+    "state": "COMPLETE",
+    "value": 0.4268360823818748,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.4,
+      "freq_low_hz": 850,
+      "freq_high_hz": 2300,
+      "epsilon": 0.3062558783899639,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 12.176076376957413,
+      "balanced_score": 0.4268360823818748,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.09375,
+      "mae_deg_matched_mean": 59.53125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.4,
+        "epsilon": 0.3062558783899639,
+        "d_freq": 1,
+        "freq_range": [
+          850,
+          2300
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 9.69928500239621,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 53,
+    "state": "COMPLETE",
+    "value": 0.4207248550835954,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.55,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 2200,
+      "epsilon": 0.3513000304568239,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.515618407171825,
+      "balanced_score": 0.4207248550835954,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.749999999999993,
+      "mae_deg_matched_mean": 62.37500000000001,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.55,
+        "epsilon": 0.3513000304568239,
+        "d_freq": 4,
+        "freq_range": [
+          1000,
+          2200
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 3.5103295328153763,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 54,
+    "state": "COMPLETE",
+    "value": 0.4241980971072242,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.4,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 2300,
+      "epsilon": 0.30625460022853257,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.531624996400073,
+      "balanced_score": 0.4241980971072242,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.499999999999993,
+      "mae_deg_matched_mean": 60.50000000000001,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.4,
+        "epsilon": 0.30625460022853257,
+        "d_freq": 4,
+        "freq_range": [
+          1000,
+          2300
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.9951131629932206,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 55,
+    "state": "COMPLETE",
+    "value": 0.4464585901540157,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.4,
+      "freq_low_hz": 450,
+      "freq_high_hz": 2300,
+      "epsilon": 0.30793373975253596,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.613015229604798,
+      "balanced_score": 0.4464585901540157,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 0.0937500000000071,
+      "mae_deg_matched_mean": 64.53125,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.4,
+        "epsilon": 0.30793373975253596,
+        "d_freq": 4,
+        "freq_range": [
+          450,
+          2300
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 3.985192345426185,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 56,
+    "state": "COMPLETE",
+    "value": 0.45211839557147393,
+    "params": {
+      "window_ms": 210,
+      "overlap": 0.55,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.055791866241144496,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.586226040298977,
+      "balanced_score": 0.45211839557147393,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.5937499999999964,
+      "mae_deg_matched_mean": 57.46875000000001,
+      "method_cfg": {
+        "nfft": 3360,
+        "overlap": 0.55,
+        "epsilon": 0.055791866241144496,
+        "d_freq": 2,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 210
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3360,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 2.6885814426932484,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 57,
+    "state": "COMPLETE",
+    "value": 0.45219766574759945,
+    "params": {
+      "window_ms": 210,
+      "overlap": 0.7,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1700,
+      "epsilon": 0.049447365956326365,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.633041993122646,
+      "balanced_score": 0.45219766574759945,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.4375,
+      "mae_deg_matched_mean": 57.375,
+      "method_cfg": {
+        "nfft": 3360,
+        "overlap": 0.7,
+        "epsilon": 0.049447365956326365,
+        "d_freq": 2,
+        "freq_range": [
+          1100,
+          1700
+        ],
+        "window_ms": 210
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3360,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 4.403869246714748,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 58,
+    "state": "COMPLETE",
+    "value": 0.4581137063017306,
+    "params": {
+      "window_ms": 190,
+      "overlap": 0.65,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1650,
+      "epsilon": 0.05704647861566742,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.247899302814023,
+      "balanced_score": 0.4581137063017306,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.53125,
+      "mae_deg_matched_mean": 55.46875,
+      "method_cfg": {
+        "nfft": 3040,
+        "overlap": 0.65,
+        "epsilon": 0.05704647861566742,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          1650
+        ],
+        "window_ms": 190
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3040,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 3.303133298206376,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 59,
+    "state": "COMPLETE",
+    "value": 0.45202497768885147,
+    "params": {
+      "window_ms": 190,
+      "overlap": 0.7,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1750,
+      "epsilon": 0.08153399294021407,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.698271289825254,
+      "balanced_score": 0.45202497768885147,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.8125,
+      "mae_deg_matched_mean": 56.8125,
+      "method_cfg": {
+        "nfft": 3040,
+        "overlap": 0.7,
+        "epsilon": 0.08153399294021407,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          1750
+        ],
+        "window_ms": 190
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3040,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 4.53045654471498,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 60,
+    "state": "COMPLETE",
+    "value": 0.45811884272856307,
+    "params": {
+      "window_ms": 190,
+      "overlap": 0.7,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1750,
+      "epsilon": 0.05894924828484759,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.20259799244074,
+      "balanced_score": 0.45811884272856307,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.5625,
+      "mae_deg_matched_mean": 55.4375,
+      "method_cfg": {
+        "nfft": 3040,
+        "overlap": 0.7,
+        "epsilon": 0.05894924828484759,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          1750
+        ],
+        "window_ms": 190
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3040,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 4.957394821074558,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 61,
+    "state": "COMPLETE",
+    "value": 0.4581802257731288,
+    "params": {
+      "window_ms": 190,
+      "overlap": 0.75,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1750,
+      "epsilon": 0.08180589945762015,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.199749938445818,
+      "balanced_score": 0.4581802257731288,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.468750000000007,
+      "mae_deg_matched_mean": 55.15624999999999,
+      "method_cfg": {
+        "nfft": 3040,
+        "overlap": 0.75,
+        "epsilon": 0.08180589945762015,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          1750
+        ],
+        "window_ms": 190
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3040,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 5.369570416922215,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 62,
+    "state": "COMPLETE",
+    "value": 0.4340370297497542,
+    "params": {
+      "window_ms": 190,
+      "overlap": 0.7,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1750,
+      "epsilon": 0.21630237380981376,
+      "d_freq": 10
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 20.119346061378337,
+      "balanced_score": 0.4340370297497542,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.21875,
+      "mae_deg_matched_mean": 59.46875,
+      "method_cfg": {
+        "nfft": 3040,
+        "overlap": 0.7,
+        "epsilon": 0.21630237380981376,
+        "d_freq": 10,
+        "freq_range": [
+          1150,
+          1750
+        ],
+        "window_ms": 190
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3040,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 2.1719290172623005,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 63,
+    "state": "COMPLETE",
+    "value": 0.4581966843531106,
+    "params": {
+      "window_ms": 120,
+      "overlap": 0.75,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1750,
+      "epsilon": 0.11864461770376628,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.279705792580657,
+      "balanced_score": 0.4581966843531106,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.28125,
+      "mae_deg_matched_mean": 55.46875,
+      "method_cfg": {
+        "nfft": 1920,
+        "overlap": 0.75,
+        "epsilon": 0.11864461770376628,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          1750
+        ],
+        "window_ms": 120
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 1920,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 5.917609399737557,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 64,
+    "state": "COMPLETE",
+    "value": 0.45196982901485827,
+    "params": {
+      "window_ms": 10,
+      "overlap": 0.75,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1750,
+      "epsilon": 0.08268804881617503,
+      "d_freq": 11
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.125,
+      "angle_mae_std": 50.14541354899768,
+      "balanced_score": 0.45196982901485827,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 0.0,
+      "mae_deg_matched_mean": 90.0,
+      "method_cfg": {
+        "nfft": 160,
+        "overlap": 0.75,
+        "epsilon": 0.08268804881617503,
+        "d_freq": 11,
+        "freq_range": [
+          1150,
+          1750
+        ],
+        "window_ms": 10
+      },
+      "misses_mean": 0.0,
+      "n_scenes": 16,
+      "nfft": 160,
+      "recall_mean": 1.0,
+      "runtime_seconds_mean": 1.1506400449434295,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 65,
+    "state": "COMPLETE",
+    "value": 0.4581522388357196,
+    "params": {
+      "window_ms": 195,
+      "overlap": 0.75,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1750,
+      "epsilon": 0.11963537931409234,
+      "d_freq": 6
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.118711291033891,
+      "balanced_score": 0.4581522388357196,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.531249999999993,
+      "mae_deg_matched_mean": 55.46875000000001,
+      "method_cfg": {
+        "nfft": 3120,
+        "overlap": 0.75,
+        "epsilon": 0.11963537931409234,
+        "d_freq": 6,
+        "freq_range": [
+          1150,
+          1750
+        ],
+        "window_ms": 195
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3120,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 2.549032307404559,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 66,
+    "state": "COMPLETE",
+    "value": 0.45182943201287684,
+    "params": {
+      "window_ms": 190,
+      "overlap": 0.7,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1750,
+      "epsilon": 0.1136425544202396,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.619700310922614,
+      "balanced_score": 0.45182943201287684,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.28125,
+      "mae_deg_matched_mean": 56.71875,
+      "method_cfg": {
+        "nfft": 3040,
+        "overlap": 0.7,
+        "epsilon": 0.1136425544202396,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          1750
+        ],
+        "window_ms": 190
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3040,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 5.1869383922894485,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 67,
+    "state": "COMPLETE",
+    "value": 0.45808703075203977,
+    "params": {
+      "window_ms": 125,
+      "overlap": 0.65,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1650,
+      "epsilon": 0.10934182639407428,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.207441971763506,
+      "balanced_score": 0.45808703075203977,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.656250000000004,
+      "mae_deg_matched_mean": 55.40625,
+      "method_cfg": {
+        "nfft": 2000,
+        "overlap": 0.65,
+        "epsilon": 0.10934182639407428,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          1650
+        ],
+        "window_ms": 125
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 2000,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 3.8902836144843604,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 68,
+    "state": "COMPLETE",
+    "value": 0.4348139699848773,
+    "params": {
+      "window_ms": 195,
+      "overlap": 0.65,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 2550,
+      "epsilon": 0.10932968287053266,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.767564996102651,
+      "balanced_score": 0.4348139699848773,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.6562499999999964,
+      "mae_deg_matched_mean": 57.96875000000001,
+      "method_cfg": {
+        "nfft": 3120,
+        "overlap": 0.65,
+        "epsilon": 0.10932968287053266,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          2550
+        ],
+        "window_ms": 195
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3120,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 8.336552550259512,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 69,
+    "state": "COMPLETE",
+    "value": 0.4213809400428728,
+    "params": {
+      "window_ms": 205,
+      "overlap": 0.75,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 2450,
+      "epsilon": 0.12039679748772135,
+      "d_freq": 6
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.5602639646504,
+      "balanced_score": 0.4213809400428728,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.531249999999993,
+      "mae_deg_matched_mean": 62.34375000000001,
+      "method_cfg": {
+        "nfft": 3280,
+        "overlap": 0.75,
+        "epsilon": 0.12039679748772135,
+        "d_freq": 6,
+        "freq_range": [
+          1150,
+          2450
+        ],
+        "window_ms": 205
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 3280,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 4.984085078322096,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 70,
+    "state": "COMPLETE",
+    "value": 0.4247424678786529,
+    "params": {
+      "window_ms": 145,
+      "overlap": 0.75,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 2450,
+      "epsilon": 0.12456039189202897,
+      "d_freq": 6
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.37741920380524,
+      "balanced_score": 0.4247424678786529,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.125,
+      "mae_deg_matched_mean": 60.625,
+      "method_cfg": {
+        "nfft": 2320,
+        "overlap": 0.75,
+        "epsilon": 0.12456039189202897,
+        "d_freq": 6,
+        "freq_range": [
+          1150,
+          2450
+        ],
+        "window_ms": 145
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2320,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 4.827294853748754,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 71,
+    "state": "COMPLETE",
+    "value": 0.4161206863438612,
+    "params": {
+      "window_ms": 115,
+      "overlap": 0.75,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 2500,
+      "epsilon": 0.11343295706930608,
+      "d_freq": 6
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.46187679638067,
+      "balanced_score": 0.4161206863438612,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.46875,
+      "mae_deg_matched_mean": 62.09375,
+      "method_cfg": {
+        "nfft": 1840,
+        "overlap": 0.75,
+        "epsilon": 0.11343295706930608,
+        "d_freq": 6,
+        "freq_range": [
+          1200,
+          2500
+        ],
+        "window_ms": 115
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 1840,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 4.870903946517501,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 72,
+    "state": "COMPLETE",
+    "value": 0.41419265222226526,
+    "params": {
+      "window_ms": 110,
+      "overlap": 0.75,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 2100,
+      "epsilon": 0.11831457018053193,
+      "d_freq": 7
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.44824863580266,
+      "balanced_score": 0.41419265222226526,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.374999999999993,
+      "mae_deg_matched_mean": 60.37500000000001,
+      "method_cfg": {
+        "nfft": 1760,
+        "overlap": 0.75,
+        "epsilon": 0.11831457018053193,
+        "d_freq": 7,
+        "freq_range": [
+          1200,
+          2100
+        ],
+        "window_ms": 110
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 1760,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 3.6098595523508266,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 73,
+    "state": "COMPLETE",
+    "value": 0.405784243558677,
+    "params": {
+      "window_ms": 105,
+      "overlap": 0.75,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 2500,
+      "epsilon": 0.16699396992139898,
+      "d_freq": 6
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.437700963591347,
+      "balanced_score": 0.405784243558677,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.624999999999993,
+      "mae_deg_matched_mean": 62.06250000000001,
+      "method_cfg": {
+        "nfft": 1680,
+        "overlap": 0.75,
+        "epsilon": 0.16699396992139898,
+        "d_freq": 6,
+        "freq_range": [
+          1200,
+          2500
+        ],
+        "window_ms": 105
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 1680,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 5.545069005253026,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 74,
+    "state": "COMPLETE",
+    "value": 0.4339772887358302,
+    "params": {
+      "window_ms": 130,
+      "overlap": 0.75,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 2000,
+      "epsilon": 0.1396675981726671,
+      "d_freq": 9
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.950231045028037,
+      "balanced_score": 0.4339772887358302,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.3124999999999964,
+      "mae_deg_matched_mean": 59.31250000000001,
+      "method_cfg": {
+        "nfft": 2080,
+        "overlap": 0.75,
+        "epsilon": 0.1396675981726671,
+        "d_freq": 9,
+        "freq_range": [
+          1200,
+          2000
+        ],
+        "window_ms": 130
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2080,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 3.014491669018753,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 75,
+    "state": "COMPLETE",
+    "value": 0.4406380963026585,
+    "params": {
+      "window_ms": 115,
+      "overlap": 0.8500000000000001,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 2100,
+      "epsilon": 0.15008005388382342,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.578503488094295,
+      "balanced_score": 0.4406380963026585,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.25,
+      "mae_deg_matched_mean": 56.5,
+      "method_cfg": {
+        "nfft": 1840,
+        "overlap": 0.8500000000000001,
+        "epsilon": 0.15008005388382342,
+        "d_freq": 3,
+        "freq_range": [
+          1200,
+          2100
+        ],
+        "window_ms": 115
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 1840,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 8.830973721836926,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 76,
+    "state": "COMPLETE",
+    "value": 0.4210888736926729,
+    "params": {
+      "window_ms": 120,
+      "overlap": 0.8500000000000001,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 3200,
+      "epsilon": 0.14423338214341977,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.659782956937104,
+      "balanced_score": 0.4210888736926729,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.6249999999999964,
+      "mae_deg_matched_mean": 62.12500000000001,
+      "method_cfg": {
+        "nfft": 1920,
+        "overlap": 0.8500000000000001,
+        "epsilon": 0.14423338214341977,
+        "d_freq": 3,
+        "freq_range": [
+          1100,
+          3200
+        ],
+        "window_ms": 120
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 1920,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 19.496060502482578,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 77,
+    "state": "COMPLETE",
+    "value": 0.4248321480289756,
+    "params": {
+      "window_ms": 90,
+      "overlap": 0.8500000000000001,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 2000,
+      "epsilon": 0.14221057031740114,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.423729044650518,
+      "balanced_score": 0.4248321480289756,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.062499999999993,
+      "mae_deg_matched_mean": 60.62500000000001,
+      "method_cfg": {
+        "nfft": 1440,
+        "overlap": 0.8500000000000001,
+        "epsilon": 0.14221057031740114,
+        "d_freq": 3,
+        "freq_range": [
+          1100,
+          2000
+        ],
+        "window_ms": 90
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 1440,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 8.745507307350636,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 78,
+    "state": "COMPLETE",
+    "value": 0.4215817753260425,
+    "params": {
+      "window_ms": 90,
+      "overlap": 0.7,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 3200,
+      "epsilon": 0.14767520160055866,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.64111613979969,
+      "balanced_score": 0.4215817753260425,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.46875,
+      "mae_deg_matched_mean": 62.21875,
+      "method_cfg": {
+        "nfft": 1440,
+        "overlap": 0.7,
+        "epsilon": 0.14767520160055866,
+        "d_freq": 3,
+        "freq_range": [
+          1100,
+          3200
+        ],
+        "window_ms": 90
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 1440,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 10.323571074928623,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 79,
+    "state": "COMPLETE",
+    "value": 0.4248497976430326,
+    "params": {
+      "window_ms": 90,
+      "overlap": 0.7,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.06739722542177842,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.353188327443622,
+      "balanced_score": 0.4248497976430326,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.031249999999993,
+      "mae_deg_matched_mean": 61.15625000000001,
+      "method_cfg": {
+        "nfft": 1440,
+        "overlap": 0.7,
+        "epsilon": 0.06739722542177842,
+        "d_freq": 3,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 90
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 1440,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.924102229590062,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 80,
+    "state": "COMPLETE",
+    "value": 0.45821880365906975,
+    "params": {
+      "window_ms": 80,
+      "overlap": 0.7,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.06262233601658714,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 12.969917116157688,
+      "balanced_score": 0.45821880365906975,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.562499999999996,
+      "mae_deg_matched_mean": 55.125,
+      "method_cfg": {
+        "nfft": 1280,
+        "overlap": 0.7,
+        "epsilon": 0.06262233601658714,
+        "d_freq": 3,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 80
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 1280,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 3.0358686795807444,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 81,
+    "state": "COMPLETE",
+    "value": 0.4223601705642283,
+    "params": {
+      "window_ms": 180,
+      "overlap": 0.6000000000000001,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 3200,
+      "epsilon": 0.032578165153862214,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.522262786981514,
+      "balanced_score": 0.4223601705642283,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.2499999999999964,
+      "mae_deg_matched_mean": 62.43750000000001,
+      "method_cfg": {
+        "nfft": 2880,
+        "overlap": 0.6000000000000001,
+        "epsilon": 0.032578165153862214,
+        "d_freq": 3,
+        "freq_range": [
+          1100,
+          3200
+        ],
+        "window_ms": 180
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2880,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 5.960283225635067,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 82,
+    "state": "COMPLETE",
+    "value": 0.4407731699363343,
+    "params": {
+      "window_ms": 85,
+      "overlap": 0.8,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1900,
+      "epsilon": 0.142245293896227,
+      "d_freq": 3
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.519633019282162,
+      "balanced_score": 0.4407731699363343,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.9687499999999964,
+      "mae_deg_matched_mean": 56.71875000000001,
+      "method_cfg": {
+        "nfft": 1360,
+        "overlap": 0.8,
+        "epsilon": 0.142245293896227,
+        "d_freq": 3,
+        "freq_range": [
+          1100,
+          1900
+        ],
+        "window_ms": 85
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 1360,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 6.227389888023026,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 83,
+    "state": "COMPLETE",
+    "value": 0.4180446136162584,
+    "params": {
+      "window_ms": 85,
+      "overlap": 0.8,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1900,
+      "epsilon": 0.031817762817517185,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.433781798713294,
+      "balanced_score": 0.4180446136162584,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.999999999999993,
+      "mae_deg_matched_mean": 60.75000000000001,
+      "method_cfg": {
+        "nfft": 1360,
+        "overlap": 0.8,
+        "epsilon": 0.031817762817517185,
+        "d_freq": 4,
+        "freq_range": [
+          1050,
+          1900
+        ],
+        "window_ms": 85
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 1360,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 4.369760423724074,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 84,
+    "state": "COMPLETE",
+    "value": 0.4144887659882348,
+    "params": {
+      "window_ms": 50,
+      "overlap": 0.8,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 3300,
+      "epsilon": 0.032977115923382774,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.463883822030493,
+      "balanced_score": 0.4144887659882348,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.1562499999999964,
+      "mae_deg_matched_mean": 60.59375000000001,
+      "method_cfg": {
+        "nfft": 800,
+        "overlap": 0.8,
+        "epsilon": 0.032977115923382774,
+        "d_freq": 4,
+        "freq_range": [
+          1050,
+          3300
+        ],
+        "window_ms": 50
+      },
+      "misses_mean": 0.3125,
+      "n_scenes": 16,
+      "nfft": 800,
+      "recall_mean": 0.84375,
+      "runtime_seconds_mean": 7.511635444971034,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 85,
+    "state": "COMPLETE",
+    "value": 0.4183482138305731,
+    "params": {
+      "window_ms": 75,
+      "overlap": 0.8,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1800,
+      "epsilon": 0.08415032897019387,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.52472390969973,
+      "balanced_score": 0.4183482138305731,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.8125,
+      "mae_deg_matched_mean": 60.6875,
+      "method_cfg": {
+        "nfft": 1200,
+        "overlap": 0.8,
+        "epsilon": 0.08415032897019387,
+        "d_freq": 4,
+        "freq_range": [
+          1000,
+          1800
+        ],
+        "window_ms": 75
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 1200,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 5.2002894405741245,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 86,
+    "state": "COMPLETE",
+    "value": 0.42544215064975505,
+    "params": {
+      "window_ms": 50,
+      "overlap": 0.65,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1800,
+      "epsilon": 0.08364232111099106,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 19.440614702215576,
+      "balanced_score": 0.42544215064975505,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.6875,
+      "mae_deg_matched_mean": 60.87500000000001,
+      "method_cfg": {
+        "nfft": 800,
+        "overlap": 0.65,
+        "epsilon": 0.08364232111099106,
+        "d_freq": 4,
+        "freq_range": [
+          1050,
+          1800
+        ],
+        "window_ms": 50
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 800,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 3.33450419298606,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 87,
+    "state": "COMPLETE",
+    "value": 0.4212822777008751,
+    "params": {
+      "window_ms": 45,
+      "overlap": 0.65,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1600,
+      "epsilon": 0.4493830798649695,
+      "d_freq": 4
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 18.570705257205507,
+      "balanced_score": 0.4212822777008751,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.5625,
+      "mae_deg_matched_mean": 62.31250000000001,
+      "method_cfg": {
+        "nfft": 720,
+        "overlap": 0.65,
+        "epsilon": 0.4493830798649695,
+        "d_freq": 4,
+        "freq_range": [
+          1050,
+          1600
+        ],
+        "window_ms": 45
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 720,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.7550915733445436,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 88,
+    "state": "COMPLETE",
+    "value": 0.4387309887857221,
+    "params": {
+      "window_ms": 170,
+      "overlap": 0.65,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1600,
+      "epsilon": 0.07477849913134314,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 7.3927223503929875,
+      "balanced_score": 0.4387309887857221,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.125,
+      "mae_deg_matched_mean": 64.3125,
+      "method_cfg": {
+        "nfft": 2720,
+        "overlap": 0.65,
+        "epsilon": 0.07477849913134314,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1600
+        ],
+        "window_ms": 170
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 2720,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 7.212434888089774,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 89,
+    "state": "COMPLETE",
+    "value": 0.467642220798863,
+    "params": {
+      "window_ms": 205,
+      "overlap": 0.7,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1500,
+      "epsilon": 0.07341244908311768,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 10.256048139390728,
+      "balanced_score": 0.467642220798863,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 1.71875,
+      "mae_deg_matched_mean": 63.40625,
+      "method_cfg": {
+        "nfft": 3280,
+        "overlap": 0.7,
+        "epsilon": 0.07341244908311768,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1500
+        ],
+        "window_ms": 205
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3280,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 7.8428075401170645,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 90,
+    "state": "COMPLETE",
+    "value": 0.4387113033644486,
+    "params": {
+      "window_ms": 170,
+      "overlap": 0.7,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1500,
+      "epsilon": 0.06256077733835216,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 7.318040102206324,
+      "balanced_score": 0.4387113033644486,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.156249999999993,
+      "mae_deg_matched_mean": 64.46875,
+      "method_cfg": {
+        "nfft": 2720,
+        "overlap": 0.7,
+        "epsilon": 0.06256077733835216,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1500
+        ],
+        "window_ms": 170
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 2720,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 8.109297676914139,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 91,
+    "state": "COMPLETE",
+    "value": 0.4498872403113742,
+    "params": {
+      "window_ms": 170,
+      "overlap": 0.7,
+      "freq_low_hz": 950,
+      "freq_high_hz": 1500,
+      "epsilon": 0.060342991654723385,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 7.603388944247166,
+      "balanced_score": 0.4498872403113742,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 1.8437499999999964,
+      "mae_deg_matched_mean": 63.09375000000001,
+      "method_cfg": {
+        "nfft": 2720,
+        "overlap": 0.7,
+        "epsilon": 0.060342991654723385,
+        "d_freq": 1,
+        "freq_range": [
+          950,
+          1500
+        ],
+        "window_ms": 170
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 2720,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 8.460199776076479,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 92,
+    "state": "COMPLETE",
+    "value": 0.42768867268644456,
+    "params": {
+      "window_ms": 170,
+      "overlap": 0.7,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 5450,
+      "epsilon": 0.06427417497509788,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 11.783860784988951,
+      "balanced_score": 0.42768867268644456,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.0625,
+      "mae_deg_matched_mean": 57.75,
+      "method_cfg": {
+        "nfft": 2720,
+        "overlap": 0.7,
+        "epsilon": 0.06427417497509788,
+        "d_freq": 1,
+        "freq_range": [
+          1150,
+          5450
+        ],
+        "window_ms": 170
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 2720,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 55.62751492951065,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 93,
+    "state": "COMPLETE",
+    "value": 0.44836863289509954,
+    "params": {
+      "window_ms": 165,
+      "overlap": 0.7,
+      "freq_low_hz": 950,
+      "freq_high_hz": 1500,
+      "epsilon": 0.0666668302966497,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 7.6196190029423425,
+      "balanced_score": 0.44836863289509954,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.1875,
+      "mae_deg_matched_mean": 62.9375,
+      "method_cfg": {
+        "nfft": 2640,
+        "overlap": 0.7,
+        "epsilon": 0.0666668302966497,
+        "d_freq": 1,
+        "freq_range": [
+          950,
+          1500
+        ],
+        "window_ms": 165
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 2640,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 8.975834970071446,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 94,
+    "state": "COMPLETE",
+    "value": 0.44058103773379387,
+    "params": {
+      "window_ms": 205,
+      "overlap": 0.7,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 5150,
+      "epsilon": 0.0598371664769437,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.524975049875364,
+      "balanced_score": 0.44058103773379387,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.4375,
+      "mae_deg_matched_mean": 56.375,
+      "method_cfg": {
+        "nfft": 3280,
+        "overlap": 0.7,
+        "epsilon": 0.0598371664769437,
+        "d_freq": 1,
+        "freq_range": [
+          1150,
+          5150
+        ],
+        "window_ms": 205
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3280,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 53.50175404766924,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 95,
+    "state": "COMPLETE",
+    "value": 0.45291575105614384,
+    "params": {
+      "window_ms": 145,
+      "overlap": 0.7,
+      "freq_low_hz": 950,
+      "freq_high_hz": 1500,
+      "epsilon": 0.06465747479384873,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 8.320719620321311,
+      "balanced_score": 0.45291575105614384,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 0.625,
+      "mae_deg_matched_mean": 64.625,
+      "method_cfg": {
+        "nfft": 2320,
+        "overlap": 0.7,
+        "epsilon": 0.06465747479384873,
+        "d_freq": 1,
+        "freq_range": [
+          950,
+          1500
+        ],
+        "window_ms": 145
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 2320,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 8.257289668050362,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 96,
+    "state": "COMPLETE",
+    "value": 0.4277242589911579,
+    "params": {
+      "window_ms": 225,
+      "overlap": 0.7,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 5150,
+      "epsilon": 0.06730824114532474,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 11.777726595145618,
+      "balanced_score": 0.4277242589911579,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.0,
+      "mae_deg_matched_mean": 57.8125,
+      "method_cfg": {
+        "nfft": 3600,
+        "overlap": 0.7,
+        "epsilon": 0.06730824114532474,
+        "d_freq": 1,
+        "freq_range": [
+          1150,
+          5150
+        ],
+        "window_ms": 225
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3600,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 53.22119534612284,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 97,
+    "state": "COMPLETE",
+    "value": 0.4581929915486911,
+    "params": {
+      "window_ms": 200,
+      "overlap": 0.55,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1850,
+      "epsilon": 0.06987156772261381,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.047052768250005,
+      "balanced_score": 0.4581929915486911,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.59375,
+      "mae_deg_matched_mean": 55.03125,
+      "method_cfg": {
+        "nfft": 3200,
+        "overlap": 0.55,
+        "epsilon": 0.06987156772261381,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          1850
+        ],
+        "window_ms": 200
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3200,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 4.379827921104152,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 98,
+    "state": "COMPLETE",
+    "value": 0.43462673120935513,
+    "params": {
+      "window_ms": 205,
+      "overlap": 0.55,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 5250,
+      "epsilon": 0.05398363596259455,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.810184958331533,
+      "balanced_score": 0.43462673120935513,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.9375,
+      "mae_deg_matched_mean": 57.8125,
+      "method_cfg": {
+        "nfft": 3280,
+        "overlap": 0.55,
+        "epsilon": 0.05398363596259455,
+        "d_freq": 2,
+        "freq_range": [
+          1150,
+          5250
+        ],
+        "window_ms": 205
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3280,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 15.688990035559982,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 99,
+    "state": "COMPLETE",
+    "value": 0.42694936343335055,
+    "params": {
+      "window_ms": 205,
+      "overlap": 0.55,
+      "freq_low_hz": 350,
+      "freq_high_hz": 1900,
+      "epsilon": 0.09098504586102008,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 12.335163152548908,
+      "balanced_score": 0.42694936343335055,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.6875,
+      "mae_deg_matched_mean": 60.0,
+      "method_cfg": {
+        "nfft": 3280,
+        "overlap": 0.55,
+        "epsilon": 0.09098504586102008,
+        "d_freq": 2,
+        "freq_range": [
+          350,
+          1900
+        ],
+        "window_ms": 205
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3280,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 7.86887091724202,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 100,
+    "state": "COMPLETE",
+    "value": 0.42684946450720485,
+    "params": {
+      "window_ms": 205,
+      "overlap": 0.55,
+      "freq_low_hz": 350,
+      "freq_high_hz": 2200,
+      "epsilon": 0.1030104001170481,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 12.382849467610447,
+      "balanced_score": 0.42684946450720485,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.84375,
+      "mae_deg_matched_mean": 60.03125,
+      "method_cfg": {
+        "nfft": 3280,
+        "overlap": 0.55,
+        "epsilon": 0.1030104001170481,
+        "d_freq": 2,
+        "freq_range": [
+          350,
+          2200
+        ],
+        "window_ms": 205
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3280,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 9.254507238132646,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 101,
+    "state": "COMPLETE",
+    "value": 0.45193570794566673,
+    "params": {
+      "window_ms": 215,
+      "overlap": 0.55,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1850,
+      "epsilon": 0.10436330117335847,
+      "d_freq": 5
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.400856825235914,
+      "balanced_score": 0.45193570794566673,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.25,
+      "mae_deg_matched_mean": 56.50000000000001,
+      "method_cfg": {
+        "nfft": 3440,
+        "overlap": 0.55,
+        "epsilon": 0.10436330117335847,
+        "d_freq": 5,
+        "freq_range": [
+          1150,
+          1850
+        ],
+        "window_ms": 215
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3440,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 2.3831387860991526,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 102,
+    "state": "COMPLETE",
+    "value": 0.43452760426391485,
+    "params": {
+      "window_ms": 225,
+      "overlap": 0.45,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 5100,
+      "epsilon": 0.0751698119039981,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.792973278609614,
+      "balanced_score": 0.43452760426391485,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.125,
+      "mae_deg_matched_mean": 57.6875,
+      "method_cfg": {
+        "nfft": 3600,
+        "overlap": 0.45,
+        "epsilon": 0.0751698119039981,
+        "d_freq": 2,
+        "freq_range": [
+          1200,
+          5100
+        ],
+        "window_ms": 225
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3600,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 15.032229350937996,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 103,
+    "state": "COMPLETE",
+    "value": 0.4347012831728802,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.45,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 5500,
+      "epsilon": 0.07515826140006399,
+      "d_freq": 2
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.753323997916521,
+      "balanced_score": 0.4347012831728802,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.8125,
+      "mae_deg_matched_mean": 58.125,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.45,
+        "epsilon": 0.07515826140006399,
+        "d_freq": 2,
+        "freq_range": [
+          1200,
+          5500
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 14.935503979504574,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 104,
+    "state": "COMPLETE",
+    "value": 0.4176809388065389,
+    "params": {
+      "window_ms": 185,
+      "overlap": 0.75,
+      "freq_low_hz": 900,
+      "freq_high_hz": 2100,
+      "epsilon": 0.07562941070569551,
+      "d_freq": 13
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 19.590734417065633,
+      "balanced_score": 0.4176809388065389,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.25,
+      "mae_deg_matched_mean": 60.25,
+      "method_cfg": {
+        "nfft": 2960,
+        "overlap": 0.75,
+        "epsilon": 0.07562941070569551,
+        "d_freq": 13,
+        "freq_range": [
+          900,
+          2100
+        ],
+        "window_ms": 185
+      },
+      "misses_mean": 0.25,
+      "n_scenes": 16,
+      "nfft": 2960,
+      "recall_mean": 0.875,
+      "runtime_seconds_mean": 2.832810234511271,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 105,
+    "state": "COMPLETE",
+    "value": 0.4581504349824692,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.45,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 1700,
+      "epsilon": 0.04116979873836451,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.300574176985755,
+      "balanced_score": 0.4581504349824692,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.46875,
+      "mae_deg_matched_mean": 55.15625,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.45,
+        "epsilon": 0.04116979873836451,
+        "d_freq": 1,
+        "freq_range": [
+          1200,
+          1700
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 4.856695674709044,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 106,
+    "state": "COMPLETE",
+    "value": 0.4581504349824692,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.45,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 1700,
+      "epsilon": 0.04207196329126073,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.300574176985755,
+      "balanced_score": 0.4581504349824692,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.46875,
+      "mae_deg_matched_mean": 55.15625,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.45,
+        "epsilon": 0.04207196329126073,
+        "d_freq": 1,
+        "freq_range": [
+          1200,
+          1700
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 4.545936690614326,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 107,
+    "state": "COMPLETE",
+    "value": 0.4664790693056904,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.45,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.037269479749056166,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 11.204770189521959,
+      "balanced_score": 0.4664790693056904,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.875,
+      "mae_deg_matched_mean": 59.75,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.45,
+        "epsilon": 0.037269479749056166,
+        "d_freq": 1,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 4.112754334579222,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 108,
+    "state": "COMPLETE",
+    "value": 0.46253362277545385,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.5,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.03635992975392771,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 9.539750307922112,
+      "balanced_score": 0.46253362277545385,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.40625,
+      "mae_deg_matched_mean": 61.21875,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.5,
+        "epsilon": 0.03635992975392771,
+        "d_freq": 1,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 4.917741551733343,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 109,
+    "state": "COMPLETE",
+    "value": 0.46253362277545385,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.5,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.04136015308302639,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 9.539750307922112,
+      "balanced_score": 0.46253362277545385,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.40625,
+      "mae_deg_matched_mean": 61.21875,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.5,
+        "epsilon": 0.04136015308302639,
+        "d_freq": 1,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 4.592790797672933,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 110,
+    "state": "COMPLETE",
+    "value": 0.4661490565180548,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.45,
+      "freq_low_hz": 1150,
+      "freq_high_hz": 1650,
+      "epsilon": 0.04081430218353023,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 11.233842563878131,
+      "balanced_score": 0.4661490565180548,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.1875,
+      "mae_deg_matched_mean": 59.4375,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.45,
+        "epsilon": 0.04081430218353023,
+        "d_freq": 1,
+        "freq_range": [
+          1150,
+          1650
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 4.484782632789575,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 111,
+    "state": "COMPLETE",
+    "value": 0.4662278577482911,
+    "params": {
+      "window_ms": 225,
+      "overlap": 0.5,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.0884515814058056,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 11.1014058090631,
+      "balanced_score": 0.4662278577482911,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.15625,
+      "mae_deg_matched_mean": 59.53125,
+      "method_cfg": {
+        "nfft": 3600,
+        "overlap": 0.5,
+        "epsilon": 0.0884515814058056,
+        "d_freq": 1,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 225
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3600,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.073928283236455,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 112,
+    "state": "COMPLETE",
+    "value": 0.4554708643594003,
+    "params": {
+      "window_ms": 225,
+      "overlap": 0.5,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1600,
+      "epsilon": 0.25192776629757685,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 9.671912863415386,
+      "balanced_score": 0.4554708643594003,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.46875,
+      "mae_deg_matched_mean": 61.09375,
+      "method_cfg": {
+        "nfft": 3600,
+        "overlap": 0.5,
+        "epsilon": 0.25192776629757685,
+        "d_freq": 1,
+        "freq_range": [
+          1050,
+          1600
+        ],
+        "window_ms": 225
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3600,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.58224197011441,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 113,
+    "state": "COMPLETE",
+    "value": 0.466303137115785,
+    "params": {
+      "window_ms": 245,
+      "overlap": 0.5,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1600,
+      "epsilon": 0.03053448772946783,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 11.209954769645591,
+      "balanced_score": 0.466303137115785,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.03125,
+      "mae_deg_matched_mean": 59.71875,
+      "method_cfg": {
+        "nfft": 3920,
+        "overlap": 0.5,
+        "epsilon": 0.03053448772946783,
+        "d_freq": 1,
+        "freq_range": [
+          1050,
+          1600
+        ],
+        "window_ms": 245
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3920,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.245348412106978,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 114,
+    "state": "COMPLETE",
+    "value": 0.46645785099430964,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.5,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1600,
+      "epsilon": 0.025970392916277445,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 11.093177802144885,
+      "balanced_score": 0.46645785099430964,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.9375,
+      "mae_deg_matched_mean": 59.6875,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.5,
+        "epsilon": 0.025970392916277445,
+        "d_freq": 1,
+        "freq_range": [
+          1050,
+          1600
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.307466891448712,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 115,
+    "state": "COMPLETE",
+    "value": 0.45798386391043866,
+    "params": {
+      "window_ms": 245,
+      "overlap": 0.5,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.02721268542694911,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.383238774619459,
+      "balanced_score": 0.45798386391043866,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.4374999999999964,
+      "mae_deg_matched_mean": 61.25000000000001,
+      "method_cfg": {
+        "nfft": 3920,
+        "overlap": 0.5,
+        "epsilon": 0.02721268542694911,
+        "d_freq": 1,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 245
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3920,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.131453378300648,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 116,
+    "state": "COMPLETE",
+    "value": 0.45798386391043866,
+    "params": {
+      "window_ms": 245,
+      "overlap": 0.5,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 1600,
+      "epsilon": 0.02035691908554751,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.383238774619459,
+      "balanced_score": 0.45798386391043866,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.4374999999999964,
+      "mae_deg_matched_mean": 61.25000000000001,
+      "method_cfg": {
+        "nfft": 3920,
+        "overlap": 0.5,
+        "epsilon": 0.02035691908554751,
+        "d_freq": 1,
+        "freq_range": [
+          1100,
+          1600
+        ],
+        "window_ms": 245
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3920,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.118502338998951,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 117,
+    "state": "COMPLETE",
+    "value": 0.462507316032532,
+    "params": {
+      "window_ms": 245,
+      "overlap": 0.5,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1600,
+      "epsilon": 0.021401090690491696,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 9.54384413837003,
+      "balanced_score": 0.462507316032532,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.40625,
+      "mae_deg_matched_mean": 61.53125,
+      "method_cfg": {
+        "nfft": 3920,
+        "overlap": 0.5,
+        "epsilon": 0.021401090690491696,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1600
+        ],
+        "window_ms": 245
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3920,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.880393202387495,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 118,
+    "state": "COMPLETE",
+    "value": 0.45310662887056097,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.5,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1600,
+      "epsilon": 0.050524191087292836,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.3125,
+      "angle_mae_std": 9.664640367727088,
+      "balanced_score": 0.45310662887056097,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.96875,
+      "mae_deg_matched_mean": 62.65625,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.5,
+        "epsilon": 0.050524191087292836,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1600
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.7060025676037185,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 119,
+    "state": "COMPLETE",
+    "value": 0.4616467262574793,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.5,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1600,
+      "epsilon": 0.03514829423386176,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 9.730298604744876,
+      "balanced_score": 0.4616467262574793,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.84375,
+      "mae_deg_matched_mean": 60.78125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.5,
+        "epsilon": 0.03514829423386176,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1600
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.550043486058712,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 120,
+    "state": "COMPLETE",
+    "value": 0.4616467262574793,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.5,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1600,
+      "epsilon": 0.03600326774153256,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 9.730298604744876,
+      "balanced_score": 0.4616467262574793,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.84375,
+      "mae_deg_matched_mean": 60.78125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.5,
+        "epsilon": 0.03600326774153256,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1600
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.288898579136003,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 121,
+    "state": "COMPLETE",
+    "value": 0.46279415471762964,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.5,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1500,
+      "epsilon": 0.03864417962196431,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 9.654176557324817,
+      "balanced_score": 0.46279415471762964,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.25,
+      "mae_deg_matched_mean": 61.375,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.5,
+        "epsilon": 0.03864417962196431,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1500
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 4.75997635468957,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 122,
+    "state": "COMPLETE",
+    "value": 0.46279415471762964,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.5,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 1500,
+      "epsilon": 0.03544984546236592,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 9.654176557324817,
+      "balanced_score": 0.46279415471762964,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.25,
+      "mae_deg_matched_mean": 61.375,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.5,
+        "epsilon": 0.03544984546236592,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          1500
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 4.598238158359891,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 123,
+    "state": "COMPLETE",
+    "value": 0.43520480278798546,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.5,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 5900,
+      "epsilon": 0.035421614976740276,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 12.172867818944738,
+      "balanced_score": 0.43520480278798546,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 5.84375,
+      "mae_deg_matched_mean": 58.96875,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.5,
+        "epsilon": 0.035421614976740276,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          5900
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 31.081090077525005,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 124,
+    "state": "COMPLETE",
+    "value": 0.43819718802435204,
+    "params": {
+      "window_ms": 250,
+      "overlap": 0.4,
+      "freq_low_hz": 900,
+      "freq_high_hz": 1500,
+      "epsilon": 0.03695772783553402,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 7.5425874207727945,
+      "balanced_score": 0.43819718802435204,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.3124999999999964,
+      "mae_deg_matched_mean": 64.125,
+      "method_cfg": {
+        "nfft": 4000,
+        "overlap": 0.4,
+        "epsilon": 0.03695772783553402,
+        "d_freq": 1,
+        "freq_range": [
+          900,
+          1500
+        ],
+        "window_ms": 250
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 4000,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 4.992287846718682,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 125,
+    "state": "COMPLETE",
+    "value": 0.4519537707906707,
+    "params": {
+      "window_ms": 250,
+      "overlap": 0.4,
+      "freq_low_hz": 1000,
+      "freq_high_hz": 2000,
+      "epsilon": 0.03643352649421519,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.510893690600215,
+      "balanced_score": 0.4519537707906707,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 8.09375,
+      "mae_deg_matched_mean": 56.71875,
+      "method_cfg": {
+        "nfft": 4000,
+        "overlap": 0.4,
+        "epsilon": 0.03643352649421519,
+        "d_freq": 1,
+        "freq_range": [
+          1000,
+          2000
+        ],
+        "window_ms": 250
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 4000,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 7.349537696398329,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 126,
+    "state": "COMPLETE",
+    "value": 0.4347542245691673,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.5,
+      "freq_low_hz": 900,
+      "freq_high_hz": 2000,
+      "epsilon": 0.0358338899064862,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.794960523460873,
+      "balanced_score": 0.4347542245691673,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.75,
+      "mae_deg_matched_mean": 57.8125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.5,
+        "epsilon": 0.0358338899064862,
+        "d_freq": 1,
+        "freq_range": [
+          900,
+          2000
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 9.519628694280982,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 127,
+    "state": "COMPLETE",
+    "value": 0.4381004971414895,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.5,
+      "freq_low_hz": 900,
+      "freq_high_hz": 1500,
+      "epsilon": 0.030413857329477486,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 7.478093005573011,
+      "balanced_score": 0.4381004971414895,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.3749999999999964,
+      "mae_deg_matched_mean": 64.375,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.5,
+        "epsilon": 0.030413857329477486,
+        "d_freq": 1,
+        "freq_range": [
+          900,
+          1500
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 6.061860762943979,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 128,
+    "state": "COMPLETE",
+    "value": 0.4383383705505527,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.4,
+      "freq_low_hz": 900,
+      "freq_high_hz": 1500,
+      "epsilon": 0.03659546459554968,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.28125,
+      "angle_mae_std": 7.358827607030894,
+      "balanced_score": 0.4383383705505527,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.3125,
+      "mae_deg_matched_mean": 64.3125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.4,
+        "epsilon": 0.03659546459554968,
+        "d_freq": 1,
+        "freq_range": [
+          900,
+          1500
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 5.027269595477264,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 129,
+    "state": "COMPLETE",
+    "value": 0.43472918583151227,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.45,
+      "freq_low_hz": 900,
+      "freq_high_hz": 2000,
+      "epsilon": 0.020149382036847838,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.863645887753073,
+      "balanced_score": 0.43472918583151227,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.75,
+      "mae_deg_matched_mean": 57.8125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.45,
+        "epsilon": 0.020149382036847838,
+        "d_freq": 1,
+        "freq_range": [
+          900,
+          2000
+        ],
+        "window_ms": 230
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 8.817385718750302,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 130,
+    "state": "COMPLETE",
+    "value": 0.4348443923066163,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.45,
+      "freq_low_hz": 950,
+      "freq_high_hz": 3700,
+      "epsilon": 0.022830404585236597,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 11.757934488569852,
+      "balanced_score": 0.4348443923066163,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 6.59375,
+      "mae_deg_matched_mean": 58.15625,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.45,
+        "epsilon": 0.022830404585236597,
+        "d_freq": 1,
+        "freq_range": [
+          950,
+          3700
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.1875,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.90625,
+      "runtime_seconds_mean": 16.00594693911262,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 131,
+    "state": "COMPLETE",
+    "value": 0.4520234421523593,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.45,
+      "freq_low_hz": 950,
+      "freq_high_hz": 1700,
+      "epsilon": 0.020220378609613555,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.375,
+      "angle_mae_std": 12.633505798075227,
+      "balanced_score": 0.4520234421523593,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 7.8125,
+      "mae_deg_matched_mean": 57.0625,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.45,
+        "epsilon": 0.020220378609613555,
+        "d_freq": 1,
+        "freq_range": [
+          950,
+          1700
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 5.933643210853916,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 132,
+    "state": "COMPLETE",
+    "value": 0.45820513123006534,
+    "params": {
+      "window_ms": 240,
+      "overlap": 0.45,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1700,
+      "epsilon": 0.020204195681870388,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.40625,
+      "angle_mae_std": 13.479404138814902,
+      "balanced_score": 0.45820513123006534,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 9.09375,
+      "mae_deg_matched_mean": 55.53125,
+      "method_cfg": {
+        "nfft": 3840,
+        "overlap": 0.45,
+        "epsilon": 0.020204195681870388,
+        "d_freq": 1,
+        "freq_range": [
+          1050,
+          1700
+        ],
+        "window_ms": 240
+      },
+      "misses_mean": 0.125,
+      "n_scenes": 16,
+      "nfft": 3840,
+      "recall_mean": 0.9375,
+      "runtime_seconds_mean": 5.161786365293665,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "trial_number": 133,
+    "state": "COMPLETE",
+    "value": 0.46229317392546454,
+    "params": {
+      "window_ms": 235,
+      "overlap": 0.45,
+      "freq_low_hz": 1050,
+      "freq_high_hz": 1700,
+      "epsilon": 0.022110912350094363,
+      "d_freq": 1
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.34375,
+      "angle_mae_std": 9.640207142484025,
+      "balanced_score": 0.46229317392546454,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.5,
+      "mae_deg_matched_mean": 61.1875,
+      "method_cfg": {
+        "nfft": 3760,
+        "overlap": 0.45,
+        "epsilon": 0.022110912350094363,
+        "d_freq": 1,
+        "freq_range": [
+          1050,
+          1700
+        ],
+        "window_ms": 235
+      },
+      "misses_mean": 0.0625,
+      "n_scenes": 16,
+      "nfft": 3760,
+      "recall_mean": 0.96875,
+      "runtime_seconds_mean": 5.157520445412956,
+      "subset_n_scenes": 16
+    }
+  }
+]
