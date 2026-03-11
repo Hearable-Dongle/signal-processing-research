@@ -415,6 +415,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "tiny_dp_ipd",
             "weighted_srp_dp",
             "srp_phat_legacy",
+            "srp_phat_localization",
             "music_1src",
             "gcc_tdoa_1src",
             "snr_weighted_srp_phat",

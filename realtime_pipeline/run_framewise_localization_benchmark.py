@@ -28,10 +28,7 @@ DEFAULT_ASSETS_ROOT = Path("simulation/simulations/assets/testing_specific_angle
 DEFAULT_OUT_ROOT = Path("realtime_pipeline/output/framewise_localization_benchmark")
 DEFAULT_PROFILE = "respeaker_v3_0457"
 DEFAULT_STRATEGIES = [
-    "weighted_srp_dp",
-    "snr_weighted_srp_phat",
-    "peak_confidence_srp_phat",
-    "neural_mask_gcc_phat",
+    "srp_phat_localization",
 ]
 
 
@@ -71,11 +68,27 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def _stage_scene(scene_path: Path, staging_root: Path, profile: str, assets_root: Path) -> tuple[Path, Path]:
+def _scale_noise_gains(sim_cfg: SimulationConfig, noise_gain_scale: float) -> SimulationConfig:
+    if abs(float(noise_gain_scale) - 1.0) < 1e-12:
+        return sim_cfg
+    for source in sim_cfg.audio.sources:
+        if str(getattr(source, "classification", "")).strip().lower() == "noise":
+            source.gain = float(source.gain) * float(noise_gain_scale)
+    return sim_cfg
+
+
+def _stage_scene(
+    scene_path: Path,
+    staging_root: Path,
+    profile: str,
+    assets_root: Path,
+    noise_gain_scale: float,
+) -> tuple[Path, Path]:
     stage_dir = staging_root / scene_path.stem
     stage_dir.mkdir(parents=True, exist_ok=True)
     staged_scene = stage_dir / scene_path.name
     sim_cfg = SimulationConfig.from_file(scene_path)
+    sim_cfg = _scale_noise_gains(sim_cfg, float(noise_gain_scale))
     rel_positions = mic_positions_xyz(profile)
     sim_cfg.microphone_array = MicrophoneArray(
         mic_center=list(sim_cfg.microphone_array.mic_center),
@@ -311,6 +324,7 @@ def _run_job(
     assets_root: str,
     out_root: str,
     profile: str,
+    noise_gain_scale: float,
     fast_frame_ms: int,
     slow_chunk_ms: int,
     localization_window_ms: int,
@@ -319,7 +333,13 @@ def _run_job(
     scene_cfg_path = Path(scene_path)
     bench_root = Path(out_root)
     job_root = bench_root / strategy / scene_cfg_path.stem
-    staged_scene, staged_meta = _stage_scene(scene_cfg_path, bench_root / "_staged_scenes" / strategy, profile, Path(assets_root))
+    staged_scene, staged_meta = _stage_scene(
+        scene_cfg_path,
+        bench_root / "_staged_scenes" / strategy,
+        profile,
+        Path(assets_root),
+        float(noise_gain_scale),
+    )
     config = _strategy_run_config(strategy)
     summary = run_simulation_pipeline(
         scene_config_path=staged_scene,
@@ -387,6 +407,7 @@ def _run_job(
         "slow_chunk_ms": int(slow_chunk_ms),
         "localization_window_ms": int(localization_window_ms),
         "localization_hop_ms": int(localization_hop_ms),
+        "noise_gain_scale": float(noise_gain_scale),
         "fast_avg_ms": float(summary.get("fast_avg_ms", math.nan)),
         "fast_rtf": float(summary.get("fast_rtf", math.nan)),
         "active_metrics": active_metrics,
@@ -509,6 +530,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--slow-chunk-ms", type=int, default=200)
     parser.add_argument("--localization-window-ms", type=int, default=160)
     parser.add_argument("--localization-hop-ms", type=int, default=50)
+    parser.add_argument("--noise-gain-scale", type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -532,6 +554,7 @@ def main() -> None:
             "assets_root": str(Path(args.assets_root).resolve()),
             "out_root": str(out_root.resolve()),
             "profile": str(args.profile),
+            "noise_gain_scale": float(args.noise_gain_scale),
             "fast_frame_ms": int(args.fast_frame_ms),
             "slow_chunk_ms": int(args.slow_chunk_ms),
             "localization_window_ms": int(args.localization_window_ms),
@@ -573,6 +596,7 @@ def main() -> None:
         "slow_chunk_ms": int(args.slow_chunk_ms),
         "localization_window_ms": int(args.localization_window_ms),
         "localization_hop_ms": int(args.localization_hop_ms),
+        "noise_gain_scale": float(args.noise_gain_scale),
         "eval_mode": str(args.eval_mode),
         "aggregates": aggregates,
         "scene_results": [result.scene_summary for result in sorted(results, key=lambda item: (item.strategy, item.scene_id))],

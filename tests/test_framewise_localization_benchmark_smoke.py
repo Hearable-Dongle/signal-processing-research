@@ -16,8 +16,6 @@ def test_framewise_localization_benchmark_smoke(tmp_path: Path) -> None:
         "1",
         "--workers",
         "1",
-        "--strategies",
-        "weighted_srp_dp",
         "--out-root",
         str(out_root),
         "--eval-mode",
@@ -31,6 +29,7 @@ def test_framewise_localization_benchmark_smoke(tmp_path: Path) -> None:
     payload = json.loads((run_dir / "benchmark_results.json").read_text(encoding="utf-8"))
     assert payload["n_scenes"] == 1
     assert payload["eval_mode"] == "both"
+    assert payload["strategies"] == ["srp_phat_localization"]
     assert "active_speaker_per_frame" in payload["aggregates"]
     assert "top_k_per_frame" in payload["aggregates"]
     assert (run_dir / "benchmark_results.txt").exists()
