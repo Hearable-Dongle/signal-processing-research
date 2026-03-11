@@ -319,7 +319,9 @@ class FastPathWorker(threading.Thread):
         self._stop = stop_event
         dominant_lock_mode = str(config.tracking_mode).strip().lower() == "dominant_lock_v1"
         single_source_backend = (
-            config.localization_backend in {"music_1src", "gcc_tdoa_1src"}
+            config.localization_backend in {
+                "music_1src",
+            }
             or bool(config.single_source_mode_enabled)
             or dominant_lock_mode
         )

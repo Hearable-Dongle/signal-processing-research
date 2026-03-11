@@ -125,23 +125,6 @@ class SRPPeakTracker:
         if int(nfft_eff * overlap_eff) >= nfft_eff:
             overlap_eff = float((nfft_eff - 1) / nfft_eff)
         self._backend_name = str(backend)
-        if self._tracking_mode == "multi_peak_v2" and self._backend_name == "weighted_srp_dp":
-            if abs(float(max_assoc_distance_deg) - 20.0) < 1e-9:
-                max_assoc_distance_deg = 14.0
-            if int(track_hold_frames) == 5:
-                track_hold_frames = 3
-            if int(track_kill_frames) == 9:
-                track_kill_frames = 6
-            if abs(float(new_track_min_confidence) - 0.42) < 1e-9:
-                new_track_min_confidence = 0.55
-            if abs(float(velocity_alpha) - 0.35) < 1e-9:
-                velocity_alpha = 0.25
-            if abs(float(angle_alpha) - 0.30) < 1e-9:
-                angle_alpha = 0.20
-            if abs(float(min_relative_peak_score) - 0.28) < 1e-9:
-                min_relative_peak_score = 0.38
-            if abs(float(min_peak_contrast) - 0.08) < 1e-9:
-                min_peak_contrast = 0.12
         self._tracks: list[_TrackedPeak] = []
         self._next_track_id = 1
         self._max_tracks = int(max_tracks or max_sources)
@@ -170,7 +153,9 @@ class SRPPeakTracker:
             small_aperture_bias=small_aperture_bias,
         )
         self._max_sources = int(max_sources)
-        self._single_source_backends = {"music_1src", "gcc_tdoa_1src"}
+        self._single_source_backends = {
+            "music_1src",
+        }
         self._single_state_x: np.ndarray | None = None
         self._single_state_p: np.ndarray | None = None
         self._dominant_lock = _DominantLockState()

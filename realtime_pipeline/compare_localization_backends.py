@@ -120,7 +120,7 @@ def main() -> None:
 
     scene_paths = [Path(v) for v in args.scenes]
     out_root = Path(args.out_dir)
-    backends = ["srp_phat_legacy", "weighted_srp_dp", "tiny_dp_ipd"]
+    backends = ["srp_phat_legacy", "srp_phat_localization", "music_1src"]
     tracking_modes = ["legacy", "multi_peak_v2"]
     rows: list[dict] = []
 

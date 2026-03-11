@@ -1,0 +1,67 @@
+Title: Collapse realtime localization to localization/ adapters
+
+Summary
+- Removes the realtime-owned localization backend surface from active use in `realtime_pipeline/`.
+- Keeps `realtime_pipeline` as a thin adapter over `localization.algo` for supported methods only.
+- Leaves `srp_phat_localization` as the default realtime/framewise localization method.
+- Keeps the framewise benchmark as the valid path for `testing_specific_angles`.
+- Preserves SRP-PHAT framewise benchmark behavior on a subset run after the cleanup.
+
+Supported realtime localization backends after this change
+- `srp_phat_localization`
+- `srp_phat_legacy`
+- `music_1src`
+
+Removed from the supported realtime backend surface
+- `tiny_dp_ipd`
+- `weighted_srp_dp`
+- `gcc_tdoa_1src`
+- `gcc_vote_median_doa`
+- `gcc_vote_das`
+- `vad_gcc_vote_das`
+- `vad_gcc_vote_das_mvdr`
+- `snr_weighted_srp_phat`
+- `peak_confidence_srp_phat`
+- `particle_filter_tracker`
+- `neural_mask_gcc_phat`
+- `ipd_regressor`
+
+What changed
+- Rewrote [realtime_pipeline/localization_backends.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/localization_backends.py) into a small adapter module that bridges into `localization.algo`.
+- Restricted public backend defaults and choices in:
+  - [realtime_pipeline/contracts.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/contracts.py)
+  - [realtime_pipeline/simulation_runner.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/simulation_runner.py)
+  - [realtime_pipeline/recording_runner.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/recording_runner.py)
+- Removed old backend-specific branches from:
+  - [realtime_pipeline/srp_tracker.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/srp_tracker.py)
+  - [realtime_pipeline/fast_path.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/fast_path.py)
+- Narrowed client-facing backend choices in:
+  - [mic_array_forwarder/models.py](/home/mkeller/mkeller/signal-processing-research/mic_array_forwarder/models.py)
+  - [mic_array_forwarder/live_session.py](/home/mkeller/mkeller/signal-processing-research/mic_array_forwarder/live_session.py)
+  - [mic_array_forwarder/tools/ws_read.py](/home/mkeller/mkeller/signal-processing-research/mic_array_forwarder/tools/ws_read.py)
+  - [mic_array_forwarder/tools/ws_play.py](/home/mkeller/mkeller/signal-processing-research/mic_array_forwarder/tools/ws_play.py)
+- Kept the `testing_specific_angles` scene-level benchmark guard in [localization/benchmark/run.py](/home/mkeller/mkeller/signal-processing-research/localization/benchmark/run.py).
+
+Why
+- `localization/` is now the source of truth for SRP-PHAT.
+- The old realtime-specific localization implementations had diverged and were no longer the intended path.
+- `testing_specific_angles` should be evaluated framewise with realtime timing, not scene-level source enumeration.
+
+Validation
+- Focused tests:
+  - `PYTHONPATH=. pytest -q tests/test_realtime_pipeline_localization_backends.py tests/test_framewise_localization_benchmark_smoke.py localization/tests/test_benchmark_run_guard.py tests/test_realtime_demo_server_models.py tests/test_localization_benchmark_strategies.py`
+  - Result: `18 passed`
+
+- Framewise subset parity check:
+  - Pre-cleanup reference:
+    - [/tmp/srpphat_plan_check/20260311_215145_plan_check](/tmp/srpphat_plan_check/20260311_215145_plan_check)
+  - Post-cleanup rerun:
+    - [/tmp/srpphat_plan_check_postcleanup/20260311_220443_plan_check](/tmp/srpphat_plan_check_postcleanup/20260311_220443_plan_check)
+
+- Active-speaker-per-frame aggregate for `srp_phat_localization` on the 4-scene subset:
+  - Pre: MAE `46.6237`, Acc@25 `0.3478`, coverage `0.997`, fast_avg_ms `66.6162`
+  - Post: MAE `46.6237`, Acc@25 `0.3478`, coverage `0.997`, fast_avg_ms `66.5461`
+
+Notes
+- This is a consolidation pass, not a reimplementation pass for the removed realtime-only methods.
+- The removed methods can be reintroduced later only by reimplementing them under `localization/` and re-adding thin adapters in `realtime_pipeline/`.

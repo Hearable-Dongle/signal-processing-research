@@ -60,7 +60,7 @@ def test_realtime_pipeline_simulation_mock_end_to_end(tmp_path: Path) -> None:
     assert summary["fast_frames"] > 0
     assert summary["slow_chunks"] > 0
     assert summary["speaker_map_updates"] > 0
-    assert summary["localization_backend"] == "weighted_srp_dp"
+    assert summary["localization_backend"] == "srp_phat_localization"
     assert summary["tracking_mode"] == "multi_peak_v2"
     assert summary["control_mode"] == "spatial_peak_mode"
     assert (out_dir / "summary.json").exists()

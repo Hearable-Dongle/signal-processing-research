@@ -183,8 +183,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--localization-backend",
-        choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"],
-        default="tiny_dp_ipd",
+        choices=["srp_phat_legacy", "srp_phat_localization", "music_1src"],
+        default="srp_phat_localization",
     )
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
     parser.add_argument("--channel-map", default="", help="Comma-separated channel map, e.g. 0,1,2,3")
