@@ -30,6 +30,7 @@ class SRPPeakSnapshot:
     peak_scores: tuple[float, ...] | None = None
     raw_peaks_deg: tuple[float, ...] = ()
     raw_peak_scores: tuple[float, ...] | None = None
+    debug: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +47,7 @@ class PipelineConfig:
     slow_chunk_ms: int = 200
     slow_chunk_hop_ms: int | None = None
     fast_path_reference_mode: str = "speaker_map"  # one of: speaker_map, srp_peak
-    localization_backend: str = "weighted_srp_dp"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy, music_1src, gcc_tdoa_1src
+    localization_backend: str = "weighted_srp_dp"  # one of: tiny_dp_ipd, weighted_srp_dp, srp_phat_legacy, music_1src, gcc_tdoa_1src, snr_weighted_srp_phat, peak_confidence_srp_phat, particle_filter_tracker, neural_mask_gcc_phat, ipd_regressor
     tracking_mode: str = "multi_peak_v2"  # one of: legacy, multi_peak_v2
     control_mode: str = "spatial_peak_mode"  # one of: spatial_peak_mode, speaker_tracking_mode
     localization_window_ms: int = 160

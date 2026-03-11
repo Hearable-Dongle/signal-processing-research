@@ -482,13 +482,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default="single_dominant_no_separator",
         help="Realtime path backend to use before beamforming",
     )
-    parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_cross_0640"], default="respeaker_v3_0457")
+    parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_cross_0640", "respeaker_xvf3800_0650"], default="respeaker_v3_0457")
     parser.add_argument("--fast-frame-ms", type=int, default=50)
     parser.add_argument("--localization-window-ms", type=int, default=200)
     parser.add_argument("--slow-chunk-ms", type=int, default=2000)
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
-    parser.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"], default="weighted_srp_dp")
+    parser.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src", "snr_weighted_srp_phat", "peak_confidence_srp_phat", "particle_filter_tracker", "neural_mask_gcc_phat", "ipd_regressor"], default="weighted_srp_dp")
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
     parser.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     parser.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")

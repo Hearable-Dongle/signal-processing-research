@@ -143,6 +143,7 @@ def run_recording_pipeline(
                 "peak_scores": None if srp.peak_scores is None else [float(v) for v in srp.peak_scores],
                 "raw_peaks_deg": [float(v) for v in srp.raw_peaks_deg],
                 "raw_peak_scores": None if srp.raw_peak_scores is None else [float(v) for v in srp.raw_peak_scores],
+                "debug": None if srp.debug is None else dict(srp.debug),
             }
         )
         snapshot = pipe.shared_state.get_speaker_map_snapshot()

@@ -86,6 +86,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--force-export", action="store_true")
     parser.add_argument("--scene-ids", nargs="*", default=None)
     parser.add_argument("--max-scenes", type=int, default=None)
+    parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_cross_0640", "respeaker_xvf3800_0650"], default="respeaker_v3_0457")
     return parser.parse_args()
 
 
@@ -132,7 +133,7 @@ def main() -> None:
             "--fast-path-reference-mode",
             "speaker_map",
             "--mic-array-profile",
-            "respeaker_v3_0457",
+            str(args.mic_array_profile),
             "--workers",
             str(int(args.workers)),
         ]
@@ -151,6 +152,7 @@ def main() -> None:
         "collection_root": str(collection_root.resolve()),
         "benchmark_root": str(out_dir.resolve()),
         "methods": list(args.methods),
+        "mic_array_profile": str(args.mic_array_profile),
         "n_recordings": len(scene_metrics),
         "n_ok": sum(1 for row in interpretation_rows if row["assessment"] == "ok"),
         "n_problematic": sum(1 for row in interpretation_rows if row["assessment"] != "ok"),

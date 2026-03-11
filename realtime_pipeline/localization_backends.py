@@ -865,4 +865,24 @@ def build_localization_backend(
         return Music1SrcBackend(**common)
     if name == "gcc_tdoa_1src":
         return GCCTDOA1SrcBackend(**common)
+    if name == "snr_weighted_srp_phat":
+        from realtime_pipeline.localization_strategies.snr_weighted_srp_phat import SNRWeightedSRPPHATBackend
+
+        return SNRWeightedSRPPHATBackend(**common)
+    if name == "peak_confidence_srp_phat":
+        from realtime_pipeline.localization_strategies.peak_confidence_srp_phat import PeakConfidenceSRPPHATBackend
+
+        return PeakConfidenceSRPPHATBackend(**common)
+    if name == "particle_filter_tracker":
+        from realtime_pipeline.localization_strategies.particle_filter_tracker import ParticleFilterTrackerBackend
+
+        return ParticleFilterTrackerBackend(**common)
+    if name == "neural_mask_gcc_phat":
+        from realtime_pipeline.localization_strategies.neural_mask_gcc_phat import NeuralMaskGCCPHATBackend
+
+        return NeuralMaskGCCPHATBackend(**common)
+    if name == "ipd_regressor":
+        from realtime_pipeline.localization_strategies.ipd_regressor import IPDRegressorBackend
+
+        return IPDRegressorBackend(**common)
     raise ValueError(f"Unsupported localization backend: {backend}")

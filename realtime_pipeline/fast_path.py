@@ -459,6 +459,7 @@ class FastPathWorker(threading.Thread):
                             peak_scores=None if scores is None else tuple(float(v) for v in scores),
                             raw_peaks_deg=tuple(float(v) for v in tracker_debug.get("raw_peaks_deg", [])),
                             raw_peak_scores=tuple(float(v) for v in tracker_debug.get("raw_peak_scores", [])) if tracker_debug.get("raw_peak_scores") else None,
+                            debug=dict(tracker_debug),
                         )
                     else:
                         snapshot = override

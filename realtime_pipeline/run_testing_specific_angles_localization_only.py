@@ -7,12 +7,17 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
+
 from realtime_pipeline.compare_realtime_methods import METHOD_LOCALIZATION_ONLY, run_comparison_suite
+from simulation.mic_array_profiles import SUPPORTED_MIC_ARRAY_PROFILES, mic_positions_xyz
+from simulation.simulation_config import MicrophoneArray, SimulationConfig
 
 
 DEFAULT_SCENES_ROOT = Path("simulation/simulations/configs/testing_specific_angles")
 DEFAULT_ASSETS_ROOT = Path("simulation/simulations/assets/testing_specific_angles")
 DEFAULT_OUT_ROOT = Path("realtime_pipeline/output/testing_specific_angles_localization_only_postloc")
+DEFAULT_PROFILE = "respeaker_v3_0457"
 
 
 def _write_csv(path: Path, rows: list[dict]) -> None:
@@ -33,11 +38,19 @@ def _load_scene_meta(scene_path: Path) -> dict:
     return json.loads(meta_path.read_text(encoding="utf-8"))
 
 
-def _stage_scene(scene_path: Path, staging_root: Path) -> Path:
+def _stage_scene(scene_path: Path, staging_root: Path, profile: str) -> Path:
     stage_dir = staging_root / scene_path.stem
     stage_dir.mkdir(parents=True, exist_ok=True)
     staged_scene = stage_dir / scene_path.name
-    shutil.copy2(scene_path, staged_scene)
+    sim_cfg = SimulationConfig.from_file(scene_path)
+    rel_positions = mic_positions_xyz(profile)
+    sim_cfg.microphone_array = MicrophoneArray(
+        mic_center=list(sim_cfg.microphone_array.mic_center),
+        mic_radius=float(np.max(np.linalg.norm(rel_positions[:, :2], axis=1))),
+        mic_count=int(rel_positions.shape[0]),
+        mic_positions=rel_positions.tolist(),
+    )
+    sim_cfg.to_file(staged_scene)
 
     asset_dir = DEFAULT_ASSETS_ROOT / scene_path.stem
     for filename in ("scenario_metadata.json", "metrics_summary.json", "frame_ground_truth.csv"):
@@ -72,6 +85,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--out-root", default=str(DEFAULT_OUT_ROOT))
     parser.add_argument("--mock-separation", action="store_true")
     parser.add_argument("--max-scenes", type=int, default=None)
+    parser.add_argument("--profile", default=DEFAULT_PROFILE, choices=list(SUPPORTED_MIC_ARRAY_PROFILES))
     return parser.parse_args()
 
 
@@ -90,7 +104,7 @@ def main() -> None:
 
     rows: list[dict] = []
     for scene_path in scene_paths:
-        staged_scene = _stage_scene(scene_path, staging_root)
+        staged_scene = _stage_scene(scene_path, staging_root, str(args.profile))
         scene_out = out_root / scene_path.stem
         comparison_summary = run_comparison_suite(
             out_dir=scene_out,
@@ -107,6 +121,7 @@ def main() -> None:
                 "run_id": run_id,
                 "out_root": str(out_root.resolve()),
                 "n_scenes": len(rows),
+                "profile": str(args.profile),
                 "rows": rows,
             },
             indent=2,
