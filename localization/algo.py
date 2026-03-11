@@ -583,7 +583,7 @@ class SRPPHATLocalization:
                  freq_range=(200, 3000), max_sources=4,
                  **kwargs):
         """
-        Implementation of SRP-PHAT with SNR-based weighting.
+        Implementation of base SRP-PHAT.
         
         Args:
             mic_pos: (3, M) numpy array of microphone positions.
@@ -615,141 +615,43 @@ class SRPPHATLocalization:
         """
         M_mics, N_samples = audio.shape
         
-        # 1. STFT
-        f_vec, t_vec, Zxx = signal.stft(audio, fs=self.fs, nperseg=self.nfft, 
-                                       noverlap=int(self.nfft * self.overlap))
-        # Zxx: (M, F, T)
-        
-        # 2. Frequency Masking & Selection
+        # NOTE: This intentionally gives up parity with the previous "weighted"
+        # SRP-PHAT variant in favor of matching the validated debug_localization
+        # base SRP-PHAT behavior. The older implementation remained 180 degrees
+        # off on controlled scenes even after a steering-sign correction.
+        #
+        # This version uses a plain PHAT-normalized SRP sum with the same
+        # steering convention that was verified in debug_localization.
+        noverlap = min(int(round(self.nfft * self.overlap)), self.nfft - 1)
+        f_vec, t_vec, Zxx = signal.stft(
+            audio,
+            fs=self.fs,
+            nperseg=self.nfft,
+            noverlap=noverlap,
+            boundary=None,
+            padded=False,
+        )
+
         f_min, f_max = self.freq_range
         f_mask = (f_vec >= f_min) & (f_vec <= f_max)
-        relevant_freqs = f_vec[f_mask]
-        Zxx_roi = Zxx[:, f_mask, :] # (M, F_roi, T)
-        
+        relevant_freqs = f_vec[f_mask].astype(float)
+        Zxx_roi = Zxx[:, f_mask, :]
+
         if Zxx_roi.shape[1] == 0:
             return [], np.zeros(360), []
+        pairs = [(i, j) for i in range(M_mics) for j in range(i + 1, M_mics)]
+        search_angles = np.linspace(0, 2 * np.pi, 360, endpoint=False)
+        dirs = np.stack([np.cos(search_angles), np.sin(search_angles), np.zeros_like(search_angles)], axis=1)
+        P_theta = np.zeros(search_angles.shape[0], dtype=float)
 
-        # 3. Calculate Weighting W(f) based on SNR
-        # Estimate Noise Floor: Average power of quietest 10% of frames
-        # Compute frame energy
-        frame_energy = np.sum(np.sum(np.abs(Zxx_roi)**2, axis=0), axis=0) # (T,)
-        threshold_energy = np.percentile(frame_energy, 10)
-        noise_frames_mask = frame_energy <= threshold_energy
-        
-        # If we have no noise frames (unlikely unless constant sound), use bottom 1%
-        if np.sum(noise_frames_mask) == 0:
-            threshold_energy = np.percentile(frame_energy, 1)
-            noise_frames_mask = frame_energy <= threshold_energy
-            
-        # Noise Spectrum N(f): Average over noise frames, average over mics
-        # (F_roi,)
-        if np.sum(noise_frames_mask) > 0:
-            noise_spec = np.mean(np.mean(np.abs(Zxx_roi[:, :, noise_frames_mask])**2, axis=2), axis=0)
-        else:
-            # Fallback: estimate from min across time
-            noise_spec = np.min(np.mean(np.abs(Zxx_roi)**2, axis=0), axis=1)
-
-        # Signal Spectrum S(f): Average over active frames
-        # Active frames: e.g. top 50% energy
-        active_thresh = np.percentile(frame_energy, 50)
-        active_mask = frame_energy >= active_thresh
-        
-        if np.sum(active_mask) == 0:
-            # Fallback to all frames
-            active_mask = np.ones_like(frame_energy, dtype=bool)
-
-        signal_spec = np.mean(np.mean(np.abs(Zxx_roi[:, :, active_mask])**2, axis=2), axis=0)
-        
-        # SNR Weighting W(f)
-        # Simple Wiener-like or binary: if Signal > 2 * Noise -> 1, else 0
-        snr_ratio = signal_spec / (noise_spec + 1e-10)
-        W_f = np.zeros_like(relevant_freqs)
-        W_f[snr_ratio > 2.0] = 1.0 # Hard threshold or soft? Instructions: "zeroed out" -> implies hard.
-        
-        # Frequency weighting to emphasize higher frequencies (better resolution)
-        W_f *= (relevant_freqs**2)
-        W_f /= (np.max(W_f) + 1e-10) # Normalize
-
-
-        
-        # 4. GCC-PHAT Calculation (Averaged over active frames)
-        # We need the Cross-Spectrum Matrix averaged over time
-        # R_ij(f) = sum_t (X_i X_j* / |X_i X_j*|)
-        
-        n_pairs = M_mics * (M_mics - 1) // 2
-        pairs = []
-        for i in range(M_mics):
-            for j in range(i + 1, M_mics):
-                pairs.append((i, j))
-        
-        # Pre-allocate averaged GCC: (n_pairs, F_roi)
-        avg_GCC = np.zeros((n_pairs, len(relevant_freqs)), dtype=complex)
-        
-        active_indices = np.where(active_mask)[0]
-        
-        # We can vectorize over active frames?
-        # Memory check: M=4, F=200, T=500 -> Small.
-        X_active = Zxx_roi[:, :, active_indices] # (M, F, T_active)
-        
-        for p_idx, (i, j) in enumerate(pairs):
-            Xi = X_active[i]
-            Xj = X_active[j]
-            prod = Xi * np.conj(Xj)
-            denom = np.abs(prod)
-            denom[denom < 1e-10] = 1e-10
-            
-            # PHAT
-            R_inst = prod / denom # (F, T)
-            
-            # Average over time
-            avg_GCC[p_idx, :] = np.mean(R_inst, axis=1)
-
-        # 5. SRP Summation
-        # P(theta) = sum_pair sum_f W(f) * Real(GCC(f) * exp(j * 2pi * f * tau))
-        
-        search_angles = np.linspace(0, 2*np.pi, 360, endpoint=False)
-        
-        # Calculate Tau for all pairs and angles
-        # tau_ij(theta) = (p_i - p_j) . u(theta) / c
-        # Delays in seconds
-        
-        delays = np.zeros((n_pairs, len(search_angles)))
-        for p_idx, (i, j) in enumerate(pairs):
-            # Vector pointing from i to j: r_j - r_i
-            # Delay tau_ij = t_i - t_j = (r_j - r_i) . u / c
-            diff = self.mic_pos[:, j] - self.mic_pos[:, i]
-            
-            for a_idx, ang in enumerate(search_angles):
-                u = np.array([np.cos(ang), np.sin(ang), 0])
-                delays[p_idx, a_idx] = np.dot(diff, u) / self.c
-
-        # Computation
-        # We need sum_f W(f) * Real( GCC_pair(f) * exp(j 2pi f tau) )
-        
-        # Vectorized:
-        # avg_GCC: (P, F)
-        # W_f: (F,)
-        # delays: (P, A)
-        # relevant_freqs: (F,)
-        
-        # Construct exponent: (P, F, A)
-        omega = 2 * np.pi * relevant_freqs # (F,)
-        
-        # Phase terms: omega * tau
-        phase = omega[np.newaxis, :, np.newaxis] * delays[:, np.newaxis, :]
-        steer_vec = np.exp(1j * phase)
-        
-        # Apply SNR weights to GCC
-        # weighted_GCC: (P, F, 1)
-        weighted_GCC = (avg_GCC * W_f[np.newaxis, :])[:, :, np.newaxis]
-        
-        # Element-wise multiply and sum
-        # term: (P, F, A)
-        term = weighted_GCC * steer_vec
-        
-        # Sum over F and P
-        # Real part
-        P_theta = np.sum(np.sum(np.real(term), axis=1), axis=0) # (A,)
+        for i, j in pairs:
+            cross = Zxx_roi[i] * np.conj(Zxx_roi[j])
+            phat = cross / np.maximum(np.abs(cross), 1e-10)
+            diff = self.mic_pos[:, i] - self.mic_pos[:, j]
+            tau = (dirs @ diff) / self.c  # (A,)
+            phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]
+            steered = np.real(phat[:, :, np.newaxis] * np.exp(-1j * phase[:, np.newaxis, :]))
+            P_theta += np.sum(steered, axis=(0, 1))
         
         # Normalize P_theta for "histogram" look
         # Clip negative values (sidelobes) to zero instead of lifting everything
@@ -758,92 +660,35 @@ class SRPPHATLocalization:
         if np.max(P_theta) > 0:
             P_theta = P_theta / np.max(P_theta)
             
-        # 6. Peak Finding (Simple greedy with Ghost Suppression)
-        # Find local maxima
-        
         peaks = []
-        # Circular check
         for i in range(len(P_theta)):
-            prev = P_theta[(i-1)%len(P_theta)]
+            prev = P_theta[(i-1) % len(P_theta)]
             curr = P_theta[i]
-            next_val = P_theta[(i+1)%len(P_theta)]
+            next_val = P_theta[(i+1) % len(P_theta)]
             if curr > prev and curr >= next_val:
                 peaks.append((curr, i))
-                
         peaks.sort(key=lambda x: x[0], reverse=True)
-        
+
         final_doas = []
-        accepted_sources = [] # List of (angle_deg, amplitude)
-        
-        # Ghost suppression parameters
-        # Threshold: if peak < 0.85 * parent_peak and at 180 deg, ignore it.
-        # This works because we improved weighting to reduce ghost ratio to ~0.6.
-        suppression_threshold = 0.85 
-        ghost_angle_tol = 25.0 # degrees tolerance
-        
         for p_val, p_idx in peaks:
             if len(final_doas) >= self.max_sources:
                 break
-                
             angle = search_angles[p_idx]
-            angle_deg = np.degrees(angle)
-            
-            is_ghost = False
-            for acc_ang, acc_amp in accepted_sources:
-                # Check if this peak is a ghost of an already accepted source
-                # Ghost location is 180 degrees from source
-                ghost_loc = (acc_ang + 180) % 360
-                
-                # Circular distance
-                diff = abs(angle_deg - ghost_loc)
-                if diff > 180: diff = 360 - diff
-                
-                if diff < ghost_angle_tol:
-                    # It is spatially close to a ghost location.
-                    # Check amplitude ratio.
-                    if p_val < suppression_threshold * acc_amp:
-                        is_ghost = True
-                        break
-            
-            if not is_ghost:
-                final_doas.append(angle)
-                accepted_sources.append((angle_deg, p_val))
+            final_doas.append(angle)
 
-        # 7. Generate Time-History for Visualization
-        # Re-run SRP per frame for the history plot
         history = []
-        
-        # We use a coarser grid or fewer frames if T is very large, but T ~ 500 is fine.
-        # Construct exponent for all search angles
-        omega = 2 * np.pi * relevant_freqs
-        phase = omega[np.newaxis, :, np.newaxis] * delays[:, np.newaxis, :]
-        steer_vec = np.exp(1j * phase)
-        
-        # Process each time frame
         for t_idx in range(len(t_vec)):
-            # Check if frame is active
-            if not active_mask[t_idx]:
-                continue
-            
-            # Instantaneous GCC-PHAT
-            X_inst = Zxx_roi[:, :, t_idx] # (M, F)
-            frame_GCC = np.zeros((n_pairs, len(relevant_freqs)), dtype=complex)
-            for p_idx, (i, j) in enumerate(pairs):
-                prod = X_inst[i] * np.conj(X_inst[j])
-                denom = np.abs(prod)
-                denom[denom < 1e-10] = 1e-10
-                frame_GCC[p_idx, :] = prod / denom
-            
-            # Apply frequency weighting
-            weighted_GCC = (frame_GCC * W_f[np.newaxis, :])[:, :, np.newaxis]
-            
-            # SRP for this frame
-            P_frame = np.sum(np.sum(np.real(weighted_GCC * steer_vec), axis=1), axis=0)
-            
-            if np.max(P_frame) > 0:
-                best_idx = np.argmax(P_frame)
-                history.append((t_vec[t_idx], search_angles[best_idx]))
-            
+            frame_spec = np.zeros(search_angles.shape[0], dtype=float)
+            for i, j in pairs:
+                prod = Zxx_roi[i, :, t_idx] * np.conj(Zxx_roi[j, :, t_idx])
+                phat = prod / np.maximum(np.abs(prod), 1e-10)
+                diff = self.mic_pos[:, i] - self.mic_pos[:, j]
+                tau = (dirs @ diff) / self.c
+                phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]
+                frame_spec += np.sum(np.real(phat[:, np.newaxis] * np.exp(-1j * phase)), axis=0)
+            if np.max(frame_spec) > 0.0:
+                history.append((t_vec[t_idx], search_angles[int(np.argmax(frame_spec))]))
+
         return final_doas, P_theta, history
 
 
