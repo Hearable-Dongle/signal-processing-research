@@ -1,67 +1,125 @@
-Title: Collapse realtime localization to localization/ adapters
+Add framewise Optuna tuning for localization methods
 
-Summary
-- Removes the realtime-owned localization backend surface from active use in `realtime_pipeline/`.
-- Keeps `realtime_pipeline` as a thin adapter over `localization.algo` for supported methods only.
-- Leaves `srp_phat_localization` as the default realtime/framewise localization method.
-- Keeps the framewise benchmark as the valid path for `testing_specific_angles`.
-- Preserves SRP-PHAT framewise benchmark behavior on a subset run after the cleanup.
+## Summary
 
-Supported realtime localization backends after this change
-- `srp_phat_localization`
-- `srp_phat_legacy`
-- `music_1src`
+This PR adds a new Optuna-based tuning system for framewise, realtime-style
+localization evaluation on `testing_specific_angles`.
 
-Removed from the supported realtime backend surface
-- `tiny_dp_ipd`
-- `weighted_srp_dp`
-- `gcc_tdoa_1src`
-- `gcc_vote_median_doa`
-- `gcc_vote_das`
-- `vad_gcc_vote_das`
-- `vad_gcc_vote_das_mvdr`
-- `snr_weighted_srp_phat`
-- `peak_confidence_srp_phat`
-- `particle_filter_tracker`
-- `neural_mask_gcc_phat`
-- `ipd_regressor`
+It does not use the older scene-level `localization.benchmark.run` path.
+Instead, it evaluates sliding-window predictions against the active speaker at
+each timestamp, which matches the current realtime localization use case.
 
-What changed
-- Rewrote [realtime_pipeline/localization_backends.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/localization_backends.py) into a small adapter module that bridges into `localization.algo`.
-- Restricted public backend defaults and choices in:
-  - [realtime_pipeline/contracts.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/contracts.py)
-  - [realtime_pipeline/simulation_runner.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/simulation_runner.py)
-  - [realtime_pipeline/recording_runner.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/recording_runner.py)
-- Removed old backend-specific branches from:
-  - [realtime_pipeline/srp_tracker.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/srp_tracker.py)
-  - [realtime_pipeline/fast_path.py](/home/mkeller/mkeller/signal-processing-research/realtime_pipeline/fast_path.py)
-- Narrowed client-facing backend choices in:
-  - [mic_array_forwarder/models.py](/home/mkeller/mkeller/signal-processing-research/mic_array_forwarder/models.py)
-  - [mic_array_forwarder/live_session.py](/home/mkeller/mkeller/signal-processing-research/mic_array_forwarder/live_session.py)
-  - [mic_array_forwarder/tools/ws_read.py](/home/mkeller/mkeller/signal-processing-research/mic_array_forwarder/tools/ws_read.py)
-  - [mic_array_forwarder/tools/ws_play.py](/home/mkeller/mkeller/signal-processing-research/mic_array_forwarder/tools/ws_play.py)
-- Kept the `testing_specific_angles` scene-level benchmark guard in [localization/benchmark/run.py](/home/mkeller/mkeller/signal-processing-research/localization/benchmark/run.py).
+## What Changed
 
-Why
-- `localization/` is now the source of truth for SRP-PHAT.
-- The old realtime-specific localization implementations had diverged and were no longer the intended path.
-- `testing_specific_angles` should be evaluated framewise with realtime timing, not scene-level source enumeration.
+- Added a reusable framewise tuning evaluator in
+  `localization/tuning/framewise_common.py`
+- Added a direct Optuna runner in
+  `localization/tuning/run_optuna_framewise_respeaker_v3.py`
+- Added a multi-method launcher in
+  `localization/tuning/launch_optuna_framewise_methods.py`
+- Added smoke coverage for the framewise Optuna runner
+- Updated `localization/README.md`
+- Added `localization/tuning/FRAMEWISE_TUNING.md`
 
-Validation
-- Focused tests:
-  - `PYTHONPATH=. pytest -q tests/test_realtime_pipeline_localization_backends.py tests/test_framewise_localization_benchmark_smoke.py localization/tests/test_benchmark_run_guard.py tests/test_realtime_demo_server_models.py tests/test_localization_benchmark_strategies.py`
-  - Result: `18 passed`
+## Tuned Methods
 
-- Framewise subset parity check:
-  - Pre-cleanup reference:
-    - [/tmp/srpphat_plan_check/20260311_215145_plan_check](/tmp/srpphat_plan_check/20260311_215145_plan_check)
-  - Post-cleanup rerun:
-    - [/tmp/srpphat_plan_check_postcleanup/20260311_220443_plan_check](/tmp/srpphat_plan_check_postcleanup/20260311_220443_plan_check)
+Initial method set:
 
-- Active-speaker-per-frame aggregate for `srp_phat_localization` on the 4-scene subset:
-  - Pre: MAE `46.6237`, Acc@25 `0.3478`, coverage `0.997`, fast_avg_ms `66.6162`
-  - Post: MAE `46.6237`, Acc@25 `0.3478`, coverage `0.997`, fast_avg_ms `66.5461`
+- `SRP-PHAT`
+- `GMDA`
+- `SSZ`
 
-Notes
-- This is a consolidation pass, not a reimplementation pass for the removed realtime-only methods.
-- The removed methods can be reintroduced later only by reimplementing them under `localization/` and re-adding thin adapters in `realtime_pipeline/`.
+Profile:
+
+- `respeaker_v3_0457`
+
+## Search Space
+
+Shared:
+
+- `window_ms`: `50..300`, step `50`
+- `hop_ms`: `30..100`, step `5`
+- `overlap`: `0.25..0.90`, step `0.05`
+- `freq_low_hz`: `100..1500`, step `50`
+- `freq_high_hz`: `max(freq_low_hz + 400, 1500)..6000`, step `100`
+
+Method-specific:
+
+- `GMDA`: `power_thresh_percentile`, `mdl_beta`
+- `SSZ`: `epsilon`, `d_freq`
+
+## Objective
+
+Trials optimize a balanced framewise score weighted toward:
+
+- lower MAE
+- higher `Acc@25`
+- smaller runtime penalty
+
+The score is saved per trial along with:
+
+- `mae_deg_mean`
+- `acc_at_10_mean`
+- `acc_at_20_mean`
+- `acc_at_25_mean`
+- `median_deg_mean`
+- `p90_deg_mean`
+- `coverage_rate_mean`
+- `runtime_ms_mean`
+
+## Storage / Dashboard
+
+Each method writes a local SQLite study so it can be inspected with
+`optuna-dashboard`.
+
+Output root:
+
+- `localization/tuning/results/framewise_respeaker_v3_optuna/<run_id>/`
+
+Each run includes:
+
+- `dashboard_commands.txt`
+- `overall_best_configs.csv`
+- `overall_best_configs.json`
+
+Each method includes:
+
+- `study.db`
+- `best_params.json`
+- `best_full_eval.csv`
+- `best_full_eval.json`
+- `best_scene_rows.csv`
+- `best_timeline_rows.csv`
+- `trials_export.csv`
+- `trials_export.json`
+
+## Parallelism
+
+Parallelism is supported in two layers:
+
+- one coordinator per method
+- multiple worker processes per study
+
+Trials can also parallelize scene evaluation while preserving sequential window
+processing inside each scene.
+
+## Validation
+
+Validated in this workspace with:
+
+```bash
+PYTHONPATH=. pytest -q localization/tests/test_tuning_framewise_common.py localization/tests/test_run_optuna_framewise_smoke.py localization/tests/test_tuning_common.py
+```
+
+And with a smoke run:
+
+```bash
+PYTHONPATH=. python -m localization.tuning.run_optuna_framewise_respeaker_v3 \
+  --methods SRP-PHAT \
+  --duration-min 0.02 \
+  --subset-per-bucket 1 \
+  --max-scenes 1 \
+  --top-n-full-eval 1 \
+  --srp-workers 1 \
+  --trial-scene-workers 1
+```
