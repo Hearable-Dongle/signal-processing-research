@@ -38,7 +38,7 @@ def run_recording_pipeline(
     output_allow_amplification: bool = False,
     robust_mode: bool = True,
     capture_trace: bool = False,
-    localization_backend: str = "weighted_srp_dp",
+    localization_backend: str = "srp_phat_localization",
     localization_window_ms: int = 200,
     tracking_mode: str = "multi_peak_v2",
     control_mode: str = "spatial_peak_mode",

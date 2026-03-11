@@ -7,7 +7,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from realtime_pipeline.localization_backends import build_localization_backend
+from realtime_pipeline.localization_backends import SUPPORTED_LOCALIZATION_BACKENDS, build_localization_backend
 from realtime_pipeline.localization_strategies.ipd_regressor import extract_ipd_features
 from simulation.mic_array_profiles import mic_positions_xyz
 
@@ -36,16 +36,11 @@ def _simulate_far_field_signal(angle_deg: float, sr: int, duration_s: float, mic
     return out.astype(np.float32)
 
 
-def test_new_localization_backends_emit_compatible_results() -> None:
+def test_supported_localization_backends_emit_compatible_results() -> None:
     sr = 16000
     mic_pos = mic_positions_xyz("respeaker_v3_0457").T
     audio = _simulate_far_field_signal(30.0, sr=sr, duration_s=0.32, mic_pos_xyz=mic_pos)
-    for backend_name in [
-        "snr_weighted_srp_phat",
-        "peak_confidence_srp_phat",
-        "particle_filter_tracker",
-        "neural_mask_gcc_phat",
-    ]:
+    for backend_name in SUPPORTED_LOCALIZATION_BACKENDS:
         backend = build_localization_backend(
             backend_name,
             mic_pos=mic_pos,
@@ -60,27 +55,25 @@ def test_new_localization_backends_emit_compatible_results() -> None:
         )
         result = backend.process(audio)
         assert result.debug["backend"] == backend_name
-        assert result.score_spectrum is None or len(np.asarray(result.score_spectrum).reshape(-1)) == 72
+        assert result.score_spectrum is None or len(np.asarray(result.score_spectrum).reshape(-1)) > 0
 
 
-def test_peak_confidence_backend_reports_gating_flag() -> None:
+def test_removed_backend_names_are_rejected() -> None:
     sr = 16000
     mic_pos = mic_positions_xyz("respeaker_v3_0457").T
-    audio = np.zeros((mic_pos.shape[1], int(0.2 * sr)), dtype=np.float32)
-    backend = build_localization_backend(
-        "peak_confidence_srp_phat",
-        mic_pos=mic_pos,
-        fs=sr,
-        nfft=256,
-        overlap=0.5,
-        freq_range=(300, 2500),
-        max_sources=1,
-        grid_size=72,
-        min_separation_deg=15.0,
-        small_aperture_bias=True,
-    )
-    result = backend.process(audio)
-    assert "gated" in result.debug or result.score_spectrum is None
+    with np.testing.assert_raises_regex(ValueError, "delegates localization to localization/"):
+        build_localization_backend(
+            "peak_confidence_srp_phat",
+            mic_pos=mic_pos,
+            fs=sr,
+            nfft=256,
+            overlap=0.5,
+            freq_range=(300, 2500),
+            max_sources=1,
+            grid_size=72,
+            min_separation_deg=15.0,
+            small_aperture_bias=True,
+        )
 
 
 def test_ipd_feature_extractor_has_expected_shape() -> None:

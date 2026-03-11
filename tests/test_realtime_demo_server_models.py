@@ -21,7 +21,7 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.localization_window_ms == 160
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
-    assert req.localization_backend == "weighted_srp_dp"
+    assert req.localization_backend == "srp_phat_localization"
     assert req.tracking_mode == "multi_peak_v2"
     assert req.processing_mode == "specific_speaker_enhancement"
     assert req.monitor_source == "processed"

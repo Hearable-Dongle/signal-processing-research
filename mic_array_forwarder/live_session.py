@@ -450,11 +450,11 @@ class LiveDemoSession:
                 window_ms=max(int(self.req.localization_window_ms), max(10, int(self.req.localization_hop_ms))),
                 nfft=512,
                 overlap=0.5,
-                freq_range=(300, 3000) if str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"} else (200, 3000),
+                freq_range=(300, 3000) if str(self.req.localization_backend) == "music_1src" else (200, 3000),
                 max_sources=(
                     1
                     if self.req.algorithm_mode in {METHOD_LOCALIZATION_ONLY, METHOD_SINGLE_DOMINANT_NO_SEPARATOR}
-                    or str(self.req.localization_backend) in {"music_1src", "gcc_tdoa_1src"}
+                    or str(self.req.localization_backend) == "music_1src"
                     else max(1, min(int(self._algorithm.max_sources), channel_count))
                 ),
                 prior_enabled=True,

@@ -41,7 +41,7 @@ class SessionStartRequest(BaseModel):
     identity_backend: Literal["mfcc_legacy", "speaker_embed_session"] = "mfcc_legacy"
     identity_speaker_embedding_model: Literal["ecapa_voxceleb", "wavlm_base_sv", "wavlm_base_plus_sv"] = "wavlm_base_plus_sv"
     beamforming_mode: Literal["mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
-    localization_backend: Literal["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src"] = "weighted_srp_dp"
+    localization_backend: Literal["srp_phat_legacy", "srp_phat_localization", "music_1src"] = "srp_phat_localization"
     tracking_mode: Literal["legacy", "multi_peak_v2"] = "multi_peak_v2"
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False

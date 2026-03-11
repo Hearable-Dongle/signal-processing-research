@@ -41,7 +41,7 @@ def run_simulation_pipeline(
     write_raw_mix_output: bool = True,
     robust_mode: bool = True,
     capture_trace: bool = False,
-    localization_backend: str = "weighted_srp_dp",
+    localization_backend: str = "srp_phat_localization",
     tracking_mode: str = "multi_peak_v2",
     control_mode: str = "spatial_peak_mode",
     localization_window_ms: int = 160,
@@ -412,19 +412,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--localization-backend",
         choices=[
-            "tiny_dp_ipd",
-            "weighted_srp_dp",
             "srp_phat_legacy",
             "srp_phat_localization",
             "music_1src",
-            "gcc_tdoa_1src",
-            "snr_weighted_srp_phat",
-            "peak_confidence_srp_phat",
-            "particle_filter_tracker",
-            "neural_mask_gcc_phat",
-            "ipd_regressor",
         ],
-        default="weighted_srp_dp",
+        default="srp_phat_localization",
     )
     p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
     p.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
