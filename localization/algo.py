@@ -600,6 +600,41 @@ class SRPPHATLocalization:
         self.freq_range = freq_range
         self.max_sources = max_sources
         self.c = 343.0
+        self.accumulation_sec = float(kwargs.get("accumulation_sec", 0.5))
+        self.min_active_frames = int(kwargs.get("min_active_frames", 3))
+        self.rms_floor = float(kwargs.get("rms_floor", 5e-4))
+        self.speech_ratio_threshold = float(kwargs.get("speech_ratio_threshold", 0.62))
+        self.rms_ratio_threshold = float(kwargs.get("rms_ratio_threshold", 1.2))
+        self.flux_threshold = float(kwargs.get("flux_threshold", 0.12))
+        self.noise_floor_alpha = float(kwargs.get("noise_floor_alpha", 0.95))
+
+    def _speech_features(self, chunk: np.ndarray, prev_mag: np.ndarray | None, noise_floor: float):
+        mono = np.mean(chunk, axis=0)
+        rms = float(np.sqrt(np.mean(np.square(mono)) + 1e-12))
+        spec = np.abs(np.fft.rfft(mono * np.hanning(mono.size)))
+        freqs = np.fft.rfftfreq(mono.size, d=1.0 / self.fs)
+        speech_mask = (freqs >= 250.0) & (freqs <= 3500.0)
+        total_energy = float(np.sum(spec**2) + 1e-12)
+        speech_energy = float(np.sum(spec[speech_mask] ** 2))
+        speech_ratio = speech_energy / total_energy
+        if prev_mag is None:
+            flux = 0.0
+        else:
+            flux = float(np.mean(np.maximum(spec - prev_mag, 0.0)) / (np.mean(prev_mag) + 1e-12))
+        rms_ratio = rms / max(noise_floor, 1e-8)
+        speech_active = bool(
+            rms > self.rms_floor
+            and speech_ratio >= self.speech_ratio_threshold
+            and (rms_ratio >= self.rms_ratio_threshold or flux >= self.flux_threshold)
+        )
+        return speech_active, rms, spec
+
+    def _update_noise_floor(self, noise_floor: float, rms: float, speech_active: bool) -> float:
+        if not np.isfinite(noise_floor) or noise_floor <= 0.0:
+            return rms
+        if speech_active:
+            return float(noise_floor)
+        return float(self.noise_floor_alpha * noise_floor + (1.0 - self.noise_floor_alpha) * rms)
         
     def process(self, audio):
         """
@@ -615,13 +650,10 @@ class SRPPHATLocalization:
         """
         M_mics, N_samples = audio.shape
         
-        # NOTE: This intentionally gives up parity with the previous "weighted"
-        # SRP-PHAT variant in favor of matching the validated debug_localization
-        # base SRP-PHAT behavior. The older implementation remained 180 degrees
-        # off on controlled scenes even after a steering-sign correction.
-        #
-        # This version uses a plain PHAT-normalized SRP sum with the same
-        # steering convention that was verified in debug_localization.
+        # NOTE: This intentionally gives up parity with the previous scene-level
+        # SRP-PHAT implementation in favor of matching the validated
+        # debug_localization winner: MSC-weighted SRP-PHAT with speech-active
+        # accumulation. That path was materially better under directional noise.
         noverlap = min(int(round(self.nfft * self.overlap)), self.nfft - 1)
         f_vec, t_vec, Zxx = signal.stft(
             audio,
@@ -642,16 +674,48 @@ class SRPPHATLocalization:
         pairs = [(i, j) for i in range(M_mics) for j in range(i + 1, M_mics)]
         search_angles = np.linspace(0, 2 * np.pi, 360, endpoint=False)
         dirs = np.stack([np.cos(search_angles), np.sin(search_angles), np.zeros_like(search_angles)], axis=1)
-        P_theta = np.zeros(search_angles.shape[0], dtype=float)
+        frame_specs = []
+        frame_times = []
+        frame_active = []
+        prev_mag = None
+        noise_floor = 0.0
+        accum_frames = max(1, int(round(self.accumulation_sec / max((1.0 - self.overlap) * self.nfft / self.fs, 1e-6))))
 
-        for i, j in pairs:
-            cross = Zxx_roi[i] * np.conj(Zxx_roi[j])
-            phat = cross / np.maximum(np.abs(cross), 1e-10)
-            diff = self.mic_pos[:, i] - self.mic_pos[:, j]
-            tau = (dirs @ diff) / self.c  # (A,)
-            phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]
-            steered = np.real(phat[:, :, np.newaxis] * np.exp(-1j * phase[:, np.newaxis, :]))
-            P_theta += np.sum(steered, axis=(0, 1))
+        for t_idx in range(Zxx_roi.shape[2]):
+            start = int(round(t_idx * (self.nfft - noverlap)))
+            stop = min(start + self.nfft, N_samples)
+            if stop - start <= 8:
+                continue
+            chunk = audio[:, start:stop]
+            speech_active, rms, prev_mag = self._speech_features(chunk, prev_mag, noise_floor)
+            noise_floor = self._update_noise_floor(noise_floor, rms, speech_active)
+            frame_spec = np.zeros(search_angles.shape[0], dtype=float)
+            for i, j in pairs:
+                cross = Zxx_roi[i, :, t_idx] * np.conj(Zxx_roi[j, :, t_idx])
+                phat = cross / np.maximum(np.abs(cross), 1e-10)
+                auto_i = np.abs(Zxx_roi[i, :, t_idx]) ** 2
+                auto_j = np.abs(Zxx_roi[j, :, t_idx]) ** 2
+                msc = (np.abs(cross) ** 2) / np.maximum(auto_i * auto_j, 1e-10)
+                msc = np.clip(msc, 0.0, 1.0)
+                if np.max(msc) > 1e-10:
+                    msc = msc / np.max(msc)
+                diff = self.mic_pos[:, i] - self.mic_pos[:, j]
+                tau = (dirs @ diff) / self.c  # (A,)
+                phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]
+                steered = np.real(phat[:, np.newaxis] * np.exp(-1j * phase))
+                frame_spec += np.sum(steered * msc[:, np.newaxis], axis=0)
+            frame_specs.append(frame_spec)
+            frame_times.append(float(t_vec[t_idx]) if t_idx < len(t_vec) else float(start / self.fs))
+            frame_active.append(bool(speech_active))
+
+        if not frame_specs:
+            return [], np.zeros(360), []
+
+        active_specs = [spec for spec, active in zip(frame_specs, frame_active) if active]
+        if len(active_specs) >= self.min_active_frames:
+            P_theta = np.mean(np.stack(active_specs, axis=0), axis=0)
+        else:
+            P_theta = np.mean(np.stack(frame_specs, axis=0), axis=0)
         
         # Normalize P_theta for "histogram" look
         # Clip negative values (sidelobes) to zero instead of lifting everything
@@ -677,17 +741,14 @@ class SRPPHATLocalization:
             final_doas.append(angle)
 
         history = []
-        for t_idx in range(len(t_vec)):
-            frame_spec = np.zeros(search_angles.shape[0], dtype=float)
-            for i, j in pairs:
-                prod = Zxx_roi[i, :, t_idx] * np.conj(Zxx_roi[j, :, t_idx])
-                phat = prod / np.maximum(np.abs(prod), 1e-10)
-                diff = self.mic_pos[:, i] - self.mic_pos[:, j]
-                tau = (dirs @ diff) / self.c
-                phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]
-                frame_spec += np.sum(np.real(phat[:, np.newaxis] * np.exp(-1j * phase)), axis=0)
-            if np.max(frame_spec) > 0.0:
-                history.append((t_vec[t_idx], search_angles[int(np.argmax(frame_spec))]))
+        for idx in range(len(frame_specs)):
+            start_idx = max(0, idx - accum_frames + 1)
+            window_specs = [spec for spec, active in zip(frame_specs[start_idx:idx + 1], frame_active[start_idx:idx + 1]) if active]
+            if len(window_specs) < self.min_active_frames:
+                continue
+            hist_spec = np.mean(np.stack(window_specs, axis=0), axis=0)
+            if np.max(hist_spec) > 0.0:
+                history.append((frame_times[idx], search_angles[int(np.argmax(hist_spec))]))
 
         return final_doas, P_theta, history
 
