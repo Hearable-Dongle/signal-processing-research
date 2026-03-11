@@ -20,6 +20,7 @@ AI localization modules/configs were removed. Valid `localization.type` values a
   - `python -m localization.benchmark.report`
   - `python -m localization.benchmark.rank_respeaker_v3_methods`
   - `python -m localization.tuning.run_optuna_respeaker_v3`
+  - `python -m localization.tuning.run_optuna_framewise_respeaker_v3`
 
 ## Run A Single Localization Config
 
@@ -112,6 +113,52 @@ python -m localization.tuning.run_optuna_respeaker_v3 \
 This writes per-method SQLite studies under
 `localization/tuning/results/respeaker_v3_optuna/<run_id>/` and includes
 `dashboard_commands.txt` with live `optuna-dashboard` commands for each study DB.
+
+## Framewise Realtime-Style Tuning
+
+Use this when you want tuning to match the sliding-window behavior of the
+realtime localization path. This is the preferred tuner for
+`testing_specific_angles`.
+
+Single runner:
+
+```bash
+PYTHONPATH=. python -m localization.tuning.run_optuna_framewise_respeaker_v3 \
+  --methods SRP-PHAT GMDA SSZ \
+  --duration-min 60 \
+  --subset-per-bucket 1 \
+  --top-n-full-eval 5 \
+  --srp-workers 10 \
+  --gmda-workers 8 \
+  --ssz-workers 4 \
+  --trial-scene-workers 2
+```
+
+Parallel launcher:
+
+```bash
+PYTHONPATH=. python -m localization.tuning.launch_optuna_framewise_methods \
+  --methods SRP-PHAT GMDA SSZ \
+  --duration-min 120 \
+  --subset-per-bucket 1 \
+  --top-n-full-eval 5 \
+  --srp-workers 10 \
+  --gmda-workers 8 \
+  --ssz-workers 4 \
+  --trial-scene-workers 2
+```
+
+This writes SQLite studies under:
+
+- `localization/tuning/results/framewise_respeaker_v3_optuna/<run_id>/`
+
+and includes `dashboard_commands.txt` so you can open:
+
+```bash
+optuna-dashboard sqlite:////abs/path/to/study.db
+```
+
+See [FRAMEWISE_TUNING.md](/home/mkeller/mkeller/signal-processing-research/localization/tuning/FRAMEWISE_TUNING.md) for the search space, resume behavior, and how to add new methods.
 
 ## Implemented Benchmark Components
 
