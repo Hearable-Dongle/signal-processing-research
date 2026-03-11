@@ -1,0 +1,2 @@
+acc_within_10deg_mean,angle_mae_std,balanced_score,false_alarms_mean,layout_mae_std,mae_deg_matched_mean,method,method_cfg,misses_mean,recall_mean,runtime_seconds_mean,trial_number
+0.3125,8.361279637640367,0.3294839709257129,0.0,6.2890625,39.276041666666664,SRP-PHAT,"{'nfft': 3520, 'overlap': 0.65, 'freq_range': [1200, 1800], 'window_ms': 220}",0.90625,0.546875,0.3907200659790154,166

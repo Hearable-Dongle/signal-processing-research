@@ -1,0 +1,192 @@
+[
+  {
+    "rank": 1,
+    "trial_number": 268,
+    "value": 0.4966994657406606,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.9,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 4100,
+      "power_thresh_percentile": 96,
+      "mdl_beta": 1.12136133566762
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.4375,
+      "angle_mae_std": 14.611104509926692,
+      "balanced_score": 0.4966994657406606,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.90625,
+      "mae_deg_matched_mean": 46.125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.9,
+        "freq_range": [
+          1200,
+          4100
+        ],
+        "power_thresh_percentile": 96,
+        "mdl_beta": 1.12136133566762,
+        "window_ms": 230
+      },
+      "misses_mean": 0.0,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 1.0,
+      "runtime_seconds_mean": 4.491102805623086,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "rank": 2,
+    "trial_number": 269,
+    "value": 0.4966994657406606,
+    "params": {
+      "window_ms": 230,
+      "overlap": 0.9,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 4100,
+      "power_thresh_percentile": 96,
+      "mdl_beta": 1.5587384787175593
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.4375,
+      "angle_mae_std": 14.611104509926692,
+      "balanced_score": 0.4966994657406606,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 2.90625,
+      "mae_deg_matched_mean": 46.125,
+      "method_cfg": {
+        "nfft": 3680,
+        "overlap": 0.9,
+        "freq_range": [
+          1200,
+          4100
+        ],
+        "power_thresh_percentile": 96,
+        "mdl_beta": 1.5587384787175593,
+        "window_ms": 230
+      },
+      "misses_mean": 0.0,
+      "n_scenes": 16,
+      "nfft": 3680,
+      "recall_mean": 1.0,
+      "runtime_seconds_mean": 4.003329357481562,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "rank": 3,
+    "trial_number": 200,
+    "value": 0.4950764414984273,
+    "params": {
+      "window_ms": 215,
+      "overlap": 0.9,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 3800,
+      "power_thresh_percentile": 96,
+      "mdl_beta": 1.1036711463337165
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.4375,
+      "angle_mae_std": 12.064280956609064,
+      "balanced_score": 0.4950764414984273,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 4.0,
+      "mae_deg_matched_mean": 47.125,
+      "method_cfg": {
+        "nfft": 3440,
+        "overlap": 0.9,
+        "freq_range": [
+          1100,
+          3800
+        ],
+        "power_thresh_percentile": 96,
+        "mdl_beta": 1.1036711463337165,
+        "window_ms": 215
+      },
+      "misses_mean": 0.0,
+      "n_scenes": 16,
+      "nfft": 3440,
+      "recall_mean": 1.0,
+      "runtime_seconds_mean": 4.133828732447,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "rank": 4,
+    "trial_number": 78,
+    "value": 0.494957547881154,
+    "params": {
+      "window_ms": 120,
+      "overlap": 0.8500000000000001,
+      "freq_low_hz": 800,
+      "freq_high_hz": 4200,
+      "power_thresh_percentile": 95,
+      "mdl_beta": 6.95392085263425
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.4375,
+      "angle_mae_std": 12.512640093496458,
+      "balanced_score": 0.494957547881154,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.953125,
+      "mae_deg_matched_mean": 47.453125,
+      "method_cfg": {
+        "nfft": 1920,
+        "overlap": 0.8500000000000001,
+        "freq_range": [
+          800,
+          4200
+        ],
+        "power_thresh_percentile": 95,
+        "mdl_beta": 6.95392085263425,
+        "window_ms": 120
+      },
+      "misses_mean": 0.0,
+      "n_scenes": 16,
+      "nfft": 1920,
+      "recall_mean": 1.0,
+      "runtime_seconds_mean": 4.144918647565646,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "rank": 5,
+    "trial_number": 226,
+    "value": 0.49480434084076336,
+    "params": {
+      "window_ms": 215,
+      "overlap": 0.9,
+      "freq_low_hz": 1100,
+      "freq_high_hz": 4100,
+      "power_thresh_percentile": 96,
+      "mdl_beta": 0.8502815753623234
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.4375,
+      "angle_mae_std": 13.980236817893152,
+      "balanced_score": 0.49480434084076336,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 3.828125,
+      "mae_deg_matched_mean": 46.890625,
+      "method_cfg": {
+        "nfft": 3440,
+        "overlap": 0.9,
+        "freq_range": [
+          1100,
+          4100
+        ],
+        "power_thresh_percentile": 96,
+        "mdl_beta": 0.8502815753623234,
+        "window_ms": 215
+      },
+      "misses_mean": 0.0,
+      "n_scenes": 16,
+      "nfft": 3440,
+      "recall_mean": 1.0,
+      "runtime_seconds_mean": 4.040094315161696,
+      "subset_n_scenes": 16
+    }
+  }
+]

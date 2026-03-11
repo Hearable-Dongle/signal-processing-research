@@ -1,0 +1,2 @@
+acc_within_10deg_mean,angle_mae_std,balanced_score,false_alarms_mean,layout_mae_std,mae_deg_matched_mean,method,method_cfg,misses_mean,recall_mean,runtime_seconds_mean,trial_number
+0.3541666666666667,4.868716458841821,0.48061941499835714,0.0,0.5312500000000036,58.057291666666664,SSZ,"{'nfft': 3600, 'overlap': 0.5, 'epsilon': 0.0884515814058056, 'd_freq': 1, 'freq_range': [1100, 1600], 'window_ms': 225}",0.09375,0.953125,1.6075877126907774,111

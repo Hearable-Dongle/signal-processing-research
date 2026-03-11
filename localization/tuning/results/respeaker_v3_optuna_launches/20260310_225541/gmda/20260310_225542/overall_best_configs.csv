@@ -1,0 +1,2 @@
+acc_within_10deg_mean,angle_mae_std,balanced_score,false_alarms_mean,layout_mae_std,mae_deg_matched_mean,method,method_cfg,misses_mean,recall_mean,runtime_seconds_mean,trial_number
+0.390625,2.9008300996313254,0.49408552317945936,0.0,6.03515625,41.3671875,GMDA,"{'nfft': 3440, 'overlap': 0.9, 'freq_range': [1100, 3800], 'power_thresh_percentile': 96, 'mdl_beta': 1.1036711463337165, 'window_ms': 215}",0.0,1.0,1.765717026772715,200

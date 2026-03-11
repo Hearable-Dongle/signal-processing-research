@@ -1,0 +1,29 @@
+{
+  "updated_at_utc": "2026-03-10T23:00:11.411356+00:00",
+  "processes": [
+    {
+      "method": "SRP-PHAT",
+      "pid": 2109792,
+      "returncode": null,
+      "running": true,
+      "log_path": "localization/tuning/results/respeaker_v3_optuna_launches/20260310_225541/srp_phat/launcher.log",
+      "out_root": "localization/tuning/results/respeaker_v3_optuna_launches/20260310_225541/srp_phat"
+    },
+    {
+      "method": "GMDA",
+      "pid": 2109793,
+      "returncode": null,
+      "running": true,
+      "log_path": "localization/tuning/results/respeaker_v3_optuna_launches/20260310_225541/gmda/launcher.log",
+      "out_root": "localization/tuning/results/respeaker_v3_optuna_launches/20260310_225541/gmda"
+    },
+    {
+      "method": "SSZ",
+      "pid": 2109794,
+      "returncode": null,
+      "running": true,
+      "log_path": "localization/tuning/results/respeaker_v3_optuna_launches/20260310_225541/ssz/launcher.log",
+      "out_root": "localization/tuning/results/respeaker_v3_optuna_launches/20260310_225541/ssz"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "run_id": "20260310_225542",
+  "profile": "respeaker_v3_0457",
+  "duration_min": 60.0,
+  "benchmark_config": "/home/mkeller/mkeller/signal-processing-research/localization/benchmark/configs/default.json",
+  "scenes_root": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles",
+  "assets_root": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles",
+  "methods": [
+    "SSZ"
+  ],
+  "subset_per_bucket": 1,
+  "subset_scene_ids": [
+    "testing_specific_angles_k2_scene06",
+    "testing_specific_angles_k2_scene08",
+    "testing_specific_angles_k2_scene15",
+    "testing_specific_angles_k2_scene22",
+    "testing_specific_angles_k2_scene30",
+    "testing_specific_angles_k2_scene33",
+    "testing_specific_angles_k2_scene41",
+    "testing_specific_angles_k2_scene44",
+    "testing_specific_angles_k2_scene48",
+    "testing_specific_angles_k2_scene56",
+    "testing_specific_angles_k2_scene67",
+    "testing_specific_angles_k2_scene70",
+    "testing_specific_angles_k2_scene78",
+    "testing_specific_angles_k2_scene82",
+    "testing_specific_angles_k2_scene90",
+    "testing_specific_angles_k2_scene94"
+  ],
+  "method_workers": {
+    "SSZ": 6
+  },
+  "top_n_full_eval": 5
+}

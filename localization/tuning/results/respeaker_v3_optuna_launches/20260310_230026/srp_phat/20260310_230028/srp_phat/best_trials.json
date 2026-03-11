@@ -1,0 +1,172 @@
+[
+  {
+    "rank": 1,
+    "trial_number": 318,
+    "value": 0.42305991464449244,
+    "params": {
+      "window_ms": 225,
+      "overlap": 0.55,
+      "freq_low_hz": 450,
+      "freq_high_hz": 1800
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.5,
+      "angle_mae_std": 28.753243702885072,
+      "balanced_score": 0.42305991464449244,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 0.15625,
+      "mae_deg_matched_mean": 40.59375,
+      "method_cfg": {
+        "nfft": 3600,
+        "overlap": 0.55,
+        "freq_range": [
+          450,
+          1800
+        ],
+        "window_ms": 225
+      },
+      "misses_mean": 0.6875,
+      "n_scenes": 16,
+      "nfft": 3600,
+      "recall_mean": 0.65625,
+      "runtime_seconds_mean": 1.6564484571863431,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "rank": 2,
+    "trial_number": 744,
+    "value": 0.42305991464449244,
+    "params": {
+      "window_ms": 225,
+      "overlap": 0.55,
+      "freq_low_hz": 450,
+      "freq_high_hz": 1800
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.5,
+      "angle_mae_std": 28.753243702885072,
+      "balanced_score": 0.42305991464449244,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 0.15625,
+      "mae_deg_matched_mean": 40.59375,
+      "method_cfg": {
+        "nfft": 3600,
+        "overlap": 0.55,
+        "freq_range": [
+          450,
+          1800
+        ],
+        "window_ms": 225
+      },
+      "misses_mean": 0.6875,
+      "n_scenes": 16,
+      "nfft": 3600,
+      "recall_mean": 0.65625,
+      "runtime_seconds_mean": 2.098485290480312,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "rank": 3,
+    "trial_number": 47,
+    "value": 0.4193505957586744,
+    "params": {
+      "window_ms": 200,
+      "overlap": 0.8500000000000001,
+      "freq_low_hz": 100,
+      "freq_high_hz": 1800
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.46875,
+      "angle_mae_std": 28.586201189341338,
+      "balanced_score": 0.4193505957586744,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 0.03125,
+      "mae_deg_matched_mean": 47.59375,
+      "method_cfg": {
+        "nfft": 3200,
+        "overlap": 0.8500000000000001,
+        "freq_range": [
+          100,
+          1800
+        ],
+        "window_ms": 200
+      },
+      "misses_mean": 0.6875,
+      "n_scenes": 16,
+      "nfft": 3200,
+      "recall_mean": 0.65625,
+      "runtime_seconds_mean": 4.256184520549141,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "rank": 4,
+    "trial_number": 166,
+    "value": 0.414949757177793,
+    "params": {
+      "window_ms": 220,
+      "overlap": 0.65,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 1800
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.4375,
+      "angle_mae_std": 31.31586808233168,
+      "balanced_score": 0.414949757177793,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 0.0,
+      "mae_deg_matched_mean": 38.4375,
+      "method_cfg": {
+        "nfft": 3520,
+        "overlap": 0.65,
+        "freq_range": [
+          1200,
+          1800
+        ],
+        "window_ms": 220
+      },
+      "misses_mean": 0.6875,
+      "n_scenes": 16,
+      "nfft": 3520,
+      "recall_mean": 0.65625,
+      "runtime_seconds_mean": 1.0315481885627378,
+      "subset_n_scenes": 16
+    }
+  },
+  {
+    "rank": 5,
+    "trial_number": 174,
+    "value": 0.414949757177793,
+    "params": {
+      "window_ms": 220,
+      "overlap": 0.65,
+      "freq_low_hz": 1200,
+      "freq_high_hz": 1800
+    },
+    "user_attrs": {
+      "acc_within_10deg_mean": 0.4375,
+      "angle_mae_std": 31.31586808233168,
+      "balanced_score": 0.414949757177793,
+      "false_alarms_mean": 0.0,
+      "layout_mae_std": 0.0,
+      "mae_deg_matched_mean": 38.4375,
+      "method_cfg": {
+        "nfft": 3520,
+        "overlap": 0.65,
+        "freq_range": [
+          1200,
+          1800
+        ],
+        "window_ms": 220
+      },
+      "misses_mean": 0.6875,
+      "n_scenes": 16,
+      "nfft": 3520,
+      "recall_mean": 0.65625,
+      "runtime_seconds_mean": 1.0652313151804265,
+      "subset_n_scenes": 16
+    }
+  }
+]
