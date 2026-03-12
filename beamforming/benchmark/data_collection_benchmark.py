@@ -272,15 +272,16 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
             raw_ys.append(float(angle_deg))
             raw_cs.append(float(max(0.0, score)))
         for speaker in row.get("speakers", []):
+            if not bool(speaker.get("active", False)):
+                continue
             speaker_id = int(speaker.get("speaker_id", 0))
             track = centroid_tracks.setdefault(
                 speaker_id,
-                {"xs": [], "ys": [], "conf": [], "active": []},
+                {"xs": [], "ys": [], "conf": []},
             )
             track["xs"].append(x)
             track["ys"].append(float(speaker.get("direction_degrees", 0.0)))
             track["conf"].append(float(max(0.0, speaker.get("confidence", 0.0))))
-            track["active"].append(bool(speaker.get("active", False)))
     gt_handles = []
     gt_labels = []
     gt_colors = ["#c1121f", "#003049", "#669bbc", "#fb8500", "#2a9d8f", "#6a4c93"]
@@ -318,16 +319,9 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
         track = centroid_tracks[speaker_id]
         color = centroid_palette(color_idx)
         ax.plot(track["xs"], track["ys"], color=color, linewidth=2.0, alpha=0.9, zorder=3)
-        active_xs = [x for x, active in zip(track["xs"], track["active"]) if active]
-        active_ys = [y for y, active in zip(track["ys"], track["active"]) if active]
-        inactive_xs = [x for x, active in zip(track["xs"], track["active"]) if not active]
-        inactive_ys = [y for y, active in zip(track["ys"], track["active"]) if not active]
-        if inactive_xs:
-            ax.scatter(inactive_xs, inactive_ys, s=20, color=[color], alpha=0.35, edgecolors="none", zorder=3)
-        if active_xs:
-            ax.scatter(active_xs, active_ys, s=28, color=[color], alpha=0.95, edgecolors="white", linewidths=0.3, zorder=4)
+        ax.scatter(track["xs"], track["ys"], s=28, color=[color], alpha=0.95, edgecolors="white", linewidths=0.3, zorder=4)
         centroid_handles.append(ax.plot([], [], color=color, linewidth=2.0)[0])
-        centroid_labels.append(f"Speaker centroid {speaker_id}")
+        centroid_labels.append(f"Active speaker centroid {speaker_id}")
     ax.set_title(title)
     ax.set_xlabel("time (s)")
     ax.set_ylabel("direction (deg)")
