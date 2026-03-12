@@ -42,8 +42,8 @@ test("mode picker gates launcher settings and latency controls invoke callback",
   expect(screen.getByLabelText("Localization overlap")).toHaveValue(0.9);
   expect(screen.getByLabelText("Localization freq low (Hz)")).toHaveValue(1200);
   expect(screen.getByLabelText("Localization freq high (Hz)")).toHaveValue(5400);
-  expect(screen.getByLabelText("Speaker history size (M)")).toHaveValue(8);
-  expect(screen.getByLabelText("Speaker activation min predictions (N)")).toHaveValue(3);
+  expect(screen.getByLabelText("Speaker centroid history (M)")).toHaveValue(8);
+  expect(screen.getByLabelText("Speaker activation observations (N)")).toHaveValue(3);
   expect(screen.getByLabelText("Speaker match window (deg)")).toHaveValue(30);
   await user.clear(screen.getByLabelText("Playback latency number"));
   await user.type(screen.getByLabelText("Playback latency number"), "240");

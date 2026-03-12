@@ -233,10 +233,10 @@ export function SceneLauncher({
             }}
           />
 
-          <label htmlFor="speaker-history-size">Speaker history size (M)</label>
+          <label htmlFor="speaker-history-size">Speaker centroid history (M)</label>
           <input
             id="speaker-history-size"
-            aria-label="Speaker history size (M)"
+            aria-label="Speaker centroid history (M)"
             type="number"
             min={1}
             max={64}
@@ -250,10 +250,10 @@ export function SceneLauncher({
             }}
           />
 
-          <label htmlFor="speaker-activation-min-predictions">Speaker activation min predictions (N)</label>
+          <label htmlFor="speaker-activation-min-predictions">Speaker activation observations (N)</label>
           <input
             id="speaker-activation-min-predictions"
-            aria-label="Speaker activation min predictions (N)"
+            aria-label="Speaker activation observations (N)"
             type="number"
             min={1}
             max={64}

@@ -305,8 +305,8 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
             raw_ys,
             s=12,
             c=raw_cs,
-            cmap="Greys",
-            alpha=0.18,
+            cmap="viridis",
+            alpha=0.2,
             edgecolors="none",
             zorder=1,
         )
@@ -566,8 +566,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--localization-overlap", type=float, default=0.5)
     parser.add_argument("--localization-freq-low-hz", type=int, default=200)
     parser.add_argument("--localization-freq-high-hz", type=int, default=3000)
-    parser.add_argument("--speaker-history-size", type=int, default=8)
-    parser.add_argument("--speaker-activation-min-predictions", type=int, default=3)
+    parser.add_argument(
+        "--speaker-centroid-history-size",
+        "--speaker-history-size",
+        dest="speaker_history_size",
+        type=int,
+        default=8,
+    )
+    parser.add_argument(
+        "--speaker-activation-observations",
+        "--speaker-activation-min-predictions",
+        dest="speaker_activation_min_predictions",
+        type=int,
+        default=3,
+    )
     parser.add_argument("--speaker-match-window-deg", type=float, default=30.0)
     parser.add_argument("--slow-chunk-ms", type=int, default=2000)
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
