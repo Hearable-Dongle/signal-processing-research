@@ -36,6 +36,12 @@ test("speaker tap opens popover", async () => {
 
   expect(screen.getByTestId("ground-truth-stage")).toBeInTheDocument();
   expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();
+  expect(screen.getByTestId("tracked-mic-1")).toBeInTheDocument();
+  expect(screen.getByTestId("tracked-mic-2")).toBeInTheDocument();
+  expect(screen.getByTestId("tracked-mic-3")).toBeInTheDocument();
+  expect(screen.getByTestId("tracked-mic-4")).toBeInTheDocument();
+  expect(screen.getByTestId("tracked-cable")).toHaveTextContent("cable");
+  expect(screen.getByTestId("ground-truth-cable")).toHaveTextContent("cable");
 
   await user.click(screen.getByTestId("speaker-4"));
 

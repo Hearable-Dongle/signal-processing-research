@@ -212,6 +212,40 @@ button:disabled {
   background: var(--accent);
 }
 
+.mic-array-marker,
+.mic-array-cable {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.mic-array-marker {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #7a2f11;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid #d8b8a4;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.mic-array-cable {
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  color: #4d4138;
+  background: rgba(255, 248, 238, 0.9);
+  border: 1px dashed #c49c82;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 .speaker-dot {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -226,6 +260,7 @@ button:disabled {
     opacity 140ms ease,
     transform 140ms ease,
     box-shadow 140ms ease;
+  z-index: 3;
 }
 
 .speaker-dot.active {
@@ -299,6 +334,7 @@ button:disabled {
   font-size: 0.8rem;
   color: #fff;
   background: #355070;
+  z-index: 3;
 }
 
 .ground-truth-item {
