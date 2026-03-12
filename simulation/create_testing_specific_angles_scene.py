@@ -11,11 +11,15 @@ import numpy as np
 import soundfile as sf
 
 from simulation.simulation_config import MicrophoneArray, Room, SimulationAudio, SimulationConfig, SimulationSource
+from simulation.target_policy import is_speech_target
 from sim.realistic_conversations.assets import AssetLibrary, load_asset_library
 
 
 DEFAULT_CONFIG_ROOT = Path("simulation/simulations/configs/testing_specific_angles")
 DEFAULT_ASSET_ROOT = Path("simulation/simulations/assets/testing_specific_angles")
+DEFAULT_LIBRARY_ROBUST_CONFIG_ROOT = Path("simulation/simulations/configs/library_scene_robustness")
+DEFAULT_LIBRARY_ROBUST_ASSET_ROOT = Path("simulation/simulations/assets/library_scene_robustness")
+DEFAULT_LIBRARY_TEMPLATE_SCENE = Path("simulation/simulations/configs/library_scene/library_k5_scene28.json")
 DEFAULT_SEED = 42
 DEFAULT_DURATION_SEC = 10.0
 DEFAULT_SAMPLE_RATE = 16000
@@ -154,6 +158,30 @@ def _write_frame_truth(path: Path, rows: list[dict[str, Any]]) -> None:
             out["active_speaker_ids"] = "|".join(str(v) for v in row["active_speaker_ids"])
             out["speaker_positions"] = json.dumps(row["speaker_positions"], separators=(",", ":"))
             writer.writerow(out)
+
+
+def _angle_from_center_deg(center: list[float], pos: list[float]) -> float:
+    delta = np.asarray(pos[:2], dtype=np.float64) - np.asarray(center[:2], dtype=np.float64)
+    return float(np.mod(np.degrees(np.arctan2(delta[1], delta[0])), 360.0))
+
+
+def _resolve_source_audio_path(source: SimulationSource, corpus_root: str | Path | None = None) -> Path:
+    raw_path = Path(source.audio_path)
+    if raw_path.is_absolute() and raw_path.exists():
+        return raw_path
+    if raw_path.exists():
+        return raw_path.resolve()
+    if corpus_root is not None:
+        candidate = Path(corpus_root) / raw_path
+        if candidate.exists():
+            return candidate.resolve()
+    candidate = source.get_absolute_path()
+    if candidate.exists():
+        return candidate.resolve()
+    raise FileNotFoundError(
+        f"Could not resolve source audio '{source.audio_path}'. "
+        f"Checked cwd-relative, corpus_root={corpus_root}, and LIBRIMIX_PATH={candidate.parent.parent.parent if candidate.parts else candidate}."
+    )
 
 
 def generate_testing_specific_angles_dataset(
@@ -396,27 +424,277 @@ def generate_testing_specific_angles_dataset(
     return summary_rows
 
 
+def generate_library_scene_robustness_dataset(
+    *,
+    template_scene_path: str | Path = DEFAULT_LIBRARY_TEMPLATE_SCENE,
+    config_root: str | Path = DEFAULT_LIBRARY_ROBUST_CONFIG_ROOT,
+    asset_root: str | Path = DEFAULT_LIBRARY_ROBUST_ASSET_ROOT,
+    trial_count: int = 8,
+    noise_scale: float = 0.2,
+    seed: int = DEFAULT_SEED,
+    speech_gap_sec: float = 0.2,
+    corpus_root: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    config_root = Path(config_root)
+    asset_root = Path(asset_root)
+    config_root.mkdir(parents=True, exist_ok=True)
+    asset_root.mkdir(parents=True, exist_ok=True)
+
+    template_path = Path(template_scene_path)
+    sim_cfg = SimulationConfig.from_file(template_path)
+    rng = np.random.default_rng(seed)
+    duration_sec = float(sim_cfg.audio.duration)
+    sample_rate = int(sim_cfg.audio.fs)
+    total_samples = int(round(duration_sec * sample_rate))
+    mic_center = list(sim_cfg.microphone_array.mic_center)
+    room_dims = list(sim_cfg.room.dimensions)
+
+    speech_sources = [source for source in sim_cfg.audio.sources if is_speech_target(source)]
+    noise_sources = [source for source in sim_cfg.audio.sources if not is_speech_target(source)]
+    if not speech_sources:
+        raise ValueError(f"No speech sources found in template scene: {template_path}")
+
+    n_speech = len(speech_sources)
+    total_gap = max(0.0, float(speech_gap_sec)) * max(0, n_speech - 1)
+    speech_seg_sec = max(0.4, (duration_sec - total_gap) / max(1, n_speech))
+    summary_rows: list[dict[str, Any]] = []
+
+    for trial_idx in range(int(trial_count)):
+        scene_name = f"{template_path.stem}_noise{str(noise_scale).replace('.', 'p')}x_trial{trial_idx:02d}"
+        scene_dir = asset_root / scene_name
+        render_assets = scene_dir / "render_assets"
+        render_assets.mkdir(parents=True, exist_ok=True)
+        order = list(rng.permutation(n_speech))
+        source_rows: list[SimulationSource] = []
+        frame_rows: list[dict[str, Any]] = []
+        speech_events: list[dict[str, Any]] = []
+        speaker_positions_map = {str(idx): list(speech_sources[idx].loc) for idx in range(n_speech)}
+
+        for slot_idx, speech_idx in enumerate(order):
+            start_sec = slot_idx * (speech_seg_sec + float(speech_gap_sec))
+            end_sec = min(duration_sec, start_sec + speech_seg_sec)
+            track = _speech_track(
+                path=_resolve_source_audio_path(speech_sources[speech_idx], corpus_root),
+                sr=sample_rate,
+                total_samples=total_samples,
+                start_sec=start_sec,
+                duration_sec=max(0.0, end_sec - start_sec),
+                rng=rng,
+            )
+            asset_path = render_assets / f"speaker_{speech_idx}_seg000.wav"
+            _render_sparse_asset(track, asset_path, sample_rate)
+            source_rows.append(
+                SimulationSource(
+                    loc=list(speech_sources[speech_idx].loc),
+                    audio_path=str(asset_path.resolve()),
+                    gain=1.0,
+                    classification="speech",
+                )
+            )
+            speech_events.append(
+                {
+                    "speaker_id": int(speech_idx),
+                    "start_sec": round(start_sec, 4),
+                    "end_sec": round(end_sec, 4),
+                    "angle_deg": round(_angle_from_center_deg(mic_center, speech_sources[speech_idx].loc), 3),
+                }
+            )
+
+        for noise_idx, noise_source in enumerate(noise_sources):
+            noise_track = _noise_track(
+                path=_resolve_source_audio_path(noise_source, corpus_root),
+                sr=sample_rate,
+                total_samples=total_samples,
+                rng=rng,
+                gain=float(noise_source.gain) * float(noise_scale),
+            )
+            asset_path = render_assets / f"noise_{noise_idx}_seg000.wav"
+            _render_sparse_asset(noise_track, asset_path, sample_rate)
+            source_rows.append(
+                SimulationSource(
+                    loc=list(noise_source.loc),
+                    audio_path=str(asset_path.resolve()),
+                    gain=1.0,
+                    classification="noise",
+                )
+            )
+
+        frame_step_sec = 0.02
+        for frame_idx in range(int(np.ceil(duration_sec / frame_step_sec))):
+            start_sec = frame_idx * frame_step_sec
+            end_sec = min(duration_sec, start_sec + frame_step_sec)
+            active_ids = [
+                int(event["speaker_id"])
+                for event in speech_events
+                if float(event["start_sec"]) <= start_sec < float(event["end_sec"])
+            ]
+            primary_id = active_ids[0] if active_ids else -1
+            frame_rows.append(
+                {
+                    "frame_index": frame_idx,
+                    "start_time_s": round(start_sec, 4),
+                    "end_time_s": round(end_sec, 4),
+                    "active_speaker_ids": active_ids,
+                    "primary_speaker_id": primary_id,
+                    "overlap": len(active_ids) > 1,
+                    "overlap_count": len(active_ids),
+                    "speaker_positions": {str(sid): speaker_positions_map[str(sid)] for sid in active_ids},
+                    "frame_snr_db": float(20.0 * np.log10(max(1e-6, 1.0 / max(float(noise_scale), 1e-6)))),
+                }
+            )
+
+        scene_cfg = SimulationConfig(
+            room=Room(dimensions=room_dims, absorption=float(sim_cfg.room.absorption)),
+            microphone_array=MicrophoneArray(
+                mic_center=mic_center,
+                mic_radius=float(sim_cfg.microphone_array.mic_radius),
+                mic_count=int(sim_cfg.microphone_array.mic_count),
+                mic_positions=sim_cfg.microphone_array.mic_positions,
+            ),
+            audio=SimulationAudio(
+                sources=source_rows,
+                duration=duration_sec,
+                fs=sample_rate,
+            ),
+        )
+        scene_config_path = scene_dir / "scene_config.json"
+        scene_cfg.to_file(scene_config_path)
+        config_out = config_root / f"{scene_name}.json"
+        scene_cfg.to_file(config_out)
+
+        (scene_dir / "frame_ground_truth.json").write_text(json.dumps(frame_rows, indent=2), encoding="utf-8")
+        _write_frame_truth(scene_dir / "frame_ground_truth.csv", frame_rows)
+        metadata = {
+            "scene_name": scene_name,
+            "scene_type": "library_scene_robustness",
+            "seed": int(seed + trial_idx),
+            "template_scene_path": str(template_path.resolve()),
+            "trial_index": int(trial_idx),
+            "noise_scale": float(noise_scale),
+            "speaker_count": int(n_speech),
+            "room": {
+                "dimensions_m": room_dims,
+                "absorption": float(sim_cfg.room.absorption),
+            },
+            "mic_array": {
+                "mic_center_m": mic_center,
+                "mic_radius_m": float(sim_cfg.microphone_array.mic_radius),
+                "mic_count": int(sim_cfg.microphone_array.mic_count),
+            },
+            "assets": {
+                "speech": [
+                    {
+                        "speaker_id": int(speech_idx),
+                        "source_path": str(_resolve_source_audio_path(speech_sources[speech_idx], corpus_root)),
+                        "render_asset_path": str((render_assets / f"speaker_{speech_idx}_seg000.wav").resolve()),
+                        "active_window_sec": [
+                            float(next(event["start_sec"] for event in speech_events if int(event["speaker_id"]) == speech_idx)),
+                            float(next(event["end_sec"] for event in speech_events if int(event["speaker_id"]) == speech_idx)),
+                        ],
+                        "position_m": list(speech_sources[speech_idx].loc),
+                        "angle_deg": round(_angle_from_center_deg(mic_center, speech_sources[speech_idx].loc), 3),
+                    }
+                    for speech_idx in range(n_speech)
+                ],
+                "speech_events": speech_events,
+                "noise": [
+                    {
+                        "noise_id": int(noise_idx),
+                        "source_path": str(_resolve_source_audio_path(noise_source, corpus_root)),
+                        "render_asset_path": str((render_assets / f"noise_{noise_idx}_seg000.wav").resolve()),
+                        "active_window_sec": [0.0, duration_sec],
+                        "position_m": list(noise_source.loc),
+                        "angle_deg": round(_angle_from_center_deg(mic_center, noise_source.loc), 3),
+                        "scaled_gain": float(noise_source.gain) * float(noise_scale),
+                    }
+                    for noise_idx, noise_source in enumerate(noise_sources)
+                ],
+            },
+            "summary_metrics": {
+                "overlap_ratio": 0.0,
+                "num_turn_events": int(len(speech_events)),
+                "num_backchannels": 0,
+                "speaker_activity_frames": {
+                    str(event["speaker_id"]): int(round((float(event["end_sec"]) - float(event["start_sec"])) / frame_step_sec))
+                    for event in speech_events
+                },
+            },
+        }
+        (scene_dir / "scenario_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        (scene_dir / "event_schedule.json").write_text(
+            json.dumps(
+                {
+                    "speech_events": speech_events,
+                    "noise_events": [
+                        {
+                            "noise_id": int(noise_idx),
+                            "start_sec": 0.0,
+                            "end_sec": duration_sec,
+                            "angle_deg": round(_angle_from_center_deg(mic_center, noise_source.loc), 3),
+                        }
+                        for noise_idx, noise_source in enumerate(noise_sources)
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        summary_rows.append(
+            {
+                "scene_name": scene_name,
+                "scene_config_path": str(config_out.resolve()),
+                "scene_dir": str(scene_dir.resolve()),
+                "template_scene_path": str(template_path.resolve()),
+                "noise_scale": float(noise_scale),
+                "speech_gap_sec": float(speech_gap_sec),
+                "speech_order": [int(v) for v in order],
+            }
+        )
+
+    summary_path = asset_root / "generation_summary.json"
+    summary_path.write_text(json.dumps({"scenes": summary_rows}, indent=2), encoding="utf-8")
+    return summary_rows
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate fixed-angle testing scenes for ReSpeaker localization evaluation")
+    parser.add_argument("--mode", choices=["testing_specific_angles", "library_scene_robustness"], default="testing_specific_angles")
     parser.add_argument("--config-root", default=str(DEFAULT_CONFIG_ROOT))
     parser.add_argument("--asset-root", default=str(DEFAULT_ASSET_ROOT))
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--duration-sec", type=float, default=DEFAULT_DURATION_SEC)
     parser.add_argument("--sample-rate", type=int, default=DEFAULT_SAMPLE_RATE)
     parser.add_argument("--asset-manifest", default=None)
+    parser.add_argument("--template-scene-path", default=str(DEFAULT_LIBRARY_TEMPLATE_SCENE))
+    parser.add_argument("--trial-count", type=int, default=8)
+    parser.add_argument("--noise-scale", type=float, default=0.2)
+    parser.add_argument("--speech-gap-sec", type=float, default=0.2)
+    parser.add_argument("--corpus-root", default=None)
     return parser
 
 
 def main() -> None:
     args = _build_arg_parser().parse_args()
-    generated = generate_testing_specific_angles_dataset(
-        config_root=args.config_root,
-        asset_root=args.asset_root,
-        seed=args.seed,
-        duration_sec=float(args.duration_sec),
-        sample_rate=int(args.sample_rate),
-        manifest_path=args.asset_manifest,
-    )
+    if str(args.mode) == "library_scene_robustness":
+        generated = generate_library_scene_robustness_dataset(
+            template_scene_path=args.template_scene_path,
+            config_root=args.config_root if args.config_root != str(DEFAULT_CONFIG_ROOT) else DEFAULT_LIBRARY_ROBUST_CONFIG_ROOT,
+            asset_root=args.asset_root if args.asset_root != str(DEFAULT_ASSET_ROOT) else DEFAULT_LIBRARY_ROBUST_ASSET_ROOT,
+            trial_count=int(args.trial_count),
+            noise_scale=float(args.noise_scale),
+            seed=int(args.seed),
+            speech_gap_sec=float(args.speech_gap_sec),
+            corpus_root=args.corpus_root,
+        )
+    else:
+        generated = generate_testing_specific_angles_dataset(
+            config_root=args.config_root,
+            asset_root=args.asset_root,
+            seed=args.seed,
+            duration_sec=float(args.duration_sec),
+            sample_rate=int(args.sample_rate),
+            manifest_path=args.asset_manifest,
+        )
     print(json.dumps({"num_scenes": len(generated), "scenes": generated}, indent=2))
 
 

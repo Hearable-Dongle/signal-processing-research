@@ -329,6 +329,16 @@ def _run_job(
     slow_chunk_ms: int,
     localization_window_ms: int,
     localization_hop_ms: int,
+    srp_overlap: float,
+    srp_freq_min_hz: int,
+    srp_freq_max_hz: int,
+    localization_vad_enabled: bool,
+    localization_snr_gating_enabled: bool,
+    localization_snr_threshold_db: float,
+    localization_msc_variance_enabled: bool,
+    localization_msc_history_frames: int,
+    localization_hsda_enabled: bool,
+    localization_hsda_window_frames: int,
 ) -> JobResult:
     scene_cfg_path = Path(scene_path)
     bench_root = Path(out_root)
@@ -356,6 +366,16 @@ def _run_job(
         slow_chunk_ms=int(slow_chunk_ms),
         localization_window_ms=int(localization_window_ms),
         localization_hop_ms=int(localization_hop_ms),
+        srp_overlap=float(srp_overlap),
+        srp_freq_min_hz=int(srp_freq_min_hz),
+        srp_freq_max_hz=int(srp_freq_max_hz),
+        localization_vad_enabled=bool(localization_vad_enabled),
+        localization_snr_gating_enabled=bool(localization_snr_gating_enabled),
+        localization_snr_threshold_db=float(localization_snr_threshold_db),
+        localization_msc_variance_enabled=bool(localization_msc_variance_enabled),
+        localization_msc_history_frames=int(localization_msc_history_frames),
+        localization_hsda_enabled=bool(localization_hsda_enabled),
+        localization_hsda_window_frames=int(localization_hsda_window_frames),
     )
     gt = build_framewise_speech_ground_truth(
         scene_config_path=staged_scene,
@@ -407,6 +427,16 @@ def _run_job(
         "slow_chunk_ms": int(slow_chunk_ms),
         "localization_window_ms": int(localization_window_ms),
         "localization_hop_ms": int(localization_hop_ms),
+        "srp_overlap": float(srp_overlap),
+        "srp_freq_min_hz": int(srp_freq_min_hz),
+        "srp_freq_max_hz": int(srp_freq_max_hz),
+        "localization_vad_enabled": bool(localization_vad_enabled),
+        "localization_snr_gating_enabled": bool(localization_snr_gating_enabled),
+        "localization_snr_threshold_db": float(localization_snr_threshold_db),
+        "localization_msc_variance_enabled": bool(localization_msc_variance_enabled),
+        "localization_msc_history_frames": int(localization_msc_history_frames),
+        "localization_hsda_enabled": bool(localization_hsda_enabled),
+        "localization_hsda_window_frames": int(localization_hsda_window_frames),
         "noise_gain_scale": float(noise_gain_scale),
         "fast_avg_ms": float(summary.get("fast_avg_ms", math.nan)),
         "fast_rtf": float(summary.get("fast_rtf", math.nan)),
@@ -530,6 +560,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--slow-chunk-ms", type=int, default=200)
     parser.add_argument("--localization-window-ms", type=int, default=160)
     parser.add_argument("--localization-hop-ms", type=int, default=50)
+    parser.add_argument("--srp-overlap", type=float, default=0.2)
+    parser.add_argument("--srp-freq-min-hz", type=int, default=1200)
+    parser.add_argument("--srp-freq-max-hz", type=int, default=5400)
+    parser.add_argument("--localization-vad-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--localization-snr-gating-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--localization-snr-threshold-db", type=float, default=3.0)
+    parser.add_argument("--localization-msc-variance-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--localization-msc-history-frames", type=int, default=6)
+    parser.add_argument("--localization-hsda-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--localization-hsda-window-frames", type=int, default=5)
     parser.add_argument("--noise-gain-scale", type=float, default=1.0)
     return parser.parse_args()
 
@@ -559,6 +599,16 @@ def main() -> None:
             "slow_chunk_ms": int(args.slow_chunk_ms),
             "localization_window_ms": int(args.localization_window_ms),
             "localization_hop_ms": int(args.localization_hop_ms),
+            "srp_overlap": float(args.srp_overlap),
+            "srp_freq_min_hz": int(args.srp_freq_min_hz),
+            "srp_freq_max_hz": int(args.srp_freq_max_hz),
+            "localization_vad_enabled": bool(args.localization_vad_enabled),
+            "localization_snr_gating_enabled": bool(args.localization_snr_gating_enabled),
+            "localization_snr_threshold_db": float(args.localization_snr_threshold_db),
+            "localization_msc_variance_enabled": bool(args.localization_msc_variance_enabled),
+            "localization_msc_history_frames": int(args.localization_msc_history_frames),
+            "localization_hsda_enabled": bool(args.localization_hsda_enabled),
+            "localization_hsda_window_frames": int(args.localization_hsda_window_frames),
         }
         for strategy in strategies
         for scene in scenes
@@ -596,6 +646,16 @@ def main() -> None:
         "slow_chunk_ms": int(args.slow_chunk_ms),
         "localization_window_ms": int(args.localization_window_ms),
         "localization_hop_ms": int(args.localization_hop_ms),
+        "srp_overlap": float(args.srp_overlap),
+        "srp_freq_min_hz": int(args.srp_freq_min_hz),
+        "srp_freq_max_hz": int(args.srp_freq_max_hz),
+        "localization_vad_enabled": bool(args.localization_vad_enabled),
+        "localization_snr_gating_enabled": bool(args.localization_snr_gating_enabled),
+        "localization_snr_threshold_db": float(args.localization_snr_threshold_db),
+        "localization_msc_variance_enabled": bool(args.localization_msc_variance_enabled),
+        "localization_msc_history_frames": int(args.localization_msc_history_frames),
+        "localization_hsda_enabled": bool(args.localization_hsda_enabled),
+        "localization_hsda_window_frames": int(args.localization_hsda_window_frames),
         "noise_gain_scale": float(args.noise_gain_scale),
         "eval_mode": str(args.eval_mode),
         "aggregates": aggregates,
