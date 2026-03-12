@@ -262,7 +262,7 @@ def _parse_args() -> argparse.Namespace:
         ],
     )
     p.add_argument("--out-root", default="simulation/output/noisy_respeaker_cases")
-    p.add_argument("--profile", choices=["respeaker_v3_0457", "respeaker_cross_0640"], default="respeaker_v3_0457")
+    p.add_argument("--profile", choices=["respeaker_v3_0457", "respeaker_xvf3800_0650"], default="respeaker_xvf3800_0650")
     p.add_argument("--noise-count", type=int, default=3)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--benchmark-config", default="localization/benchmark/configs/default.json")

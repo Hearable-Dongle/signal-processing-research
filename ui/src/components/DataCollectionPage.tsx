@@ -7,6 +7,7 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, ""
 const DEFAULT_SAMPLE_RATE_HZ = 48000;
 const DEFAULT_CHANNEL_MAP = "0,1,2,3";
 const DEFAULT_DEVICE = "ReSpeaker";
+const DEFAULT_MIC_ARRAY_PROFILE = "respeaker_xvf3800_0650";
 
 function apiUrl(path: string): string {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
@@ -71,6 +72,7 @@ export function DataCollectionPage() {
   const [collectionTitle, setCollectionTitle] = useState("Capstone data collection");
   const [collectionNotes, setCollectionNotes] = useState("");
   const [deviceName, setDeviceName] = useState(DEFAULT_DEVICE);
+  const [micArrayProfile, setMicArrayProfile] = useState(DEFAULT_MIC_ARRAY_PROFILE);
   const [createdAtIso] = useState(nowIso);
   const [sessionStatus, setSessionStatus] = useState("idle");
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -95,6 +97,7 @@ export function DataCollectionPage() {
           monitor_source: "processed",
           sample_rate_hz: DEFAULT_SAMPLE_RATE_HZ,
           audio_device_query: deviceName,
+          mic_array_profile: micArrayProfile,
           channel_map: DEFAULT_CHANNEL_MAP.split(",").map((value) => Number(value)),
         }),
       });
@@ -260,6 +263,18 @@ export function DataCollectionPage() {
           <label htmlFor="device-name">Device</label>
           <select id="device-name" aria-label="Device" value={deviceName} onChange={(e) => setDeviceName(e.target.value)}>
             <option value="ReSpeaker">ReSpeaker</option>
+            <option value="XVF3800">XVF3800</option>
+          </select>
+
+          <label htmlFor="mic-array-profile">Mic array profile</label>
+          <select
+            id="mic-array-profile"
+            aria-label="Mic array profile"
+            value={micArrayProfile}
+            onChange={(e) => setMicArrayProfile(e.target.value)}
+          >
+            <option value="respeaker_xvf3800_0650">ReSpeaker XVF3800 (65.0 mm)</option>
+            <option value="respeaker_v3_0457">ReSpeaker 4-Mic v3 (45.7 mm)</option>
           </select>
 
           <p className="status">Created: {new Date(createdAtIso).toLocaleString()}</p>

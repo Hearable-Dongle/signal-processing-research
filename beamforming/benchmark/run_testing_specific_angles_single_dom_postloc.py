@@ -86,7 +86,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--force-export", action="store_true")
     parser.add_argument("--scene-ids", nargs="*", default=None)
     parser.add_argument("--max-scenes", type=int, default=None)
-    parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_cross_0640", "respeaker_xvf3800_0650"], default="respeaker_v3_0457")
+    parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_xvf3800_0650"], default="respeaker_xvf3800_0650")
     return parser.parse_args()
 
 

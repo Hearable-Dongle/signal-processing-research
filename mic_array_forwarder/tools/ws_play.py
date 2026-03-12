@@ -178,8 +178,8 @@ def main() -> int:
     parser.add_argument("--stop-existing", action="store_true", help="Stop any active session before starting")
     parser.add_argument(
         "--mic-array-profile",
-        choices=["respeaker_v3_0457", "respeaker_cross_0640"],
-        default="respeaker_v3_0457",
+        choices=["respeaker_v3_0457", "respeaker_xvf3800_0650"],
+        default="respeaker_xvf3800_0650",
     )
     parser.add_argument(
         "--localization-backend",

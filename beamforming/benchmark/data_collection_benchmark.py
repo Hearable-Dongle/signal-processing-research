@@ -554,7 +554,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ],
         default="single_dominant_no_separator",
     )
-    parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_cross_0640", "respeaker_xvf3800_0650"], default="respeaker_v3_0457")
+    parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_xvf3800_0650"], default="respeaker_xvf3800_0650")
     parser.add_argument("--fast-frame-ms", type=int, default=None, help="Fast-path frame cadence in ms. Defaults to localization hop when omitted.")
     parser.add_argument("--localization-window-ms", type=int, default=200)
     parser.add_argument("--localization-hop-ms", type=int, default=50)

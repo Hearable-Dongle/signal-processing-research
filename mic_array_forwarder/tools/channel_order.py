@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -84,6 +85,12 @@ def main() -> int:
     parser.add_argument("--tap-count", type=int, default=4)
     parser.add_argument("--min-gap-ms", type=int, default=400, help="Minimum gap between taps")
     parser.add_argument("--record-seconds", type=float, default=6.0)
+    parser.add_argument(
+        "--live-threshold-scale",
+        type=float,
+        default=1.0,
+        help="Scale factor for the live tap-print threshold. Lower values trigger more easily.",
+    )
     args = parser.parse_args()
 
     try:
@@ -103,26 +110,70 @@ def main() -> int:
 
     sr = int(args.sample_rate_hz)
     frames = int(sr * float(args.record_seconds))
+    min_gap_s = float(args.min_gap_ms) / 1000.0
+    recorded_chunks: list[np.ndarray] = []
+    chunk_frames_seen = 0
+    last_live_tap_s = -min_gap_s
+    live_tap_count = 0
+    stop_requested = False
+    baseline_peak = 1e-4
+    recent_peaks: deque[float] = deque(maxlen=32)
+
+    def _callback(indata: np.ndarray, frames_in: int, _time_info: Any, status: Any) -> None:
+        nonlocal chunk_frames_seen, last_live_tap_s, live_tap_count, stop_requested, baseline_peak
+        if status:
+            print(f"audio status: {status}", file=sys.stderr, flush=True)
+        chunk = np.asarray(indata, dtype=np.float32).copy()
+        recorded_chunks.append(chunk)
+        peak_by_channel = np.max(np.abs(chunk), axis=0)
+        chunk_peak = float(np.max(peak_by_channel))
+        recent_peaks.append(chunk_peak)
+        baseline_peak = 0.97 * baseline_peak + 0.03 * chunk_peak
+        live_scale = max(0.05, float(args.live_threshold_scale))
+        live_threshold = max(
+            (float(np.median(recent_peaks)) * 4.0 if recent_peaks else 0.0) * live_scale,
+            (baseline_peak * 5.0) * live_scale,
+            1e-4,
+        )
+        current_time_s = float(chunk_frames_seen) / float(sr)
+        if chunk_peak >= live_threshold and (current_time_s - last_live_tap_s) >= min_gap_s:
+            per_channel_str = ", ".join(f"ch{idx}={float(v):.4f}" for idx, v in enumerate(peak_by_channel))
+            live_tap_count += 1
+            print(
+                f"detected tap {live_tap_count}/{int(args.tap_count)} ~{current_time_s:.2f}s "
+                f"peak={chunk_peak:.4f} threshold={live_threshold:.4f} {per_channel_str}",
+                flush=True,
+            )
+            last_live_tap_s = current_time_s
+            if live_tap_count >= int(args.tap_count):
+                stop_requested = True
+        chunk_frames_seen += int(frames_in)
+
     print("Get ready to tap. Starting in 2s...")
     time.sleep(2.0)
     print("START: tap each mic in order, leave ~0.5s between taps.")
 
-    recording = sd.rec(
-        frames,
+    with sd.InputStream(
         samplerate=sr,
         channels=int(args.channel_count),
         dtype="float32",
         device=device_idx,
-    )
-    sd.wait()
+        callback=_callback,
+    ):
+        deadline = time.monotonic() + float(args.record_seconds)
+        while time.monotonic() < deadline and not stop_requested:
+            sd.sleep(50)
 
-    data = np.asarray(recording, dtype=np.float32)
+    if not recorded_chunks:
+        print("No audio captured.", file=sys.stderr)
+        return 1
+    data = np.concatenate(recorded_chunks, axis=0)[:frames]
     if data.ndim != 2 or data.shape[1] != int(args.channel_count):
         print(f"Unexpected recording shape: {data.shape}", file=sys.stderr)
         return 1
 
     energy = np.mean(np.abs(data), axis=1)
-    tap_idxs = _pick_tap_times(energy, sr, int(args.tap_count), float(args.min_gap_ms) / 1000.0)
+    tap_idxs = _pick_tap_times(energy, sr, int(args.tap_count), min_gap_s)
     if len(tap_idxs) < int(args.tap_count):
         print(
             f"Detected only {len(tap_idxs)} taps. Try again with louder taps or higher record duration.",
