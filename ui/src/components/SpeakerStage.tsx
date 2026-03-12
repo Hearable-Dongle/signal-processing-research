@@ -1,10 +1,8 @@
-import { BeamformerViz } from "./BeamformerViz";
 import { speakerColor } from "../utils/color";
-import type { BeamformingState, GroundTruthSpeaker, ProcessingMode, Speaker } from "../types/contracts";
+import type { GroundTruthSpeaker, ProcessingMode, Speaker } from "../types/contracts";
 
 type Props = {
   speakers: Speaker[];
-  beamforming: BeamformingState | null;
   groundTruth: GroundTruthSpeaker[];
   processingMode: ProcessingMode;
   selectedSpeakerId: number | null;
@@ -19,7 +17,7 @@ function polarToXY(directionDeg: number): { x: number; y: number } {
   return { x, y };
 }
 
-export function SpeakerStage({ speakers, beamforming, groundTruth, processingMode, selectedSpeakerId, onSpeakerTap }: Props) {
+export function SpeakerStage({ speakers, groundTruth, processingMode, selectedSpeakerId, onSpeakerTap }: Props) {
   const activeSpeakers = speakers.filter((speaker) => speaker.active);
   const showTrackedRoom = processingMode !== "beamform_from_ground_truth";
   const showGroundTruthBlock = true;
@@ -61,12 +59,6 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
               );
             })}
           </div>
-          <BeamformerViz
-            speakers={speakers}
-            beamforming={beamforming}
-            processingMode={processingMode}
-            selectedSpeakerId={processingMode === "specific_speaker_enhancement" ? selectedSpeakerId : null}
-          />
         </>
       )}
       {showGroundTruthBlock && (

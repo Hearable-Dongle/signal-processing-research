@@ -31,6 +31,7 @@ type Props = {
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
   defaultBackgroundNoiseGain: number;
+  defaultAlgorithmMode: AlgorithmMode;
   onStart: (config: SessionLaunchConfig) => void;
   onStop: () => void;
   onKillRun: () => void;
@@ -49,15 +50,22 @@ const ALGORITHM_OPTIONS: Array<{ value: AlgorithmMode; label: string }> = [
   { value: "spatial_baseline", label: "Spatial baseline" },
   { value: "speaker_tracking", label: "Speaker tracking" },
   { value: "speaker_tracking_long_memory", label: "Speaker tracking + long memory" },
-  { value: "speaker_tracking_single_active", label: "Speaker tracking, single active" },
   { value: "single_dominant_no_separator", label: "Single dominant no-separator" },
 ];
+
+function displayAlgorithmMode(mode: AlgorithmMode): Exclude<AlgorithmMode, "speaker_tracking_single_active"> {
+  if (mode === "speaker_tracking_single_active") {
+    return "speaker_tracking";
+  }
+  return mode;
+}
 
 export function SceneLauncher({
   status,
   defaultScenePath,
   defaultBackgroundNoisePath,
   defaultBackgroundNoiseGain,
+  defaultAlgorithmMode,
   onStart,
   onStop,
   onKillRun,
@@ -71,10 +79,10 @@ export function SceneLauncher({
   onMonitorSourceChange,
 }: Props) {
   const [inputSource, setInputSource] = useState<InputSource | null>(null);
-  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>("single_dominant_no_separator");
+  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>(defaultAlgorithmMode);
   const [localizationHopMs, setLocalizationHopMs] = useState(95);
   const [localizationWindowMs, setLocalizationWindowMs] = useState(300);
-  const [localizationOverlap, setLocalizationOverlap] = useState(0.9);
+  const [localizationOverlap, setLocalizationOverlap] = useState(0.2);
   const [localizationFreqLowHz, setLocalizationFreqLowHz] = useState(1200);
   const [localizationFreqHighHz, setLocalizationFreqHighHz] = useState(5400);
   const [speakerHistorySize, setSpeakerHistorySize] = useState(8);
@@ -92,6 +100,8 @@ export function SceneLauncher({
   const showSimulationSettings = inputSource === "simulation";
   const showLiveSettings = inputSource === "respeaker_live";
   const canStart = inputSource !== null && !isBusy;
+  const singleActiveEnabled = algorithmMode === "speaker_tracking_single_active";
+  const baseAlgorithmMode = displayAlgorithmMode(algorithmMode);
   const supportsGroundTruthSpeakerSources =
     algorithmMode !== "localization_only" && algorithmMode !== "single_dominant_no_separator";
 
@@ -141,9 +151,16 @@ export function SceneLauncher({
           <select
             id="algorithm-mode"
             aria-label="Algorithm mode"
-            value={algorithmMode}
+            value={baseAlgorithmMode}
             disabled={isBusy}
-            onChange={(e) => setAlgorithmMode(e.target.value as AlgorithmMode)}
+            onChange={(e) => {
+              const nextMode = e.target.value as Exclude<AlgorithmMode, "speaker_tracking_single_active">;
+              if (nextMode === "speaker_tracking" && singleActiveEnabled) {
+                setAlgorithmMode("speaker_tracking_single_active");
+                return;
+              }
+              setAlgorithmMode(nextMode);
+            }}
           >
             {ALGORITHM_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -151,6 +168,25 @@ export function SceneLauncher({
               </option>
             ))}
           </select>
+
+          <div className="switch-row">
+            <span>Single active speaker</span>
+            <button
+              id="single-active-speaker"
+              aria-label="Single active speaker"
+              aria-checked={singleActiveEnabled}
+              className={`switch ${singleActiveEnabled ? "on" : "off"}`.trim()}
+              disabled={isBusy}
+              role="switch"
+              type="button"
+              onClick={() => setAlgorithmMode(singleActiveEnabled ? "speaker_tracking" : "speaker_tracking_single_active")}
+            >
+              <span className="switch-thumb" />
+            </button>
+          </div>
+          {!singleActiveEnabled && baseAlgorithmMode !== "speaker_tracking" && (
+            <p className="launcher-hint">Turning this on switches the algorithm to Speaker tracking.</p>
+          )}
 
           <label htmlFor="localization-hop-ms">Localization hop (ms)</label>
           <input

@@ -9,7 +9,6 @@ import { SpeakerControlPopover } from "./SpeakerControlPopover";
 import { SpeakerStage } from "./SpeakerStage";
 import { WaveformTimeline } from "./WaveformTimeline";
 import {
-  type BeamformingState,
   SCHEMA_VERSION,
   type AlgorithmMode,
   type GroundTruthSpeaker,
@@ -130,7 +129,6 @@ export function RealtimeDemoPage({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [groundTruth, setGroundTruth] = useState<GroundTruthSpeaker[]>([]);
-  const [beamforming, setBeamforming] = useState<BeamformingState | null>(null);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<number | null>(null);
   const [gainBySpeaker, setGainBySpeaker] = useState<Record<number, number>>({});
   const [metrics, setMetrics] = useState<MetricsMessage | null>(null);
@@ -201,7 +199,6 @@ export function RealtimeDemoPage({
     setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setSelectedSpeakerId(null);
     setGroundTruth([]);
-    setBeamforming(null);
     setPlayheadMs(0);
     setRawWaveformBins([]);
     rawMixedTotalSamplesRef.current = 0;
@@ -215,7 +212,6 @@ export function RealtimeDemoPage({
           if (msg.type === "speaker_state") {
             setSpeakers(msg.speakers);
             setGroundTruth(msg.ground_truth ?? []);
-            setBeamforming(msg.beamforming ?? null);
           }
           if (msg.type === "metrics") {
             setMetrics(msg);
@@ -502,6 +498,7 @@ export function RealtimeDemoPage({
           defaultScenePath={defaultScenePath}
           defaultBackgroundNoisePath={defaultBackgroundNoisePath}
           defaultBackgroundNoiseGain={defaultBackgroundNoiseGain}
+          defaultAlgorithmMode={defaultAlgorithmMode}
           onStart={startSession}
           onStop={stopSession}
           onKillRun={killCurrentRun}
@@ -516,7 +513,6 @@ export function RealtimeDemoPage({
         />
         <SpeakerStage
           speakers={speakers}
-          beamforming={beamforming}
           groundTruth={groundTruth}
           processingMode="specific_speaker_enhancement"
           selectedSpeakerId={selectedSpeakerId}

@@ -72,7 +72,7 @@ test("speaker interaction emits select and adjust messages", async () => {
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
-  expect(screen.getByLabelText("Algorithm mode")).toHaveValue("single_dominant_no_separator");
+  expect(screen.getByLabelText("Algorithm mode")).toHaveValue("localization_only");
   await user.click(screen.getByRole("button", { name: "Start" }));
   await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
 
@@ -81,11 +81,11 @@ test("speaker interaction emits select and adjust messages", async () => {
   );
   expect(startCall).toBeTruthy();
   const startBody = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
-  expect(startBody.algorithm_mode).toBe("single_dominant_no_separator");
+  expect(startBody.algorithm_mode).toBe("localization_only");
   expect(startBody.processing_mode).toBe("specific_speaker_enhancement");
   expect(startBody.localization_hop_ms).toBe(95);
   expect(startBody.localization_window_ms).toBe(300);
-  expect(startBody.overlap).toBe(0.9);
+  expect(startBody.overlap).toBe(0.2);
   expect(startBody.freq_low_hz).toBe(1200);
   expect(startBody.freq_high_hz).toBe(5400);
   expect(startBody.speaker_history_size).toBe(8);
@@ -135,6 +135,7 @@ test("live mode start sends the ReSpeaker session config", async () => {
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "ReSpeaker Live Direct capture from the local USB microphone array." }));
+  await user.click(screen.getByRole("switch", { name: "Single active speaker" }));
   await user.clear(screen.getByLabelText("Audio device query"));
   await user.type(screen.getByLabelText("Audio device query"), "USB Mic");
   await user.click(screen.getByRole("button", { name: "Start" }));
@@ -149,10 +150,10 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.audio_device_query).toBe("USB Mic");
   expect(body.sample_rate_hz).toBe(48000);
   expect(body.channel_map).toEqual([0, 1, 2, 3]);
-  expect(body.algorithm_mode).toBe("single_dominant_no_separator");
+  expect(body.algorithm_mode).toBe("speaker_tracking_single_active");
   expect(body.localization_hop_ms).toBe(95);
   expect(body.localization_window_ms).toBe(300);
-  expect(body.overlap).toBe(0.9);
+  expect(body.overlap).toBe(0.2);
   expect(body.freq_low_hz).toBe(1200);
   expect(body.freq_high_hz).toBe(5400);
   expect(body.speaker_history_size).toBe(8);

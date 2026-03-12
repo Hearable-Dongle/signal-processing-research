@@ -558,7 +558,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fast-frame-ms", type=int, default=None, help="Fast-path frame cadence in ms. Defaults to localization hop when omitted.")
     parser.add_argument("--localization-window-ms", type=int, default=200)
     parser.add_argument("--localization-hop-ms", type=int, default=50)
-    parser.add_argument("--localization-overlap", type=float, default=0.5)
+    parser.add_argument("--localization-overlap", type=float, default=0.2)
     parser.add_argument("--localization-freq-low-hz", type=int, default=200)
     parser.add_argument("--localization-freq-high-hz", type=int, default=3000)
     parser.add_argument(
