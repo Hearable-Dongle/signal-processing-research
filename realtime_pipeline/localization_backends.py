@@ -114,7 +114,7 @@ class LocalizationBackendBase:
 
 
 class _LocalizationAlgoAdapter(LocalizationBackendBase):
-    def __init__(self, *, backend_name: str, algo_cls, algo_kwargs: dict | None = None, **kwargs):
+    def __init__(self, *, backend_name: str, algo_cls, **kwargs):
         super().__init__(**kwargs)
         self.backend_name = str(backend_name)
         self._localizer = algo_cls(
@@ -124,7 +124,6 @@ class _LocalizationAlgoAdapter(LocalizationBackendBase):
             overlap=self.overlap,
             freq_range=self.freq_range,
             max_sources=self.max_sources,
-            **(algo_kwargs or {}),
         )
 
     def process(self, audio: np.ndarray) -> LocalizationBackendResult:
@@ -151,8 +150,8 @@ class _LocalizationAlgoAdapter(LocalizationBackendBase):
 
 
 class LegacySRPBackend(_LocalizationAlgoAdapter):
-    def __init__(self, *, backend_name: str = "srp_phat_legacy", algo_kwargs: dict | None = None, **kwargs):
-        super().__init__(backend_name=backend_name, algo_cls=SRPPHATLocalization, algo_kwargs=algo_kwargs, **kwargs)
+    def __init__(self, *, backend_name: str = "srp_phat_legacy", **kwargs):
+        super().__init__(backend_name=backend_name, algo_cls=SRPPHATLocalization, **kwargs)
 
 
 class Music1SrcBackend(_LocalizationAlgoAdapter):
@@ -173,7 +172,6 @@ def build_localization_backend(
     grid_size: int = 72,
     min_separation_deg: float = 15.0,
     small_aperture_bias: bool = True,
-    algo_kwargs: dict | None = None,
 ) -> LocalizationBackendBase:
     common = dict(
         mic_pos=mic_pos,
@@ -189,7 +187,7 @@ def build_localization_backend(
     )
     name = str(name)
     if name in {"srp_phat_legacy", "srp_phat_localization"}:
-        return LegacySRPBackend(backend_name=name, algo_kwargs=algo_kwargs, **common)
+        return LegacySRPBackend(backend_name=name, **common)
     if name == "music_1src":
         return Music1SrcBackend(backend_name=name, **common)
     supported = ", ".join(SUPPORTED_LOCALIZATION_BACKENDS)

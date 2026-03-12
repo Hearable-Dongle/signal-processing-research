@@ -1,5 +1,3 @@
-from collections import deque
-
 import numpy as np
 import pyroomacoustics as pra
 import scipy.signal as signal
@@ -581,7 +579,20 @@ class GMDALaplace:
 
 
 class SRPPHATLocalization:
-    def __init__(self, mic_pos, fs=16000, nfft=512, overlap=0.5, freq_range=(200, 3000), max_sources=4, **kwargs):
+    def __init__(self, mic_pos, fs=16000, nfft=512, overlap=0.5, 
+                 freq_range=(200, 3000), max_sources=4,
+                 **kwargs):
+        """
+        Implementation of base SRP-PHAT.
+        
+        Args:
+            mic_pos: (3, M) numpy array of microphone positions.
+            fs: Sampling frequency.
+            nfft: FFT size.
+            overlap: Overlap fraction (0 to 1).
+            freq_range: Tuple (min_freq, max_freq) in Hz.
+            max_sources: Number of peaks to find.
+        """
         self.mic_pos = mic_pos
         self.fs = fs
         self.nfft = nfft
@@ -591,27 +602,13 @@ class SRPPHATLocalization:
         self.c = 343.0
         self.accumulation_sec = float(kwargs.get("accumulation_sec", 0.5))
         self.min_active_frames = int(kwargs.get("min_active_frames", 3))
-        self.vad_enabled = bool(kwargs.get("vad_enabled", True))
-        self.rms_floor = float(kwargs.get("vad_rms_floor", kwargs.get("rms_floor", 5e-4)))
-        self.speech_ratio_threshold = float(kwargs.get("vad_speech_ratio_threshold", kwargs.get("speech_ratio_threshold", 0.62)))
-        self.rms_ratio_threshold = float(kwargs.get("vad_rms_ratio_threshold", kwargs.get("rms_ratio_threshold", 1.2)))
-        self.flux_threshold = float(kwargs.get("vad_flux_threshold", kwargs.get("flux_threshold", 0.12)))
-        self.noise_floor_alpha = float(kwargs.get("vad_noise_floor_alpha", kwargs.get("noise_floor_alpha", 0.95)))
-        self.snr_gating_enabled = bool(kwargs.get("snr_gating_enabled", True))
-        self.snr_threshold_db = float(kwargs.get("snr_threshold_db", 3.0))
-        self.snr_soft_range_db = float(kwargs.get("snr_soft_range_db", 12.0))
-        self.snr_weight_exponent = float(kwargs.get("snr_weight_exponent", 1.0))
-        self.noise_floor_alpha_fast = float(kwargs.get("noise_floor_alpha_fast", 0.35))
-        self.noise_floor_alpha_slow = float(kwargs.get("noise_floor_alpha_slow", 0.97))
-        self.msc_variance_enabled = bool(kwargs.get("msc_variance_enabled", True))
-        self.msc_history_frames = int(kwargs.get("msc_history_frames", 6))
-        self.msc_variance_floor = float(kwargs.get("msc_variance_floor", 2e-3))
-        self.msc_weight_exponent = float(kwargs.get("msc_weight_exponent", 1.0))
-        self.hsda_enabled = bool(kwargs.get("hsda_enabled", True))
-        self.hsda_window_frames = int(kwargs.get("hsda_window_frames", 5))
-        self.hsda_peak_rel_floor = float(kwargs.get("hsda_peak_rel_floor", 0.35))
+        self.rms_floor = float(kwargs.get("rms_floor", 5e-4))
+        self.speech_ratio_threshold = float(kwargs.get("speech_ratio_threshold", 0.62))
+        self.rms_ratio_threshold = float(kwargs.get("rms_ratio_threshold", 1.2))
+        self.flux_threshold = float(kwargs.get("flux_threshold", 0.12))
+        self.noise_floor_alpha = float(kwargs.get("noise_floor_alpha", 0.95))
 
-    def _speech_features(self, chunk: np.ndarray, prev_mag: np.ndarray | None, noise_floor: float) -> tuple[bool, float, np.ndarray, dict[str, float]]:
+    def _speech_features(self, chunk: np.ndarray, prev_mag: np.ndarray | None, noise_floor: float):
         mono = np.mean(chunk, axis=0)
         rms = float(np.sqrt(np.mean(np.square(mono)) + 1e-12))
         spec = np.abs(np.fft.rfft(mono * np.hanning(mono.size)))
@@ -625,26 +622,12 @@ class SRPPHATLocalization:
         else:
             flux = float(np.mean(np.maximum(spec - prev_mag, 0.0)) / (np.mean(prev_mag) + 1e-12))
         rms_ratio = rms / max(noise_floor, 1e-8)
-        score_terms = [
-            np.clip(rms / max(self.rms_floor, 1e-8), 0.0, 3.0) / 3.0,
-            np.clip(speech_ratio / max(self.speech_ratio_threshold, 1e-8), 0.0, 2.0) / 2.0,
-            np.clip(max(rms_ratio, flux) / max(min(self.rms_ratio_threshold, self.flux_threshold), 1e-8), 0.0, 3.0) / 3.0,
-        ]
-        speech_score = float(np.mean(score_terms))
         speech_active = bool(
             rms > self.rms_floor
             and speech_ratio >= self.speech_ratio_threshold
             and (rms_ratio >= self.rms_ratio_threshold or flux >= self.flux_threshold)
         )
-        if not self.vad_enabled:
-            speech_active = True
-            speech_score = 1.0
-        return speech_active, rms, spec, {
-            "speech_ratio": float(speech_ratio),
-            "flux": float(flux),
-            "rms_ratio": float(rms_ratio),
-            "speech_score": float(np.clip(speech_score, 0.0, 1.0)),
-        }
+        return speech_active, rms, spec
 
     def _update_noise_floor(self, noise_floor: float, rms: float, speech_active: bool) -> float:
         if not np.isfinite(noise_floor) or noise_floor <= 0.0:
@@ -652,105 +635,50 @@ class SRPPHATLocalization:
         if speech_active:
             return float(noise_floor)
         return float(self.noise_floor_alpha * noise_floor + (1.0 - self.noise_floor_alpha) * rms)
-
-    def _update_noise_psd(self, noise_psd: np.ndarray | None, frame_psd: np.ndarray, speech_active: bool) -> np.ndarray:
-        psd = np.maximum(np.asarray(frame_psd, dtype=np.float64), 1e-12)
-        if noise_psd is None:
-            return psd.copy()
-        below = psd <= noise_psd
-        updated = noise_psd.copy()
-        alpha_fast = float(np.clip(self.noise_floor_alpha_fast, 0.0, 1.0))
-        alpha_slow = float(np.clip(self.noise_floor_alpha_slow, 0.0, 1.0))
-        updated[below] = alpha_fast * updated[below] + (1.0 - alpha_fast) * psd[below]
-        rise_alpha = alpha_slow if speech_active else min(alpha_slow, 0.995)
-        updated[~below] = rise_alpha * updated[~below] + (1.0 - rise_alpha) * psd[~below]
-        return np.maximum(updated, 1e-12)
-
-    def _snr_weights(self, frame_psd: np.ndarray, noise_psd: np.ndarray | None) -> tuple[np.ndarray, np.ndarray]:
-        psd = np.maximum(np.asarray(frame_psd, dtype=np.float64), 1e-12)
-        if noise_psd is None:
-            snr_db = np.full_like(psd, 12.0)
-        else:
-            snr_db = 10.0 * np.log10(psd / np.maximum(noise_psd, 1e-12))
-        if not self.snr_gating_enabled:
-            return np.ones_like(psd), snr_db
-        soft = max(self.snr_soft_range_db, 1e-6)
-        weights = np.clip((snr_db - self.snr_threshold_db) / soft, 0.0, 1.0)
-        weights = np.power(weights, max(self.snr_weight_exponent, 1e-6))
-        return weights.astype(np.float64, copy=False), snr_db
-
-    def _msc_temporal_weights(self, current_msc: np.ndarray, history: deque[np.ndarray]) -> np.ndarray:
-        msc = np.clip(np.asarray(current_msc, dtype=np.float64), 0.0, 1.0)
-        if not self.msc_variance_enabled:
-            return msc
-        if history:
-            stacked = np.stack(list(history) + [msc], axis=0)
-        else:
-            stacked = msc[np.newaxis, :]
-        mean_msc = np.mean(stacked, axis=0)
-        var_msc = np.var(stacked, axis=0)
-        transient = var_msc / (var_msc + max(self.msc_variance_floor, 1e-8))
-        weights = mean_msc * np.power(np.clip(transient, 0.0, 1.0), max(self.msc_weight_exponent, 1e-6))
-        return np.clip(weights, 0.0, 1.0)
-
-    def _normalize_spectrum(self, values: np.ndarray) -> np.ndarray:
-        spec = np.asarray(values, dtype=np.float64).copy()
-        spec[spec < 0.0] = 0.0
-        vmax = float(np.max(spec))
-        if vmax > 0.0:
-            spec /= vmax
-        return spec
-
-    def _histogram_spectrum(self, peak_history: deque[tuple[int, float]], n_angles: int) -> np.ndarray:
-        hist = np.zeros(n_angles, dtype=np.float64)
-        if not peak_history:
-            return hist
-        for idx, weight in peak_history:
-            hist[int(idx) % n_angles] += float(max(weight, 0.0))
-        kernel = np.array([0.2, 0.6, 0.2], dtype=np.float64)
-        padded = np.pad(hist, (1, 1), mode="wrap")
-        smoothed = np.convolve(padded, kernel, mode="same")[1:-1]
-        return self._normalize_spectrum(smoothed)
-
-    def _pick_peaks(self, spectrum: np.ndarray, angles: np.ndarray) -> list[float]:
-        peaks = []
-        for i in range(len(spectrum)):
-            prev = spectrum[(i - 1) % len(spectrum)]
-            curr = spectrum[i]
-            next_val = spectrum[(i + 1) % len(spectrum)]
-            if curr > prev and curr >= next_val:
-                peaks.append((curr, i))
-        peaks.sort(key=lambda x: x[0], reverse=True)
-        final_doas = []
-        for p_val, p_idx in peaks:
-            if p_val <= 0.0 or len(final_doas) >= self.max_sources:
-                break
-            final_doas.append(float(angles[p_idx]))
-        return final_doas
-
+        
     def process(self, audio):
+        """
+        Process multichannel audio to find sources using SRP-PHAT.
+        
+        Args:
+            audio: (M, N) numpy array of multichannel audio.
+            
+        Returns:
+            estimated_doas: List of estimated angles (radians).
+            histogram: Angular power spectrum P(theta).
+            history: Dummy history.
+        """
         M_mics, N_samples = audio.shape
+        
+        # NOTE: This intentionally gives up parity with the previous scene-level
+        # SRP-PHAT implementation in favor of matching the validated
+        # debug_localization winner: MSC-weighted SRP-PHAT with speech-active
+        # accumulation. That path was materially better under directional noise.
         noverlap = min(int(round(self.nfft * self.overlap)), self.nfft - 1)
-        f_vec, t_vec, Zxx = signal.stft(audio, fs=self.fs, nperseg=self.nfft, noverlap=noverlap, boundary=None, padded=False)
+        f_vec, t_vec, Zxx = signal.stft(
+            audio,
+            fs=self.fs,
+            nperseg=self.nfft,
+            noverlap=noverlap,
+            boundary=None,
+            padded=False,
+        )
+
         f_min, f_max = self.freq_range
         f_mask = (f_vec >= f_min) & (f_vec <= f_max)
         relevant_freqs = f_vec[f_mask].astype(float)
         Zxx_roi = Zxx[:, f_mask, :]
+
         if Zxx_roi.shape[1] == 0:
             return [], np.zeros(360), []
-
         pairs = [(i, j) for i in range(M_mics) for j in range(i + 1, M_mics)]
-        msc_histories = {pair: deque(maxlen=max(1, self.msc_history_frames - 1)) for pair in pairs}
         search_angles = np.linspace(0, 2 * np.pi, 360, endpoint=False)
         dirs = np.stack([np.cos(search_angles), np.sin(search_angles), np.zeros_like(search_angles)], axis=1)
         frame_specs = []
         frame_times = []
         frame_active = []
-        frame_scores = []
         prev_mag = None
         noise_floor = 0.0
-        noise_psd = None
-        peak_history: deque[tuple[int, float]] = deque(maxlen=max(1, self.hsda_window_frames))
         accum_frames = max(1, int(round(self.accumulation_sec / max((1.0 - self.overlap) * self.nfft / self.fs, 1e-6))))
 
         for t_idx in range(Zxx_roi.shape[2]):
@@ -759,72 +687,70 @@ class SRPPHATLocalization:
             if stop - start <= 8:
                 continue
             chunk = audio[:, start:stop]
-            speech_active, rms, prev_mag, speech_meta = self._speech_features(chunk, prev_mag, noise_floor)
+            speech_active, rms, prev_mag = self._speech_features(chunk, prev_mag, noise_floor)
             noise_floor = self._update_noise_floor(noise_floor, rms, speech_active)
-            mono_psd = np.mean(np.abs(Zxx_roi[:, :, t_idx]) ** 2, axis=0)
-            noise_psd = self._update_noise_psd(noise_psd, mono_psd, speech_active)
-            snr_weights, _snr_db = self._snr_weights(mono_psd, noise_psd)
-            frame_spec = np.zeros(search_angles.shape[0], dtype=np.float64)
+            frame_spec = np.zeros(search_angles.shape[0], dtype=float)
             for i, j in pairs:
                 cross = Zxx_roi[i, :, t_idx] * np.conj(Zxx_roi[j, :, t_idx])
                 phat = cross / np.maximum(np.abs(cross), 1e-10)
                 auto_i = np.abs(Zxx_roi[i, :, t_idx]) ** 2
                 auto_j = np.abs(Zxx_roi[j, :, t_idx]) ** 2
-                msc = np.clip((np.abs(cross) ** 2) / np.maximum(auto_i * auto_j, 1e-10), 0.0, 1.0)
-                pair_weights = self._msc_temporal_weights(msc, msc_histories[(i, j)])
-                msc_histories[(i, j)].append(msc.copy())
+                msc = (np.abs(cross) ** 2) / np.maximum(auto_i * auto_j, 1e-10)
+                msc = np.clip(msc, 0.0, 1.0)
+                if np.max(msc) > 1e-10:
+                    msc = msc / np.max(msc)
                 diff = self.mic_pos[:, i] - self.mic_pos[:, j]
-                tau = (dirs @ diff) / self.c
+                tau = (dirs @ diff) / self.c  # (A,)
                 phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]
                 steered = np.real(phat[:, np.newaxis] * np.exp(-1j * phase))
-                freq_weights = pair_weights * snr_weights
-                frame_spec += np.sum(steered * freq_weights[:, np.newaxis], axis=0)
-            frame_spec *= float(max(speech_meta["speech_score"], 1e-3))
+                frame_spec += np.sum(steered * msc[:, np.newaxis], axis=0)
             frame_specs.append(frame_spec)
             frame_times.append(float(t_vec[t_idx]) if t_idx < len(t_vec) else float(start / self.fs))
             frame_active.append(bool(speech_active))
-            frame_scores.append(float(speech_meta["speech_score"]))
-
-            norm_frame_spec = self._normalize_spectrum(frame_spec)
-            if speech_active and np.max(norm_frame_spec) >= self.hsda_peak_rel_floor:
-                peak_idx = int(np.argmax(norm_frame_spec))
-                peak_history.append((peak_idx, float(max(np.max(norm_frame_spec), speech_meta["speech_score"]))))
 
         if not frame_specs:
             return [], np.zeros(360), []
 
         active_specs = [spec for spec, active in zip(frame_specs, frame_active) if active]
         if len(active_specs) >= self.min_active_frames:
-            p_theta = np.mean(np.stack(active_specs, axis=0), axis=0)
+            P_theta = np.mean(np.stack(active_specs, axis=0), axis=0)
         else:
-            p_theta = np.mean(np.stack(frame_specs, axis=0), axis=0)
-        p_theta = self._normalize_spectrum(p_theta)
+            P_theta = np.mean(np.stack(frame_specs, axis=0), axis=0)
+        
+        # Normalize P_theta for "histogram" look
+        # Clip negative values (sidelobes) to zero instead of lifting everything
+        P_theta[P_theta < 0] = 0
+        
+        if np.max(P_theta) > 0:
+            P_theta = P_theta / np.max(P_theta)
+            
+        peaks = []
+        for i in range(len(P_theta)):
+            prev = P_theta[(i-1) % len(P_theta)]
+            curr = P_theta[i]
+            next_val = P_theta[(i+1) % len(P_theta)]
+            if curr > prev and curr >= next_val:
+                peaks.append((curr, i))
+        peaks.sort(key=lambda x: x[0], reverse=True)
 
-        if self.hsda_enabled:
-            hist_spec = self._histogram_spectrum(peak_history, len(search_angles))
-            if np.max(hist_spec) > 0.0:
-                p_theta = self._normalize_spectrum(0.65 * p_theta + 0.35 * hist_spec)
-
-        final_doas = self._pick_peaks(p_theta, search_angles)
+        final_doas = []
+        for p_val, p_idx in peaks:
+            if len(final_doas) >= self.max_sources:
+                break
+            angle = search_angles[p_idx]
+            final_doas.append(angle)
 
         history = []
-        peak_trace: deque[tuple[int, float]] = deque(maxlen=max(1, self.hsda_window_frames))
         for idx in range(len(frame_specs)):
             start_idx = max(0, idx - accum_frames + 1)
-            window_specs = [spec for spec, active in zip(frame_specs[start_idx : idx + 1], frame_active[start_idx : idx + 1]) if active]
+            window_specs = [spec for spec, active in zip(frame_specs[start_idx:idx + 1], frame_active[start_idx:idx + 1]) if active]
             if len(window_specs) < self.min_active_frames:
                 continue
-            hist_spec = self._normalize_spectrum(np.mean(np.stack(window_specs, axis=0), axis=0))
-            peak_idx = int(np.argmax(hist_spec))
-            if frame_active[idx]:
-                peak_trace.append((peak_idx, frame_scores[idx]))
-            if self.hsda_enabled and peak_trace:
-                hist_mode = self._histogram_spectrum(peak_trace, len(search_angles))
-                peak_idx = int(np.argmax(hist_mode))
+            hist_spec = np.mean(np.stack(window_specs, axis=0), axis=0)
             if np.max(hist_spec) > 0.0:
-                history.append((frame_times[idx], float(search_angles[peak_idx])))
+                history.append((frame_times[idx], search_angles[int(np.argmax(hist_spec))]))
 
-        return final_doas, p_theta, history
+        return final_doas, P_theta, history
 
 
 class PyroomacousticsDOABase:
