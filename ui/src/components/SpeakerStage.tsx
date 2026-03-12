@@ -38,7 +38,7 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
                 return (
                   <button
                     key={speaker.speaker_id}
-                    className={`speaker-dot ${selected ? "selected" : ""} ${speaker.active ? "" : "inactive"}`}
+                    className={`speaker-dot ${selected ? "selected" : ""} ${speaker.active ? "active" : "inactive"}`}
                     data-testid={`speaker-${speaker.speaker_id}`}
                     aria-label={`speaker-${speaker.speaker_id}`}
                     onClick={() => onSpeakerTap(speaker.speaker_id)}
@@ -53,7 +53,7 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
               return (
                 <div
                   key={speaker.speaker_id}
-                  className="speaker-dot speaker-dot-passive"
+                  className={`speaker-dot speaker-dot-passive ${speaker.active ? "active" : "inactive"}`}
                   data-testid={`active-speaker-${speaker.speaker_id}`}
                   style={{ left: `${x}%`, top: `${y}%`, backgroundColor: speakerColor(speaker.speaker_id) }}
                   title={`${speaker.direction_degrees.toFixed(1)}° / weight ${speaker.gain_weight.toFixed(2)}`}

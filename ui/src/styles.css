@@ -184,6 +184,14 @@ button:disabled {
   display: grid;
   place-items: center;
   font-weight: 700;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.speaker-dot.active {
+  opacity: 1;
 }
 
 .speaker-dot.selected {
@@ -191,7 +199,8 @@ button:disabled {
 }
 
 .speaker-dot.inactive {
-  opacity: 0.35;
+  opacity: 0.22;
+  transform: translate(-50%, -50%) scale(0.92);
 }
 
 .speaker-dot-passive {

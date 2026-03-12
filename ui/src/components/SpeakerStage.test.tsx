@@ -91,6 +91,39 @@ test("localize and beamform shows active speakers only without numbered speaker 
   expect(screen.getByTestId("ground-truth-0")).toBeInTheDocument();
 });
 
+test("specific speaker enhancement renders active speaker fully and inactive speaker translucent", () => {
+  render(
+    <SpeakerStage
+      speakers={[
+        {
+          speaker_id: 1,
+          direction_degrees: 10,
+          confidence: 0.9,
+          active: true,
+          activity_confidence: 0.9,
+          gain_weight: 1.0,
+        },
+        {
+          speaker_id: 2,
+          direction_degrees: 200,
+          confidence: 0.6,
+          active: false,
+          activity_confidence: 0.2,
+          gain_weight: 0.4,
+        },
+      ]}
+      beamforming={null}
+      groundTruth={[]}
+      processingMode="specific_speaker_enhancement"
+      selectedSpeakerId={null}
+      onSpeakerTap={() => undefined}
+    />
+  );
+
+  expect(screen.getByTestId("speaker-1")).toHaveClass("active");
+  expect(screen.getByTestId("speaker-2")).toHaveClass("inactive");
+});
+
 test("beamform from ground truth shows ground truth only", () => {
   render(
     <SpeakerStage
