@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import deque
+from dataclasses import dataclass
 import math
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,23 @@ def _clip01(v: float) -> float:
     return float(np.clip(float(v), 0.0, 1.0))
 
 
+def _circular_mean_deg(values: list[float] | deque[float], weights: list[float] | deque[float] | None = None) -> float:
+    if not values:
+        return 0.0
+    angles = np.deg2rad(np.asarray(list(values), dtype=np.float64))
+    if weights is None:
+        weights_arr = np.ones_like(angles, dtype=np.float64)
+    else:
+        weights_arr = np.asarray(list(weights), dtype=np.float64)
+        if weights_arr.shape != angles.shape:
+            raise ValueError("weights must match angle history length")
+    sin_sum = float(np.sum(np.sin(angles) * weights_arr))
+    cos_sum = float(np.sum(np.cos(angles) * weights_arr))
+    if abs(sin_sum) < 1e-9 and abs(cos_sum) < 1e-9:
+        return float(_normalize_angle_deg(list(values)[-1]))
+    return float(_normalize_angle_deg(np.rad2deg(math.atan2(sin_sum, cos_sum))))
+
+
 def _serialize_item(item: SpeakerGainDirection) -> dict[str, Any]:
     return {
         "speaker_id": int(item.speaker_id),
@@ -51,11 +70,23 @@ def _serialize_item(item: SpeakerGainDirection) -> dict[str, Any]:
     }
 
 
+@dataclass(slots=True)
+class _TrackState:
+    speaker_id: int
+    direction_degrees: float
+    updated_at_ms: float
+    angle_history_deg: deque[float]
+    score_history: deque[float]
+    support_count: int = 0
+    confirmed: bool = False
+
+
 class LiveCausalProcessor:
     def __init__(self, req: SessionStartRequest, mic_geometry_xyz: np.ndarray):
         self.req = req
         self.mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=np.float64)
         self.algorithm = get_live_algorithm_preset(req.algorithm_mode)
+        self.speaker_track_states: dict[int, _TrackState] = {}
         self.speaker_tracks: dict[int, SpeakerGainDirection] = {}
         self.next_speaker_id = 1
         self.selected_speaker_id: int | None = None
@@ -138,16 +169,59 @@ class LiveCausalProcessor:
             key=lambda item: (-float(item.active), -float(item.confidence), int(item.speaker_id)),
         )
 
+    def _make_track_state(self, speaker_id: int, angle_deg: float, score: float, now_ms: float) -> _TrackState:
+        history_size = max(1, int(self.req.speaker_history_size))
+        angle_history_deg: deque[float] = deque(maxlen=history_size)
+        score_history: deque[float] = deque(maxlen=history_size)
+        angle_history_deg.append(float(_normalize_angle_deg(angle_deg)))
+        score_history.append(float(_clip01(score)))
+        return _TrackState(
+            speaker_id=int(speaker_id),
+            direction_degrees=float(_normalize_angle_deg(angle_deg)),
+            updated_at_ms=float(now_ms),
+            angle_history_deg=angle_history_deg,
+            score_history=score_history,
+            support_count=1,
+            confirmed=bool(max(1, int(self.req.speaker_activation_min_predictions)) <= 1),
+        )
+
+    def _track_centroid_deg(self, track: _TrackState) -> float:
+        return _circular_mean_deg(track.angle_history_deg, track.score_history)
+
+    def _track_confidence(self, track: _TrackState) -> float:
+        if not track.score_history:
+            return 0.0
+        return _clip01(float(np.mean(np.asarray(list(track.score_history), dtype=np.float64))))
+
+    def _build_public_track(self, track: _TrackState, now_ms: float, observed_now: bool) -> SpeakerGainDirection:
+        age_ms = max(0.0, float(now_ms) - float(track.updated_at_ms))
+        active_hold_ms = min(float(self.algorithm.inactive_hold_ms), _UI_PRESENCE_HOLD_MS)
+        still_present = age_ms <= active_hold_ms
+        confidence = self._track_confidence(track)
+        if not observed_now:
+            confidence = _clip01(confidence * 0.85)
+        activity_confidence = confidence if track.confirmed else confidence * 0.6
+        gain_floor = 0.2 if observed_now or still_present else 0.05
+        return SpeakerGainDirection(
+            speaker_id=int(track.speaker_id),
+            direction_degrees=float(track.direction_degrees),
+            gain_weight=float(max(gain_floor, confidence)),
+            confidence=float(confidence),
+            active=bool(track.confirmed and still_present),
+            activity_confidence=float(activity_confidence),
+            updated_at_ms=float(track.updated_at_ms),
+        )
+
     def _match_speaker_id(self, angle_deg: float, matched: set[int], now_ms: float) -> int | None:
         best_id = None
         best_err = None
-        for sid, item in self.speaker_tracks.items():
+        for sid, track in self.speaker_track_states.items():
             if sid in matched:
                 continue
-            if now_ms - float(item.updated_at_ms) > float(self.algorithm.stale_track_ms):
+            if now_ms - float(track.updated_at_ms) > float(self.algorithm.inactive_hold_ms):
                 continue
-            err = _angle_error_deg(angle_deg, float(item.direction_degrees))
-            if err > float(self.algorithm.match_angle_threshold_deg):
+            err = _angle_error_deg(angle_deg, self._track_centroid_deg(track))
+            if err > float(self.req.speaker_match_window_deg):
                 continue
             if best_err is None or err < best_err:
                 best_err = err
@@ -162,45 +236,46 @@ class LiveCausalProcessor:
     ) -> list[SpeakerStateItem]:
         scores_eff = list(scores) if scores is not None else [1.0] * len(peaks)
         now_ms = float(timestamp_ms)
+        next_states: dict[int, _TrackState] = {}
         next_tracks: dict[int, SpeakerGainDirection] = {}
         matched: set[int] = set()
+        activation_min_predictions = min(max(1, int(self.req.speaker_activation_min_predictions)), max(1, int(self.req.speaker_history_size)))
 
         for angle_deg, score in zip(peaks, scores_eff):
             sid = self._match_speaker_id(angle_deg, matched, now_ms)
             if sid is None:
                 sid = self.next_speaker_id
                 self.next_speaker_id += 1
+                track = self._make_track_state(sid, angle_deg, score, now_ms)
+            else:
+                prev = self.speaker_track_states[sid]
+                track = _TrackState(
+                    speaker_id=int(prev.speaker_id),
+                    direction_degrees=float(prev.direction_degrees),
+                    updated_at_ms=float(now_ms),
+                    angle_history_deg=deque(prev.angle_history_deg, maxlen=prev.angle_history_deg.maxlen),
+                    score_history=deque(prev.score_history, maxlen=prev.score_history.maxlen),
+                    support_count=int(prev.support_count) + 1,
+                    confirmed=bool(prev.confirmed),
+                )
+                track.angle_history_deg.append(float(_normalize_angle_deg(angle_deg)))
+                track.score_history.append(float(_clip01(score)))
+                track.direction_degrees = float(self._track_centroid_deg(track))
+                track.confirmed = bool(track.confirmed or len(track.angle_history_deg) >= activation_min_predictions)
             matched.add(sid)
-            conf = _clip01(score)
-            next_tracks[sid] = SpeakerGainDirection(
-                speaker_id=int(sid),
-                direction_degrees=float(_normalize_angle_deg(angle_deg)),
-                gain_weight=float(max(0.2, conf)),
-                confidence=conf,
-                active=bool(conf >= 0.1),
-                activity_confidence=conf,
-                updated_at_ms=now_ms,
-            )
+            next_states[sid] = track
+            next_tracks[sid] = self._build_public_track(track, now_ms, observed_now=True)
 
-        for sid, item in self.speaker_tracks.items():
-            if sid in next_tracks:
+        for sid, track in self.speaker_track_states.items():
+            if sid in next_states:
                 continue
-            age_ms = now_ms - float(item.updated_at_ms)
+            age_ms = now_ms - float(track.updated_at_ms)
             if age_ms > float(self.algorithm.inactive_hold_ms):
                 continue
-            conf = _clip01(float(item.confidence) * 0.85)
-            active_hold_ms = min(float(self.algorithm.inactive_hold_ms), _UI_PRESENCE_HOLD_MS)
-            still_present = age_ms <= active_hold_ms
-            next_tracks[sid] = SpeakerGainDirection(
-                speaker_id=int(item.speaker_id),
-                direction_degrees=float(item.direction_degrees),
-                gain_weight=float(max(0.1 if still_present else 0.05, conf)),
-                confidence=conf,
-                active=bool(still_present),
-                activity_confidence=float(conf),
-                updated_at_ms=float(item.updated_at_ms),
-            )
+            next_states[sid] = track
+            next_tracks[sid] = self._build_public_track(track, now_ms, observed_now=False)
 
+        self.speaker_track_states = next_states
         self.speaker_tracks = next_tracks
         return self.current_speaker_items()
 
@@ -286,6 +361,8 @@ def run_offline_live_causal(
                 {
                     "frame_index": int(frame_idx),
                     "timestamp_ms": float(timestamp_ms),
+                    "raw_peaks_deg": [float(v) for v in tracker_debug.get("raw_peaks_deg", [])],
+                    "raw_peak_scores": [float(v) for v in tracker_debug.get("raw_peak_scores", [])],
                     "speakers": processor.current_speaker_rows(),
                 }
             )
@@ -336,6 +413,9 @@ def run_offline_live_causal(
         "srp_overlap": float(req.overlap),
         "srp_freq_min_hz": int(req.freq_low_hz),
         "srp_freq_max_hz": int(req.freq_high_hz),
+        "speaker_history_size": int(req.speaker_history_size),
+        "speaker_activation_min_predictions": int(req.speaker_activation_min_predictions),
+        "speaker_match_window_deg": float(req.speaker_match_window_deg),
         "tracking_mode": str(req.tracking_mode),
         "control_mode": str(req.algorithm_mode),
         "direction_long_memory_enabled": False,

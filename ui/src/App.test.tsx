@@ -88,6 +88,9 @@ test("speaker interaction emits select and adjust messages", async () => {
   expect(startBody.overlap).toBe(0.9);
   expect(startBody.freq_low_hz).toBe(1200);
   expect(startBody.freq_high_hz).toBe(5400);
+  expect(startBody.speaker_history_size).toBe(8);
+  expect(startBody.speaker_activation_min_predictions).toBe(3);
+  expect(startBody.speaker_match_window_deg).toBe(30);
 
   const ws = MockWebSocket.instances[0];
   ws.onmessage?.({
@@ -152,6 +155,9 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.overlap).toBe(0.9);
   expect(body.freq_low_hz).toBe(1200);
   expect(body.freq_high_hz).toBe(5400);
+  expect(body.speaker_history_size).toBe(8);
+  expect(body.speaker_activation_min_predictions).toBe(3);
+  expect(body.speaker_match_window_deg).toBe(30);
 });
 
 test("simulation start sends algorithm mode plus ground-truth toggles", async () => {

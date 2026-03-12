@@ -261,17 +261,26 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
     if duration_s <= 0.0 and trace:
         duration_s = max(0.0, float(trace[-1].get("frame_index", 0)) * frame_step_s)
     fig, ax = plt.subplots(figsize=(14, 4))
-    xs: list[float] = []
-    ys: list[float] = []
-    ss: list[float] = []
-    cs: list[float] = []
+    raw_xs: list[float] = []
+    raw_ys: list[float] = []
+    raw_cs: list[float] = []
+    centroid_tracks: dict[int, dict[str, list[float]]] = {}
     for row in trace:
         x = float(row.get("frame_index", 0)) * frame_step_s
+        for angle_deg, score in zip(row.get("raw_peaks_deg", []), row.get("raw_peak_scores", [])):
+            raw_xs.append(x)
+            raw_ys.append(float(angle_deg))
+            raw_cs.append(float(max(0.0, score)))
         for speaker in row.get("speakers", []):
-            xs.append(x)
-            ys.append(float(speaker.get("direction_degrees", 0.0)))
-            ss.append(20.0 + 80.0 * float(max(0.0, speaker.get("gain_weight", 0.0))))
-            cs.append(float(max(0.0, speaker.get("confidence", 0.0))))
+            speaker_id = int(speaker.get("speaker_id", 0))
+            track = centroid_tracks.setdefault(
+                speaker_id,
+                {"xs": [], "ys": [], "conf": [], "active": []},
+            )
+            track["xs"].append(x)
+            track["ys"].append(float(speaker.get("direction_degrees", 0.0)))
+            track["conf"].append(float(max(0.0, speaker.get("confidence", 0.0))))
+            track["active"].append(bool(speaker.get("active", False)))
     gt_handles = []
     gt_labels = []
     gt_colors = ["#c1121f", "#003049", "#669bbc", "#fb8500", "#2a9d8f", "#6a4c93"]
@@ -289,16 +298,43 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
         gt_handles.append(line)
         gt_labels.append(f"GT speaker {int(item['speaker_id'])}: {float(item['angle_deg']):.1f} deg")
 
-    scatter = None
-    if xs:
-        scatter = ax.scatter(xs, ys, s=ss, c=cs, cmap="viridis", alpha=0.65, edgecolors="none", zorder=2)
+    raw_scatter = None
+    if raw_xs:
+        raw_scatter = ax.scatter(
+            raw_xs,
+            raw_ys,
+            s=12,
+            c=raw_cs,
+            cmap="Greys",
+            alpha=0.18,
+            edgecolors="none",
+            zorder=1,
+        )
+
+    centroid_handles = []
+    centroid_labels = []
+    centroid_palette = plt.get_cmap("tab10", max(1, len(centroid_tracks)))
+    for color_idx, speaker_id in enumerate(sorted(centroid_tracks)):
+        track = centroid_tracks[speaker_id]
+        color = centroid_palette(color_idx)
+        ax.plot(track["xs"], track["ys"], color=color, linewidth=2.0, alpha=0.9, zorder=3)
+        active_xs = [x for x, active in zip(track["xs"], track["active"]) if active]
+        active_ys = [y for y, active in zip(track["ys"], track["active"]) if active]
+        inactive_xs = [x for x, active in zip(track["xs"], track["active"]) if not active]
+        inactive_ys = [y for y, active in zip(track["ys"], track["active"]) if not active]
+        if inactive_xs:
+            ax.scatter(inactive_xs, inactive_ys, s=20, color=[color], alpha=0.35, edgecolors="none", zorder=3)
+        if active_xs:
+            ax.scatter(active_xs, active_ys, s=28, color=[color], alpha=0.95, edgecolors="white", linewidths=0.3, zorder=4)
+        centroid_handles.append(ax.plot([], [], color=color, linewidth=2.0)[0])
+        centroid_labels.append(f"Speaker centroid {speaker_id}")
     ax.set_title(title)
     ax.set_xlabel("time (s)")
     ax.set_ylabel("direction (deg)")
     ax.set_ylim(-5.0, 365.0)
     ax.set_xlim(0.0, max(duration_s, 1.0))
     ax.grid(True, alpha=0.2)
-    if not xs:
+    if not raw_xs and not centroid_tracks:
         note = "No speaker predictions were found in the trace."
         if trace:
             note = "No speaker was found in these frames."
@@ -314,17 +350,17 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
             bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#ced4da", "alpha": 0.9},
             zorder=5,
         )
-    if scatter is not None:
-        fig.colorbar(scatter, ax=ax, label="confidence")
-    if gt_handles:
-        pred_handle = None
-        if scatter is not None:
-            pred_handle = ax.scatter([], [], s=40, c="#6c757d", alpha=0.8, label="Predicted speakers")
-        legend_handles = list(gt_handles)
-        legend_labels = list(gt_labels)
-        if pred_handle is not None:
-            legend_handles.append(pred_handle)
-            legend_labels.append("Predicted speakers")
+    if raw_scatter is not None:
+        fig.colorbar(raw_scatter, ax=ax, label="raw detection confidence")
+    legend_handles = list(gt_handles)
+    legend_labels = list(gt_labels)
+    if raw_scatter is not None:
+        legend_handles.append(ax.scatter([], [], s=18, c="#6c757d", alpha=0.25))
+        legend_labels.append("Raw detections")
+    if centroid_handles:
+        legend_handles.extend(centroid_handles)
+        legend_labels.extend(centroid_labels)
+    if legend_handles:
         ax.legend(legend_handles, legend_labels, loc="upper right")
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,6 +443,9 @@ def _run_recording_method_job(
     localization_overlap: float,
     localization_freq_low_hz: int,
     localization_freq_high_hz: int,
+    speaker_history_size: int,
+    speaker_activation_min_predictions: int,
+    speaker_match_window_deg: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -438,6 +477,9 @@ def _run_recording_method_job(
         overlap=float(localization_overlap),
         freq_low_hz=int(localization_freq_low_hz),
         freq_high_hz=int(localization_freq_high_hz),
+        speaker_history_size=int(speaker_history_size),
+        speaker_activation_min_predictions=int(speaker_activation_min_predictions),
+        speaker_match_window_deg=float(speaker_match_window_deg),
         focus_ratio=2.0,
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
@@ -524,6 +566,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--localization-overlap", type=float, default=0.5)
     parser.add_argument("--localization-freq-low-hz", type=int, default=200)
     parser.add_argument("--localization-freq-high-hz", type=int, default=3000)
+    parser.add_argument("--speaker-history-size", type=int, default=8)
+    parser.add_argument("--speaker-activation-min-predictions", type=int, default=3)
+    parser.add_argument("--speaker-match-window-deg", type=float, default=30.0)
     parser.add_argument("--slow-chunk-ms", type=int, default=2000)
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
@@ -594,6 +639,9 @@ def main() -> None:
                 localization_overlap=float(args.localization_overlap),
                 localization_freq_low_hz=int(args.localization_freq_low_hz),
                 localization_freq_high_hz=int(args.localization_freq_high_hz),
+                speaker_history_size=int(args.speaker_history_size),
+                speaker_activation_min_predictions=int(args.speaker_activation_min_predictions),
+                speaker_match_window_deg=float(args.speaker_match_window_deg),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -659,6 +707,9 @@ def main() -> None:
             "localization_overlap": float(args.localization_overlap),
             "localization_freq_low_hz": int(args.localization_freq_low_hz),
             "localization_freq_high_hz": int(args.localization_freq_high_hz),
+            "speaker_history_size": int(args.speaker_history_size),
+            "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
+            "speaker_match_window_deg": float(args.speaker_match_window_deg),
             "localization_backend": str(args.localization_backend),
             "slow_chunk_ms": int(args.slow_chunk_ms),
             "slow_chunk_hop_ms": int(args.slow_chunk_hop_ms),

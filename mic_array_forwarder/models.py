@@ -32,6 +32,9 @@ class SessionStartRequest(BaseModel):
     overlap: float = 0.5
     freq_low_hz: int = 200
     freq_high_hz: int = 3000
+    speaker_history_size: int = 8
+    speaker_activation_min_predictions: int = 3
+    speaker_match_window_deg: float = 30.0
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4

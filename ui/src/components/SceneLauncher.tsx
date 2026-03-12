@@ -12,6 +12,9 @@ export type SessionLaunchConfig = {
   localizationOverlap: number;
   localizationFreqLowHz: number;
   localizationFreqHighHz: number;
+  speakerHistorySize: number;
+  speakerActivationMinPredictions: number;
+  speakerMatchWindowDeg: number;
   scenePath: string;
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
@@ -73,6 +76,9 @@ export function SceneLauncher({
   const [localizationOverlap, setLocalizationOverlap] = useState(0.9);
   const [localizationFreqLowHz, setLocalizationFreqLowHz] = useState(1200);
   const [localizationFreqHighHz, setLocalizationFreqHighHz] = useState(5400);
+  const [speakerHistorySize, setSpeakerHistorySize] = useState(8);
+  const [speakerActivationMinPredictions, setSpeakerActivationMinPredictions] = useState(3);
+  const [speakerMatchWindowDeg, setSpeakerMatchWindowDeg] = useState(30);
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
@@ -227,6 +233,52 @@ export function SceneLauncher({
             }}
           />
 
+          <label htmlFor="speaker-history-size">Speaker history size (M)</label>
+          <input
+            id="speaker-history-size"
+            aria-label="Speaker history size (M)"
+            type="number"
+            min={1}
+            max={64}
+            step={1}
+            value={speakerHistorySize}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextHistory = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+              setSpeakerHistorySize(nextHistory);
+              setSpeakerActivationMinPredictions((prev) => Math.min(prev, nextHistory));
+            }}
+          />
+
+          <label htmlFor="speaker-activation-min-predictions">Speaker activation min predictions (N)</label>
+          <input
+            id="speaker-activation-min-predictions"
+            aria-label="Speaker activation min predictions (N)"
+            type="number"
+            min={1}
+            max={64}
+            step={1}
+            value={speakerActivationMinPredictions}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextCount = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+              setSpeakerActivationMinPredictions(Math.min(nextCount, speakerHistorySize));
+            }}
+          />
+
+          <label htmlFor="speaker-match-window-deg">Speaker match window (deg)</label>
+          <input
+            id="speaker-match-window-deg"
+            aria-label="Speaker match window (deg)"
+            type="number"
+            min={1}
+            max={180}
+            step={1}
+            value={speakerMatchWindowDeg}
+            disabled={isBusy}
+            onChange={(e) => setSpeakerMatchWindowDeg(Math.max(1, Math.min(180, Number(e.target.value) || 1)))}
+          />
+
           {showSimulationSettings && (
             <>
               <label htmlFor="scene">Scene config path</label>
@@ -358,6 +410,9 @@ export function SceneLauncher({
                   localizationOverlap,
                   localizationFreqLowHz,
                   localizationFreqHighHz,
+                  speakerHistorySize,
+                  speakerActivationMinPredictions,
+                  speakerMatchWindowDeg,
                   scenePath,
                   backgroundNoisePath,
                   backgroundNoiseGain,
