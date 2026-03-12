@@ -29,6 +29,9 @@ class SessionStartRequest(BaseModel):
     use_ground_truth_speaker_sources: bool = False
     localization_hop_ms: int = 10
     localization_window_ms: int = 160
+    overlap: float = 0.5
+    freq_low_hz: int = 200
+    freq_high_hz: int = 3000
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4

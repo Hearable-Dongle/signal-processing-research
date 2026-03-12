@@ -83,8 +83,11 @@ test("speaker interaction emits select and adjust messages", async () => {
   const startBody = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
   expect(startBody.algorithm_mode).toBe("single_dominant_no_separator");
   expect(startBody.processing_mode).toBe("specific_speaker_enhancement");
-  expect(startBody.localization_hop_ms).toBe(10);
-  expect(startBody.localization_window_ms).toBe(160);
+  expect(startBody.localization_hop_ms).toBe(95);
+  expect(startBody.localization_window_ms).toBe(300);
+  expect(startBody.overlap).toBe(0.9);
+  expect(startBody.freq_low_hz).toBe(1200);
+  expect(startBody.freq_high_hz).toBe(5400);
 
   const ws = MockWebSocket.instances[0];
   ws.onmessage?.({
@@ -144,8 +147,11 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.sample_rate_hz).toBe(48000);
   expect(body.channel_map).toEqual([0, 1, 2, 3]);
   expect(body.algorithm_mode).toBe("single_dominant_no_separator");
-  expect(body.localization_hop_ms).toBe(10);
-  expect(body.localization_window_ms).toBe(160);
+  expect(body.localization_hop_ms).toBe(95);
+  expect(body.localization_window_ms).toBe(300);
+  expect(body.overlap).toBe(0.9);
+  expect(body.freq_low_hz).toBe(1200);
+  expect(body.freq_high_hz).toBe(5400);
 });
 
 test("simulation start sends algorithm mode plus ground-truth toggles", async () => {

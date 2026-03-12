@@ -37,8 +37,11 @@ test("mode picker gates launcher settings and latency controls invoke callback",
 
   const slider = screen.getByLabelText("Playback latency (ms)");
   expect(screen.getByLabelText("Algorithm mode")).toHaveValue("single_dominant_no_separator");
-  expect(screen.getByLabelText("Localization hop (ms)")).toHaveValue(10);
-  expect(screen.getByLabelText("Localization window (ms)")).toHaveValue(160);
+  expect(screen.getByLabelText("Localization hop (ms)")).toHaveValue(95);
+  expect(screen.getByLabelText("Localization window (ms)")).toHaveValue(300);
+  expect(screen.getByLabelText("Localization overlap")).toHaveValue(0.9);
+  expect(screen.getByLabelText("Localization freq low (Hz)")).toHaveValue(1200);
+  expect(screen.getByLabelText("Localization freq high (Hz)")).toHaveValue(5400);
   await user.clear(screen.getByLabelText("Playback latency number"));
   await user.type(screen.getByLabelText("Playback latency number"), "240");
   await user.click(slider);
@@ -99,6 +102,9 @@ test("simulation shows ground-truth toggles and disables oracle speaker sources 
       algorithmMode: "speaker_tracking",
       localizationHopMs: 50,
       localizationWindowMs: 200,
+      localizationOverlap: 0.9,
+      localizationFreqLowHz: 1200,
+      localizationFreqHighHz: 5400,
       useGroundTruthLocation: true,
       useGroundTruthSpeakerSources: true,
     })

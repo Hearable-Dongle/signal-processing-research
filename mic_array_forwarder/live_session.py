@@ -19,6 +19,7 @@ from mic_array_forwarder.models import (
     SpeakerStateItem,
     SpeakerStateMessage,
 )
+from mic_array_forwarder.live_causal import LiveCausalProcessor
 from mic_array_forwarder.session import _wav_bytes_from_mono_float32
 from mic_array_forwarder.ws_codec import encode_audio_chunk
 from mic_array_forwarder.mode_presets import (
@@ -26,9 +27,6 @@ from mic_array_forwarder.mode_presets import (
     METHOD_SINGLE_DOMINANT_NO_SEPARATOR,
     get_live_algorithm_preset,
 )
-from realtime_pipeline.contracts import SpeakerGainDirection
-from realtime_pipeline.fast_path import delay_and_sum_frame
-from realtime_pipeline.srp_tracker import SRPPeakTracker
 from simulation.mic_array_profiles import mic_positions_xyz
 
 def _mic_geometry_from_profile(profile: str) -> np.ndarray:
@@ -104,8 +102,6 @@ class LiveDemoSession:
         self._raw_multichannel_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._processed_audio_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._raw_mix_sample_rate_hz = int(req.sample_rate_hz)
-        self._speaker_tracks: dict[int, SpeakerGainDirection] = {}
-        self._next_speaker_id = 1
         self._processing_ms_total = 0.0
         self._processed_frames = 0
         self._last_tracker_debug: dict[str, Any] = {}
@@ -113,7 +109,7 @@ class LiveDemoSession:
         self._monitor_source = str(req.monitor_source)
         self._mic_geometry_xyz = _mic_geometry_from_profile(str(req.mic_array_profile))
         self._channel_map = self._normalize_channel_map(req.channel_map, int(req.channel_count))
-        self._algorithm = get_live_algorithm_preset(req.algorithm_mode)
+        self._processor = LiveCausalProcessor(req=req, mic_geometry_xyz=self._mic_geometry_xyz)
 
     @staticmethod
     def _normalize_channel_map(raw: list[int] | None, channel_count: int) -> list[int] | None:
@@ -218,6 +214,7 @@ class LiveDemoSession:
             sid = int(speaker_id)
             self._selected_speaker_id = sid
             self._speaker_gain_delta_db.setdefault(sid, 0.0)
+        self._processor.set_selected_speaker(sid)
 
     def adjust_speaker_gain(self, speaker_id: int, delta_db_step: int) -> float:
         if self.req.processing_mode != "specific_speaker_enhancement":
@@ -228,11 +225,13 @@ class LiveDemoSession:
             prev = float(self._speaker_gain_delta_db.get(sid, 0.0))
             curr = float(np.clip(prev + step, -12.0, 12.0))
             self._speaker_gain_delta_db[sid] = curr
+        self._processor.adjust_speaker_gain(sid, step)
         return curr
 
     def clear_focus(self) -> None:
         with self._lock:
             self._selected_speaker_id = None
+        self._processor.set_selected_speaker(None)
 
     def set_monitor_source(self, source: str) -> None:
         with self._lock:
@@ -240,7 +239,8 @@ class LiveDemoSession:
 
     def _next_audio_timestamp_ms(self) -> float:
         with self._lock:
-            ts = float(self._audio_frame_idx * 10)
+            hop_ms = max(10, int(self.req.localization_hop_ms))
+            ts = float(self._audio_frame_idx * hop_ms)
             self._audio_frame_idx += 1
             return ts
 
@@ -274,84 +274,11 @@ class LiveDemoSession:
             self._audio_seq += 1
             self._audio_chunks.append((self._audio_seq, payload))
 
-    def _match_speaker_id(self, angle_deg: float, matched: set[int]) -> int | None:
-        best_id = None
-        best_err = None
-        now_ms = _now_ms()
-        for sid, item in self._speaker_tracks.items():
-            if sid in matched:
-                continue
-            if now_ms - float(item.updated_at_ms) > float(self._algorithm.stale_track_ms):
-                continue
-            err = _angle_error_deg(angle_deg, float(item.direction_degrees))
-            if err > float(self._algorithm.match_angle_threshold_deg):
-                continue
-            if best_err is None or err < best_err:
-                best_err = err
-                best_id = sid
-        return best_id
-
-    def _build_speaker_items(self, peaks: list[float], scores: list[float] | None) -> list[SpeakerStateItem]:
-        scores_eff = list(scores) if scores is not None else [1.0] * len(peaks)
-        now_ms = _now_ms()
-        next_tracks: dict[int, SpeakerGainDirection] = {}
-        matched: set[int] = set()
-
-        for angle_deg, score in zip(peaks, scores_eff):
-            sid = self._match_speaker_id(angle_deg, matched)
-            if sid is None:
-                sid = self._next_speaker_id
-                self._next_speaker_id += 1
-            matched.add(sid)
-            conf = _clip01(score)
-            next_tracks[sid] = SpeakerGainDirection(
-                speaker_id=int(sid),
-                direction_degrees=float(_normalize_angle_deg(angle_deg)),
-                gain_weight=float(max(0.2, conf)),
-                confidence=conf,
-                active=bool(conf >= 0.1),
-                activity_confidence=conf,
-                updated_at_ms=now_ms,
-            )
-
-        for sid, item in self._speaker_tracks.items():
-            if sid in next_tracks:
-                continue
-            age_ms = now_ms - float(item.updated_at_ms)
-            if age_ms > float(self._algorithm.inactive_hold_ms):
-                continue
-            conf = _clip01(float(item.confidence) * 0.85)
-            next_tracks[sid] = SpeakerGainDirection(
-                speaker_id=int(item.speaker_id),
-                direction_degrees=float(item.direction_degrees),
-                gain_weight=float(max(0.1, conf)),
-                confidence=conf,
-                active=False,
-                activity_confidence=float(conf),
-                updated_at_ms=float(item.updated_at_ms),
-            )
-
-        self._speaker_tracks = next_tracks
-        items = [
-            SpeakerStateItem(
-                speaker_id=int(item.speaker_id),
-                direction_degrees=float(item.direction_degrees),
-                confidence=float(item.confidence),
-                active=bool(item.active),
-                activity_confidence=float(item.activity_confidence),
-                gain_weight=float(item.gain_weight),
-            )
-            for item in sorted(
-                next_tracks.values(),
-                key=lambda item: (-float(item.active), -float(item.confidence), int(item.speaker_id)),
-            )
-        ]
-
-        msg = SpeakerStateMessage(timestamp_ms=now_ms, speakers=items, ground_truth=[]).model_dump()
+    def _set_speaker_state(self, timestamp_ms: float, items: list[SpeakerStateItem]) -> None:
+        msg = SpeakerStateMessage(timestamp_ms=float(timestamp_ms), speakers=items, ground_truth=[]).model_dump()
         with self._lock:
             self._speaker_state = msg
             self._speaker_state_version += 1
-        return items
 
     def _publish_metrics(self, queue_size: int) -> None:
         fast_avg_ms = self._processing_ms_total / self._processed_frames if self._processed_frames else 0.0
@@ -381,47 +308,6 @@ class LiveDemoSession:
             self._metrics_state = msg
             self._metrics_version += 1
 
-    def _pick_focus_direction(self, items: list[SpeakerStateItem]) -> float | None:
-        if not items:
-            return None
-        with self._lock:
-            selected = self._selected_speaker_id
-            gains = dict(self._speaker_gain_delta_db)
-        if self.req.processing_mode == "specific_speaker_enhancement" and selected is not None:
-            for item in items:
-                if int(item.speaker_id) == int(selected):
-                    return float(item.direction_degrees)
-            return None
-        if self.req.processing_mode in {"localize_and_beamform", "beamform_from_ground_truth"} or self.req.algorithm_mode == METHOD_LOCALIZATION_ONLY:
-            best = max(items, key=lambda item: (float(item.activity_confidence), float(item.confidence)))
-            return float(best.direction_degrees)
-        if selected is not None and gains.get(selected):
-            for item in items:
-                if int(item.speaker_id) == int(selected):
-                    return float(item.direction_degrees)
-        return None
-
-    def _render_output(self, frame_mc: np.ndarray, items: list[SpeakerStateItem]) -> np.ndarray:
-        frame = np.asarray(frame_mc, dtype=np.float32)
-        focus_direction = self._pick_focus_direction(items)
-        if focus_direction is None:
-            return np.mean(frame, axis=1).astype(np.float32, copy=False)
-
-        mono = delay_and_sum_frame(
-            frame,
-            doa_deg=float(focus_direction),
-            mic_geometry_xyz=self._mic_geometry_xyz,
-            fs=int(self.req.sample_rate_hz),
-            sound_speed_m_s=343.0,
-        )
-        if self.req.processing_mode == "specific_speaker_enhancement":
-            with self._lock:
-                selected = self._selected_speaker_id
-                delta_db = 0.0 if selected is None else float(self._speaker_gain_delta_db.get(selected, 0.0))
-            boost_db = max(0.0, _ratio_to_db(self.req.focus_ratio) + delta_db)
-            mono = mono * float(10.0 ** (boost_db / 20.0))
-        return np.clip(mono, -1.0, 1.0).astype(np.float32, copy=False)
-
     def _run(self) -> None:
         try:
             try:
@@ -443,36 +329,6 @@ class LiveDemoSession:
 
             device_info = sd.query_devices(device_idx)
             self._last_device_name = str(device_info.get("name", f"device-{device_idx}"))
-
-            tracker = SRPPeakTracker(
-                mic_pos=self._mic_geometry_xyz.T,
-                fs=sample_rate_hz,
-                window_ms=max(int(self.req.localization_window_ms), max(10, int(self.req.localization_hop_ms))),
-                nfft=512,
-                overlap=0.5,
-                freq_range=(300, 3000) if str(self.req.localization_backend) == "music_1src" else (200, 3000),
-                max_sources=(
-                    1
-                    if self.req.algorithm_mode in {METHOD_LOCALIZATION_ONLY, METHOD_SINGLE_DOMINANT_NO_SEPARATOR}
-                    or str(self.req.localization_backend) == "music_1src"
-                    else max(1, min(int(self._algorithm.max_sources), channel_count))
-                ),
-                prior_enabled=True,
-                min_score=0.03,
-                ema_alpha=0.35,
-                hysteresis_margin=0.05,
-                match_tolerance_deg=20.0,
-                hold_frames=6,
-                max_step_deg=12.0,
-                score_decay=0.9,
-                backend=str(self.req.localization_backend),
-                grid_size=72,
-                min_peak_separation_deg=15.0,
-                small_aperture_bias=True,
-                tracking_mode=str(self.req.tracking_mode),
-                max_tracks=max(1, min(int(self._algorithm.max_sources), 3)),
-                single_source_motion_filter_enabled=True,
-            )
 
             def callback(indata: np.ndarray, _frames: int, _time_info: Any, status: Any) -> None:
                 if status:
@@ -516,14 +372,10 @@ class LiveDemoSession:
                         frame_mc = frame_mc[:, self._channel_map]
                     raw_mono = np.mean(frame_mc, axis=1).astype(np.float32, copy=False)
                     self._append_raw_audio(frame_mc, raw_mono)
-                    peaks, scores, tracker_debug = tracker.update(frame_mc)
-                    rms_by_channel = np.sqrt(np.mean(np.square(frame_mc), axis=0)).astype(np.float32, copy=False)
-                    debug = dict(tracker_debug)
-                    debug["last_frame_shape"] = [int(frame_mc.shape[0]), int(frame_mc.shape[1])]
-                    debug["rms_by_channel"] = [float(v) for v in rms_by_channel]
-                    self._last_tracker_debug = debug
-                    items = self._build_speaker_items(peaks, scores)
-                    output = self._render_output(frame_mc, items)
+                    frame_timestamp_ms = float(self._audio_frame_idx * max(10, int(self.req.localization_hop_ms)))
+                    output, _raw_mono_unused, items, tracker_debug = self._processor.process_frame(frame_mc, frame_timestamp_ms)
+                    self._last_tracker_debug = dict(tracker_debug)
+                    self._set_speaker_state(frame_timestamp_ms, items)
                     self._publish_audio_chunk(output, raw_mono)
                     self._processing_ms_total += (time.perf_counter() - t0) * 1000.0
                     self._processed_frames += 1

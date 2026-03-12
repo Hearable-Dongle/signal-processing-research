@@ -9,6 +9,9 @@ export type SessionLaunchConfig = {
   algorithmMode: AlgorithmMode;
   localizationHopMs: number;
   localizationWindowMs: number;
+  localizationOverlap: number;
+  localizationFreqLowHz: number;
+  localizationFreqHighHz: number;
   scenePath: string;
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
@@ -65,8 +68,11 @@ export function SceneLauncher({
 }: Props) {
   const [inputSource, setInputSource] = useState<InputSource | null>(null);
   const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>("single_dominant_no_separator");
-  const [localizationHopMs, setLocalizationHopMs] = useState(10);
-  const [localizationWindowMs, setLocalizationWindowMs] = useState(160);
+  const [localizationHopMs, setLocalizationHopMs] = useState(95);
+  const [localizationWindowMs, setLocalizationWindowMs] = useState(300);
+  const [localizationOverlap, setLocalizationOverlap] = useState(0.9);
+  const [localizationFreqLowHz, setLocalizationFreqLowHz] = useState(1200);
+  const [localizationFreqHighHz, setLocalizationFreqHighHz] = useState(5400);
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
@@ -169,6 +175,55 @@ export function SceneLauncher({
             onChange={(e) => {
               const nextWindow = Math.min(2000, Number(e.target.value) || 160);
               setLocalizationWindowMs(Math.max(Math.max(20, localizationHopMs), nextWindow));
+            }}
+          />
+
+          <label htmlFor="localization-overlap">Localization overlap</label>
+          <input
+            id="localization-overlap"
+            aria-label="Localization overlap"
+            type="number"
+            min={0}
+            max={0.99}
+            step={0.01}
+            value={localizationOverlap}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextOverlap = Number(e.target.value);
+              setLocalizationOverlap(Math.max(0, Math.min(0.99, Number.isFinite(nextOverlap) ? nextOverlap : 0)));
+            }}
+          />
+
+          <label htmlFor="localization-freq-low-hz">Localization freq low (Hz)</label>
+          <input
+            id="localization-freq-low-hz"
+            aria-label="Localization freq low (Hz)"
+            type="number"
+            min={0}
+            max={24000}
+            step={50}
+            value={localizationFreqLowHz}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextLow = Math.max(0, Math.min(24000, Number(e.target.value) || 0));
+              setLocalizationFreqLowHz(nextLow);
+              setLocalizationFreqHighHz((prev) => Math.max(prev, nextLow));
+            }}
+          />
+
+          <label htmlFor="localization-freq-high-hz">Localization freq high (Hz)</label>
+          <input
+            id="localization-freq-high-hz"
+            aria-label="Localization freq high (Hz)"
+            type="number"
+            min={0}
+            max={24000}
+            step={50}
+            value={localizationFreqHighHz}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextHigh = Math.max(0, Math.min(24000, Number(e.target.value) || 0));
+              setLocalizationFreqHighHz(Math.max(nextHigh, localizationFreqLowHz));
             }}
           />
 
@@ -300,6 +355,9 @@ export function SceneLauncher({
                   algorithmMode,
                   localizationHopMs,
                   localizationWindowMs,
+                  localizationOverlap,
+                  localizationFreqLowHz,
+                  localizationFreqHighHz,
                   scenePath,
                   backgroundNoisePath,
                   backgroundNoiseGain,
