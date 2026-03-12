@@ -191,7 +191,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--scenes-root", default=str(DEFAULT_SCENES_ROOT))
     parser.add_argument("--assets-root", default=str(DEFAULT_ASSETS_ROOT))
     parser.add_argument("--out-root", default=str(DEFAULT_OUT_ROOT))
-    parser.add_argument("--profile", choices=["respeaker_v3_0457", "respeaker_cross_0640", "respeaker_xvf3800_0650"], default=DEFAULT_PROFILE)
+    parser.add_argument("--profile", choices=["respeaker_v3_0457", "respeaker_xvf3800_0650"], default=DEFAULT_PROFILE)
     parser.add_argument("--beamforming-mode", choices=["mvdr_fd", "gsc_fd", "delay_sum"], default="mvdr_fd")
     parser.add_argument("--benchmark-config", default="localization/benchmark/configs/default.json")
     parser.add_argument("--methods", nargs="+", default=["SRP-PHAT", "GMDA", "SSZ"])

@@ -59,8 +59,8 @@ def main() -> int:
     parser.add_argument("--sample-rate-hz", type=int, default=48000)
     parser.add_argument(
         "--mic-array-profile",
-        choices=["respeaker_v3_0457", "respeaker_cross_0640"],
-        default="respeaker_v3_0457",
+        choices=["respeaker_v3_0457", "respeaker_xvf3800_0650"],
+        default="respeaker_xvf3800_0650",
     )
     parser.add_argument("--channel-map", default="", help="Comma-separated channel map, e.g. 0,1,2,3")
     parser.add_argument("--monitor-source", choices=["processed", "raw_mixed"], default="processed")

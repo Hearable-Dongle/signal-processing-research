@@ -265,6 +265,7 @@ export function RealtimeDemoPage({
       monitorSource: nextMonitorSource,
       sampleRateHz,
       channelMap,
+      micArrayProfile,
     } = config;
     const playbackSampleRateHz = inputSource === "respeaker_live" ? sampleRateHz : DEFAULT_SAMPLE_RATE;
     setStatus("starting");
@@ -298,6 +299,7 @@ export function RealtimeDemoPage({
           processing_mode: "specific_speaker_enhancement",
           monitor_source: nextMonitorSource,
           sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
+          mic_array_profile: inputSource === "respeaker_live" ? micArrayProfile : undefined,
           background_noise_audio_path: backgroundNoisePath,
           background_noise_gain: backgroundNoiseGain,
           use_ground_truth_location: inputSource === "simulation" ? useGroundTruthLocation : undefined,

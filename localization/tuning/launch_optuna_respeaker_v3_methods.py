@@ -21,7 +21,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--scenes-root", default=str(DEFAULT_SCENES_ROOT))
     parser.add_argument("--assets-root", default=str(DEFAULT_ASSETS_ROOT))
     parser.add_argument("--benchmark-config", default=str(DEFAULT_BENCHMARK_CONFIG))
-    parser.add_argument("--profile", default=DEFAULT_PROFILE, choices=["respeaker_v3_0457", "respeaker_cross_0640"])
+    parser.add_argument("--profile", default=DEFAULT_PROFILE, choices=["respeaker_v3_0457", "respeaker_xvf3800_0650"])
     parser.add_argument("--out-root", default=str(DEFAULT_OUT_ROOT))
     parser.add_argument("--duration-min", type=float, default=60.0)
     parser.add_argument("--subset-per-bucket", type=int, default=1)

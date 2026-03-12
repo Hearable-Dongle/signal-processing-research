@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { AlgorithmMode, MonitorSource } from "../types/contracts";
 
 export type InputSource = "simulation" | "respeaker_live";
+export type MicArrayProfile = "respeaker_v3_0457" | "respeaker_xvf3800_0650";
 
 export type SessionLaunchConfig = {
   inputSource: InputSource;
@@ -24,6 +25,7 @@ export type SessionLaunchConfig = {
   monitorSource: MonitorSource;
   sampleRateHz: number;
   channelMap: string;
+  micArrayProfile: MicArrayProfile;
 };
 
 type Props = {
@@ -96,6 +98,7 @@ export function SceneLauncher({
   const [audioDeviceQuery, setAudioDeviceQuery] = useState("ReSpeaker");
   const [sampleRateHz, setSampleRateHz] = useState(48000);
   const [channelMap, setChannelMap] = useState("0,1,2,3");
+  const [micArrayProfile, setMicArrayProfile] = useState<MicArrayProfile>("respeaker_xvf3800_0650");
   const isBusy = status === "running" || status === "starting";
   const showSimulationSettings = inputSource === "simulation";
   const showLiveSettings = inputSource === "respeaker_live";
@@ -375,6 +378,16 @@ export function SceneLauncher({
 
           {showLiveSettings && (
             <>
+              <label htmlFor="mic-array-profile">Mic array profile</label>
+              <select
+                id="mic-array-profile"
+                aria-label="Mic array profile"
+                value={micArrayProfile}
+                onChange={(e) => setMicArrayProfile(e.target.value as MicArrayProfile)}
+              >
+                <option value="respeaker_xvf3800_0650">ReSpeaker XVF3800 (65.0 mm)</option>
+                <option value="respeaker_v3_0457">ReSpeaker 4-Mic v3 (45.7 mm)</option>
+              </select>
               <label htmlFor="audio-device-query">Audio device query</label>
               <input
                 id="audio-device-query"
@@ -460,6 +473,7 @@ export function SceneLauncher({
                   monitorSource,
                   sampleRateHz,
                   channelMap,
+                  micArrayProfile,
                 })
               }
               disabled={!canStart}

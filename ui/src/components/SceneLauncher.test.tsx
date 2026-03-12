@@ -150,6 +150,7 @@ test("live mode reveals only ReSpeaker-specific settings", async () => {
   await user.click(screen.getByRole("button", { name: "ReSpeaker Live Direct capture from the local USB microphone array." }));
 
   expect(screen.getByLabelText("Audio device query")).toBeInTheDocument();
+  expect(screen.getByLabelText("Mic array profile")).toBeInTheDocument();
   expect(screen.getByLabelText("Channel map (optional)")).toBeInTheDocument();
   expect(screen.getByLabelText("Sample rate (Hz)")).toBeInTheDocument();
   expect(screen.getByLabelText("Algorithm mode")).toBeInTheDocument();

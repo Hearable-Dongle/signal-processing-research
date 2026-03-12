@@ -377,7 +377,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-ipd-train", action="store_true")
     parser.add_argument("--strategies", nargs="+", default=None)
     parser.add_argument("--baseline-script", default=None)
-    parser.add_argument("--profile", default="respeaker_v3_0457", choices=["respeaker_v3_0457", "respeaker_cross_0640", "respeaker_xvf3800_0650"])
+    parser.add_argument("--profile", default="respeaker_xvf3800_0650", choices=["respeaker_v3_0457", "respeaker_xvf3800_0650"])
     return parser.parse_args()
 
 

@@ -136,6 +136,7 @@ test("live mode start sends the ReSpeaker session config", async () => {
 
   await user.click(screen.getByRole("button", { name: "ReSpeaker Live Direct capture from the local USB microphone array." }));
   await user.click(screen.getByRole("switch", { name: "Single active speaker" }));
+  await user.selectOptions(screen.getByLabelText("Mic array profile"), "respeaker_xvf3800_0650");
   await user.clear(screen.getByLabelText("Audio device query"));
   await user.type(screen.getByLabelText("Audio device query"), "USB Mic");
   await user.click(screen.getByRole("button", { name: "Start" }));
@@ -147,6 +148,7 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(startCall).toBeTruthy();
   const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
   expect(body.input_source).toBe("respeaker_live");
+  expect(body.mic_array_profile).toBe("respeaker_xvf3800_0650");
   expect(body.audio_device_query).toBe("USB Mic");
   expect(body.sample_rate_hz).toBe(48000);
   expect(body.channel_map).toEqual([0, 1, 2, 3]);
@@ -258,8 +260,15 @@ test("data collection exports raw channels for a captured set", async () => {
   expect(screen.getByLabelText("Title")).toBeInTheDocument();
   expect(screen.getByLabelText("Notes")).toBeInTheDocument();
   expect(screen.getByLabelText("Device")).toHaveValue("ReSpeaker");
+  expect(screen.getByLabelText("Mic array profile")).toHaveValue("respeaker_xvf3800_0650");
   await user.click(screen.getByRole("button", { name: "Record" }));
   await user.click(await screen.findByRole("button", { name: "Stop" }));
+
+  const startCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+    String(c[0]).includes("/api/session/start")
+  );
+  const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
+  expect(body.mic_array_profile).toBe("respeaker_xvf3800_0650");
 
   expect(await screen.findByText(/Saved recording with 2 raw channels/i)).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Export Set" }));
