@@ -12,6 +12,7 @@ import soundfile as sf
 from mic_array_forwarder.mode_presets import (
     METHOD_LOCALIZATION_ONLY,
     METHOD_SINGLE_DOMINANT_NO_SEPARATOR,
+    METHOD_SPEAKER_TRACKING_SINGLE_ACTIVE,
     get_live_algorithm_preset,
 )
 from mic_array_forwarder.models import SessionStartRequest, SpeakerStateItem
@@ -89,6 +90,7 @@ class LiveCausalProcessor:
         self.speaker_track_states: dict[int, _TrackState] = {}
         self.speaker_tracks: dict[int, SpeakerGainDirection] = {}
         self.next_speaker_id = 1
+        self._preferred_active_speaker_id: int | None = None
         self.selected_speaker_id: int | None = None
         self.speaker_gain_delta_db: dict[int, float] = {}
 
@@ -212,6 +214,65 @@ class LiveCausalProcessor:
             updated_at_ms=float(track.updated_at_ms),
         )
 
+    def _single_active_mode_enabled(self) -> bool:
+        return str(self.req.algorithm_mode) == METHOD_SPEAKER_TRACKING_SINGLE_ACTIVE
+
+    def _track_rank_key(self, track: _TrackState, now_ms: float) -> tuple[float, float, float, float]:
+        age_ms = max(0.0, float(now_ms) - float(track.updated_at_ms))
+        return (
+            float(track.support_count),
+            float(len(track.angle_history_deg)),
+            float(self._track_confidence(track)),
+            -float(age_ms),
+        )
+
+    def _apply_single_active_constraint(
+        self,
+        next_states: dict[int, _TrackState],
+        next_tracks: dict[int, SpeakerGainDirection],
+        now_ms: float,
+    ) -> None:
+        if not self._single_active_mode_enabled():
+            return
+        active_hold_ms = min(float(self.algorithm.inactive_hold_ms), _UI_PRESENCE_HOLD_MS)
+        candidate_ids = [
+            sid
+            for sid, track in next_states.items()
+            if track.confirmed and (float(now_ms) - float(track.updated_at_ms)) <= active_hold_ms
+        ]
+        if not candidate_ids:
+            self._preferred_active_speaker_id = None
+            return
+        best_sid = max(candidate_ids, key=lambda sid: self._track_rank_key(next_states[sid], now_ms))
+        preferred_sid = self._preferred_active_speaker_id
+        if preferred_sid in candidate_ids:
+            preferred_key = self._track_rank_key(next_states[preferred_sid], now_ms)
+            best_key = self._track_rank_key(next_states[best_sid], now_ms)
+            if preferred_key >= best_key:
+                best_sid = preferred_sid
+        self._preferred_active_speaker_id = int(best_sid)
+        for sid, item in list(next_tracks.items()):
+            if sid == best_sid:
+                continue
+            next_tracks[sid] = SpeakerGainDirection(
+                speaker_id=int(item.speaker_id),
+                direction_degrees=float(item.direction_degrees),
+                gain_weight=float(item.gain_weight),
+                confidence=float(item.confidence),
+                active=False,
+                activity_confidence=float(min(item.activity_confidence, item.confidence * 0.5)),
+                updated_at_ms=float(item.updated_at_ms),
+                identity_confidence=float(item.identity_confidence),
+                identity_maturity=str(item.identity_maturity),
+                predicted_direction_deg=item.predicted_direction_deg,
+                angular_velocity_deg_per_chunk=float(item.angular_velocity_deg_per_chunk),
+                last_separator_stream_index=item.last_separator_stream_index,
+                anchor_direction_deg=item.anchor_direction_deg,
+                anchor_confidence=float(item.anchor_confidence),
+                anchor_locked=bool(item.anchor_locked),
+                anchor_last_confirmed_ms=float(item.anchor_last_confirmed_ms),
+            )
+
     def _match_speaker_id(self, angle_deg: float, matched: set[int], now_ms: float) -> int | None:
         best_id = None
         best_err = None
@@ -275,6 +336,7 @@ class LiveCausalProcessor:
             next_states[sid] = track
             next_tracks[sid] = self._build_public_track(track, now_ms, observed_now=False)
 
+        self._apply_single_active_constraint(next_states, next_tracks, now_ms)
         self.speaker_track_states = next_states
         self.speaker_tracks = next_tracks
         return self.current_speaker_items()

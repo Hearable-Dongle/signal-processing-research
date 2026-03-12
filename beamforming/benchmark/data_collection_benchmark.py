@@ -555,6 +555,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "spatial_baseline",
             "speaker_tracking",
             "speaker_tracking_long_memory",
+            "speaker_tracking_single_active",
             "single_dominant_no_separator",
         ],
         default="single_dominant_no_separator",

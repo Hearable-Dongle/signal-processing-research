@@ -7,6 +7,7 @@ METHOD_LOCALIZATION_ONLY = "localization_only"
 METHOD_SPATIAL_BASELINE = "spatial_baseline"
 METHOD_SPEAKER_TRACKING = "speaker_tracking"
 METHOD_SPEAKER_TRACKING_LONG_MEMORY = "speaker_tracking_long_memory"
+METHOD_SPEAKER_TRACKING_SINGLE_ACTIVE = "speaker_tracking_single_active"
 METHOD_SINGLE_DOMINANT_NO_SEPARATOR = "single_dominant_no_separator"
 
 
@@ -65,6 +66,14 @@ def get_simulation_algorithm_preset(algorithm_mode: str) -> SimulationAlgorithmP
             direction_long_memory_enabled=True,
             direction_long_memory_window_ms=60000.0,
         )
+    if mode == METHOD_SPEAKER_TRACKING_SINGLE_ACTIVE:
+        return SimulationAlgorithmPreset(
+            algorithm_mode=mode,
+            control_mode="speaker_tracking_mode",
+            fast_path_reference_mode="speaker_map",
+            direction_long_memory_enabled=False,
+            direction_long_memory_window_ms=2000.0,
+        )
     if mode == METHOD_SINGLE_DOMINANT_NO_SEPARATOR:
         return SimulationAlgorithmPreset(
             algorithm_mode=mode,
@@ -111,6 +120,14 @@ def get_live_algorithm_preset(algorithm_mode: str) -> LiveAlgorithmPreset:
             match_angle_threshold_deg=18.0,
             stale_track_ms=4000.0,
             inactive_hold_ms=3200.0,
+        )
+    if mode == METHOD_SPEAKER_TRACKING_SINGLE_ACTIVE:
+        return LiveAlgorithmPreset(
+            algorithm_mode=mode,
+            max_sources=3,
+            match_angle_threshold_deg=20.0,
+            stale_track_ms=2600.0,
+            inactive_hold_ms=2000.0,
         )
     if mode == METHOD_SINGLE_DOMINANT_NO_SEPARATOR:
         return LiveAlgorithmPreset(

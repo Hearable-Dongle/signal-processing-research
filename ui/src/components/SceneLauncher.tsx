@@ -49,6 +49,7 @@ const ALGORITHM_OPTIONS: Array<{ value: AlgorithmMode; label: string }> = [
   { value: "spatial_baseline", label: "Spatial baseline" },
   { value: "speaker_tracking", label: "Speaker tracking" },
   { value: "speaker_tracking_long_memory", label: "Speaker tracking + long memory" },
+  { value: "speaker_tracking_single_active", label: "Speaker tracking, single active" },
   { value: "single_dominant_no_separator", label: "Single dominant no-separator" },
 ];
 
