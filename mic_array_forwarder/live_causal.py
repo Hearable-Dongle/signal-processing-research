@@ -123,6 +123,23 @@ class LiveCausalProcessor:
             tracking_mode=str(req.tracking_mode),
             max_tracks=max(1, min(int(self.algorithm.max_sources), 3)),
             single_source_motion_filter_enabled=True,
+            localization_vad_enabled=bool(req.localization_vad_enabled),
+            localization_vad_rms_floor=float(req.localization_vad_rms_floor),
+            localization_vad_speech_ratio_threshold=float(req.localization_vad_speech_ratio_threshold),
+            localization_vad_rms_ratio_threshold=float(req.localization_vad_rms_ratio_threshold),
+            localization_vad_flux_threshold=float(req.localization_vad_flux_threshold),
+            localization_snr_gating_enabled=bool(req.localization_snr_gating_enabled),
+            localization_snr_threshold_db=float(req.localization_snr_threshold_db),
+            localization_snr_soft_range_db=float(req.localization_snr_soft_range_db),
+            localization_snr_weight_exponent=float(req.localization_snr_weight_exponent),
+            localization_noise_floor_alpha_fast=float(req.localization_noise_floor_alpha_fast),
+            localization_noise_floor_alpha_slow=float(req.localization_noise_floor_alpha_slow),
+            localization_msc_variance_enabled=bool(req.localization_msc_variance_enabled),
+            localization_msc_history_frames=int(req.localization_msc_history_frames),
+            localization_msc_variance_floor=float(req.localization_msc_variance_floor),
+            localization_msc_weight_exponent=float(req.localization_msc_weight_exponent),
+            localization_hsda_enabled=bool(req.localization_hsda_enabled),
+            localization_hsda_window_frames=int(req.localization_hsda_window_frames),
         )
 
     def process_frame(self, frame_mc: np.ndarray, timestamp_ms: float) -> tuple[np.ndarray, np.ndarray, list[SpeakerStateItem], dict[str, Any]]:
