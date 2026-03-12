@@ -13,6 +13,7 @@ class SessionStartRequest(BaseModel):
         "spatial_baseline",
         "speaker_tracking",
         "speaker_tracking_long_memory",
+        "speaker_tracking_single_active",
         "single_dominant_no_separator",
     ] = "single_dominant_no_separator"
     scene_config_path: str = ""
@@ -29,6 +30,12 @@ class SessionStartRequest(BaseModel):
     use_ground_truth_speaker_sources: bool = False
     localization_hop_ms: int = 10
     localization_window_ms: int = 160
+    overlap: float = 0.2
+    freq_low_hz: int = 200
+    freq_high_hz: int = 3000
+    speaker_history_size: int = 8
+    speaker_activation_min_predictions: int = 3
+    speaker_match_window_deg: float = 30.0
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4

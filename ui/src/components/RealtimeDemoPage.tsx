@@ -9,7 +9,6 @@ import { SpeakerControlPopover } from "./SpeakerControlPopover";
 import { SpeakerStage } from "./SpeakerStage";
 import { WaveformTimeline } from "./WaveformTimeline";
 import {
-  type BeamformingState,
   SCHEMA_VERSION,
   type AlgorithmMode,
   type GroundTruthSpeaker,
@@ -130,7 +129,6 @@ export function RealtimeDemoPage({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [groundTruth, setGroundTruth] = useState<GroundTruthSpeaker[]>([]);
-  const [beamforming, setBeamforming] = useState<BeamformingState | null>(null);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<number | null>(null);
   const [gainBySpeaker, setGainBySpeaker] = useState<Record<number, number>>({});
   const [metrics, setMetrics] = useState<MetricsMessage | null>(null);
@@ -201,7 +199,6 @@ export function RealtimeDemoPage({
     setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setSelectedSpeakerId(null);
     setGroundTruth([]);
-    setBeamforming(null);
     setPlayheadMs(0);
     setRawWaveformBins([]);
     rawMixedTotalSamplesRef.current = 0;
@@ -215,7 +212,6 @@ export function RealtimeDemoPage({
           if (msg.type === "speaker_state") {
             setSpeakers(msg.speakers);
             setGroundTruth(msg.ground_truth ?? []);
-            setBeamforming(msg.beamforming ?? null);
           }
           if (msg.type === "metrics") {
             setMetrics(msg);
@@ -254,6 +250,12 @@ export function RealtimeDemoPage({
       algorithmMode: nextAlgorithmMode,
       localizationHopMs,
       localizationWindowMs,
+      localizationOverlap,
+      localizationFreqLowHz,
+      localizationFreqHighHz,
+      speakerHistorySize,
+      speakerActivationMinPredictions,
+      speakerMatchWindowDeg,
       scenePath,
       backgroundNoisePath,
       backgroundNoiseGain,
@@ -285,6 +287,12 @@ export function RealtimeDemoPage({
           algorithm_mode: nextAlgorithmMode,
           localization_hop_ms: localizationHopMs,
           localization_window_ms: localizationWindowMs,
+          overlap: localizationOverlap,
+          freq_low_hz: localizationFreqLowHz,
+          freq_high_hz: localizationFreqHighHz,
+          speaker_history_size: speakerHistorySize,
+          speaker_activation_min_predictions: speakerActivationMinPredictions,
+          speaker_match_window_deg: speakerMatchWindowDeg,
           input_source: inputSource,
           scene_config_path: scenePath,
           processing_mode: "specific_speaker_enhancement",
@@ -426,7 +434,7 @@ export function RealtimeDemoPage({
       return;
     }
     stopOutputPlayback();
-    let blob: Blob;
+    let blob: Blob | null = null;
     if (source === "beamformed_output") {
       if (sessionId) {
         blob = await fetchSessionWav(`/api/session/${sessionId}/processed-wav`);
@@ -490,6 +498,7 @@ export function RealtimeDemoPage({
           defaultScenePath={defaultScenePath}
           defaultBackgroundNoisePath={defaultBackgroundNoisePath}
           defaultBackgroundNoiseGain={defaultBackgroundNoiseGain}
+          defaultAlgorithmMode={defaultAlgorithmMode}
           onStart={startSession}
           onStop={stopSession}
           onKillRun={killCurrentRun}
@@ -504,7 +513,6 @@ export function RealtimeDemoPage({
         />
         <SpeakerStage
           speakers={speakers}
-          beamforming={beamforming}
           groundTruth={groundTruth}
           processingMode="specific_speaker_enhancement"
           selectedSpeakerId={selectedSpeakerId}

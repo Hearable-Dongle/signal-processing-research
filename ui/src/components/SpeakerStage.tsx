@@ -1,15 +1,22 @@
-import { BeamformerViz } from "./BeamformerViz";
 import { speakerColor } from "../utils/color";
-import type { BeamformingState, GroundTruthSpeaker, ProcessingMode, Speaker } from "../types/contracts";
+import type { GroundTruthSpeaker, ProcessingMode, Speaker } from "../types/contracts";
 
 type Props = {
   speakers: Speaker[];
-  beamforming: BeamformingState | null;
   groundTruth: GroundTruthSpeaker[];
   processingMode: ProcessingMode;
   selectedSpeakerId: number | null;
   onSpeakerTap: (speakerId: number) => void;
 };
+
+const MIC_MARKERS = [
+  { id: "mic-1", label: "1", x: 50, y: 31 },
+  { id: "mic-2", label: "2", x: 69, y: 50 },
+  { id: "mic-3", label: "3", x: 50, y: 69 },
+  { id: "mic-4", label: "4", x: 31, y: 50 },
+];
+
+const CABLE_MARKER = { id: "cable", label: "cable", x: 59.5, y: 40.5 };
 
 function polarToXY(directionDeg: number): { x: number; y: number } {
   const radians = (directionDeg * Math.PI) / 180;
@@ -19,7 +26,31 @@ function polarToXY(directionDeg: number): { x: number; y: number } {
   return { x, y };
 }
 
-export function SpeakerStage({ speakers, beamforming, groundTruth, processingMode, selectedSpeakerId, onSpeakerTap }: Props) {
+function MicArrayMarkers({ prefix }: { prefix: string }) {
+  return (
+    <>
+      {MIC_MARKERS.map((marker) => (
+        <div
+          key={`${prefix}-${marker.id}`}
+          className="mic-array-marker"
+          data-testid={`${prefix}-${marker.id}`}
+          style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+        >
+          {marker.label}
+        </div>
+      ))}
+      <div
+        className="mic-array-cable"
+        data-testid={`${prefix}-${CABLE_MARKER.id}`}
+        style={{ left: `${CABLE_MARKER.x}%`, top: `${CABLE_MARKER.y}%` }}
+      >
+        {CABLE_MARKER.label}
+      </div>
+    </>
+  );
+}
+
+export function SpeakerStage({ speakers, groundTruth, processingMode, selectedSpeakerId, onSpeakerTap }: Props) {
   const activeSpeakers = speakers.filter((speaker) => speaker.active);
   const showTrackedRoom = processingMode !== "beamform_from_ground_truth";
   const showGroundTruthBlock = true;
@@ -31,6 +62,7 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
         <>
           <div className="room" data-testid="speaker-stage">
             <div className="mic-center" />
+            <MicArrayMarkers prefix="tracked" />
             {(processingMode === "localize_and_beamform" ? activeSpeakers : speakers).map((speaker) => {
               const { x, y } = polarToXY(speaker.direction_degrees);
               const selected = selectedSpeakerId === speaker.speaker_id;
@@ -38,7 +70,7 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
                 return (
                   <button
                     key={speaker.speaker_id}
-                    className={`speaker-dot ${selected ? "selected" : ""} ${speaker.active ? "" : "inactive"}`}
+                    className={`speaker-dot ${selected ? "selected" : ""} ${speaker.active ? "active" : "inactive"}`}
                     data-testid={`speaker-${speaker.speaker_id}`}
                     aria-label={`speaker-${speaker.speaker_id}`}
                     onClick={() => onSpeakerTap(speaker.speaker_id)}
@@ -53,7 +85,7 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
               return (
                 <div
                   key={speaker.speaker_id}
-                  className="speaker-dot speaker-dot-passive"
+                  className={`speaker-dot speaker-dot-passive ${speaker.active ? "active" : "inactive"}`}
                   data-testid={`active-speaker-${speaker.speaker_id}`}
                   style={{ left: `${x}%`, top: `${y}%`, backgroundColor: speakerColor(speaker.speaker_id) }}
                   title={`${speaker.direction_degrees.toFixed(1)}° / weight ${speaker.gain_weight.toFixed(2)}`}
@@ -61,12 +93,6 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
               );
             })}
           </div>
-          <BeamformerViz
-            speakers={speakers}
-            beamforming={beamforming}
-            processingMode={processingMode}
-            selectedSpeakerId={processingMode === "specific_speaker_enhancement" ? selectedSpeakerId : null}
-          />
         </>
       )}
       {showGroundTruthBlock && (
@@ -78,6 +104,7 @@ export function SpeakerStage({ speakers, beamforming, groundTruth, processingMod
             <div className="ground-truth-viz-wrap">
               <div className="ground-truth-room" data-testid="ground-truth-stage">
                 <div className="mic-center" />
+                <MicArrayMarkers prefix="ground-truth" />
                 {groundTruth.map((gt) => {
                   const { x, y } = polarToXY(gt.direction_degrees);
                   return (

@@ -9,6 +9,12 @@ export type SessionLaunchConfig = {
   algorithmMode: AlgorithmMode;
   localizationHopMs: number;
   localizationWindowMs: number;
+  localizationOverlap: number;
+  localizationFreqLowHz: number;
+  localizationFreqHighHz: number;
+  speakerHistorySize: number;
+  speakerActivationMinPredictions: number;
+  speakerMatchWindowDeg: number;
   scenePath: string;
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
@@ -25,6 +31,7 @@ type Props = {
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
   defaultBackgroundNoiseGain: number;
+  defaultAlgorithmMode: AlgorithmMode;
   onStart: (config: SessionLaunchConfig) => void;
   onStop: () => void;
   onKillRun: () => void;
@@ -46,11 +53,19 @@ const ALGORITHM_OPTIONS: Array<{ value: AlgorithmMode; label: string }> = [
   { value: "single_dominant_no_separator", label: "Single dominant no-separator" },
 ];
 
+function displayAlgorithmMode(mode: AlgorithmMode): Exclude<AlgorithmMode, "speaker_tracking_single_active"> {
+  if (mode === "speaker_tracking_single_active") {
+    return "speaker_tracking";
+  }
+  return mode;
+}
+
 export function SceneLauncher({
   status,
   defaultScenePath,
   defaultBackgroundNoisePath,
   defaultBackgroundNoiseGain,
+  defaultAlgorithmMode,
   onStart,
   onStop,
   onKillRun,
@@ -64,9 +79,15 @@ export function SceneLauncher({
   onMonitorSourceChange,
 }: Props) {
   const [inputSource, setInputSource] = useState<InputSource | null>(null);
-  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>("single_dominant_no_separator");
-  const [localizationHopMs, setLocalizationHopMs] = useState(10);
-  const [localizationWindowMs, setLocalizationWindowMs] = useState(160);
+  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>(defaultAlgorithmMode);
+  const [localizationHopMs, setLocalizationHopMs] = useState(95);
+  const [localizationWindowMs, setLocalizationWindowMs] = useState(300);
+  const [localizationOverlap, setLocalizationOverlap] = useState(0.2);
+  const [localizationFreqLowHz, setLocalizationFreqLowHz] = useState(1200);
+  const [localizationFreqHighHz, setLocalizationFreqHighHz] = useState(5400);
+  const [speakerHistorySize, setSpeakerHistorySize] = useState(8);
+  const [speakerActivationMinPredictions, setSpeakerActivationMinPredictions] = useState(3);
+  const [speakerMatchWindowDeg, setSpeakerMatchWindowDeg] = useState(30);
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
@@ -79,6 +100,8 @@ export function SceneLauncher({
   const showSimulationSettings = inputSource === "simulation";
   const showLiveSettings = inputSource === "respeaker_live";
   const canStart = inputSource !== null && !isBusy;
+  const singleActiveEnabled = algorithmMode === "speaker_tracking_single_active";
+  const baseAlgorithmMode = displayAlgorithmMode(algorithmMode);
   const supportsGroundTruthSpeakerSources =
     algorithmMode !== "localization_only" && algorithmMode !== "single_dominant_no_separator";
 
@@ -128,9 +151,16 @@ export function SceneLauncher({
           <select
             id="algorithm-mode"
             aria-label="Algorithm mode"
-            value={algorithmMode}
+            value={baseAlgorithmMode}
             disabled={isBusy}
-            onChange={(e) => setAlgorithmMode(e.target.value as AlgorithmMode)}
+            onChange={(e) => {
+              const nextMode = e.target.value as Exclude<AlgorithmMode, "speaker_tracking_single_active">;
+              if (nextMode === "speaker_tracking" && singleActiveEnabled) {
+                setAlgorithmMode("speaker_tracking_single_active");
+                return;
+              }
+              setAlgorithmMode(nextMode);
+            }}
           >
             {ALGORITHM_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -138,6 +168,25 @@ export function SceneLauncher({
               </option>
             ))}
           </select>
+
+          <div className="switch-row">
+            <span>Single active speaker</span>
+            <button
+              id="single-active-speaker"
+              aria-label="Single active speaker"
+              aria-checked={singleActiveEnabled}
+              className={`switch ${singleActiveEnabled ? "on" : "off"}`.trim()}
+              disabled={isBusy}
+              role="switch"
+              type="button"
+              onClick={() => setAlgorithmMode(singleActiveEnabled ? "speaker_tracking" : "speaker_tracking_single_active")}
+            >
+              <span className="switch-thumb" />
+            </button>
+          </div>
+          {!singleActiveEnabled && baseAlgorithmMode !== "speaker_tracking" && (
+            <p className="launcher-hint">Turning this on switches the algorithm to Speaker tracking.</p>
+          )}
 
           <label htmlFor="localization-hop-ms">Localization hop (ms)</label>
           <input
@@ -170,6 +219,101 @@ export function SceneLauncher({
               const nextWindow = Math.min(2000, Number(e.target.value) || 160);
               setLocalizationWindowMs(Math.max(Math.max(20, localizationHopMs), nextWindow));
             }}
+          />
+
+          <label htmlFor="localization-overlap">Localization overlap</label>
+          <input
+            id="localization-overlap"
+            aria-label="Localization overlap"
+            type="number"
+            min={0}
+            max={0.99}
+            step={0.01}
+            value={localizationOverlap}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextOverlap = Number(e.target.value);
+              setLocalizationOverlap(Math.max(0, Math.min(0.99, Number.isFinite(nextOverlap) ? nextOverlap : 0)));
+            }}
+          />
+
+          <label htmlFor="localization-freq-low-hz">Localization freq low (Hz)</label>
+          <input
+            id="localization-freq-low-hz"
+            aria-label="Localization freq low (Hz)"
+            type="number"
+            min={0}
+            max={24000}
+            step={50}
+            value={localizationFreqLowHz}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextLow = Math.max(0, Math.min(24000, Number(e.target.value) || 0));
+              setLocalizationFreqLowHz(nextLow);
+              setLocalizationFreqHighHz((prev) => Math.max(prev, nextLow));
+            }}
+          />
+
+          <label htmlFor="localization-freq-high-hz">Localization freq high (Hz)</label>
+          <input
+            id="localization-freq-high-hz"
+            aria-label="Localization freq high (Hz)"
+            type="number"
+            min={0}
+            max={24000}
+            step={50}
+            value={localizationFreqHighHz}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextHigh = Math.max(0, Math.min(24000, Number(e.target.value) || 0));
+              setLocalizationFreqHighHz(Math.max(nextHigh, localizationFreqLowHz));
+            }}
+          />
+
+          <label htmlFor="speaker-history-size">Speaker centroid history (M)</label>
+          <input
+            id="speaker-history-size"
+            aria-label="Speaker centroid history (M)"
+            type="number"
+            min={1}
+            max={64}
+            step={1}
+            value={speakerHistorySize}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextHistory = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+              setSpeakerHistorySize(nextHistory);
+              setSpeakerActivationMinPredictions((prev) => Math.min(prev, nextHistory));
+            }}
+          />
+
+          <label htmlFor="speaker-activation-min-predictions">Speaker activation observations (N)</label>
+          <input
+            id="speaker-activation-min-predictions"
+            aria-label="Speaker activation observations (N)"
+            type="number"
+            min={1}
+            max={64}
+            step={1}
+            value={speakerActivationMinPredictions}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextCount = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+              setSpeakerActivationMinPredictions(Math.min(nextCount, speakerHistorySize));
+            }}
+          />
+
+          <label htmlFor="speaker-match-window-deg">Speaker match window (deg)</label>
+          <input
+            id="speaker-match-window-deg"
+            aria-label="Speaker match window (deg)"
+            type="number"
+            min={1}
+            max={180}
+            step={1}
+            value={speakerMatchWindowDeg}
+            disabled={isBusy}
+            onChange={(e) => setSpeakerMatchWindowDeg(Math.max(1, Math.min(180, Number(e.target.value) || 1)))}
           />
 
           {showSimulationSettings && (
@@ -300,6 +444,12 @@ export function SceneLauncher({
                   algorithmMode,
                   localizationHopMs,
                   localizationWindowMs,
+                  localizationOverlap,
+                  localizationFreqLowHz,
+                  localizationFreqHighHz,
+                  speakerHistorySize,
+                  speakerActivationMinPredictions,
+                  speakerMatchWindowDeg,
                   scenePath,
                   backgroundNoisePath,
                   backgroundNoiseGain,

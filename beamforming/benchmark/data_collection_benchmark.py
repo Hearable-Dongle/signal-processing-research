@@ -33,7 +33,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
         f"for example: `python3 -m pip install -r beamforming/requirements.txt`."
     ) from exc
 
-from realtime_pipeline.recording_runner import run_recording_pipeline
+from mic_array_forwarder.models import SessionStartRequest
+from mic_array_forwarder.live_causal import run_offline_live_causal
 from simulation.mic_array_profiles import mic_positions_xyz
 
 try:
@@ -255,21 +256,32 @@ def _load_ground_truth_tracks(recording_dir: Path) -> list[dict]:
 def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_truth_tracks: list[dict] | None = None) -> None:
     trace = list(summary.get("speaker_map_trace", []))
     ground_truth_tracks = ground_truth_tracks or []
-    if not trace and not ground_truth_tracks:
-        return
     frame_step_s = float(summary.get("fast_frame_ms", 10.0)) / 1000.0
+    duration_s = float(summary.get("duration_s", 0.0))
+    if duration_s <= 0.0 and trace:
+        duration_s = max(0.0, float(trace[-1].get("frame_index", 0)) * frame_step_s)
     fig, ax = plt.subplots(figsize=(14, 4))
-    xs: list[float] = []
-    ys: list[float] = []
-    ss: list[float] = []
-    cs: list[float] = []
+    raw_xs: list[float] = []
+    raw_ys: list[float] = []
+    raw_cs: list[float] = []
+    centroid_tracks: dict[int, dict[str, list[float]]] = {}
     for row in trace:
         x = float(row.get("frame_index", 0)) * frame_step_s
+        for angle_deg, score in zip(row.get("raw_peaks_deg", []), row.get("raw_peak_scores", [])):
+            raw_xs.append(x)
+            raw_ys.append(float(angle_deg))
+            raw_cs.append(float(max(0.0, score)))
         for speaker in row.get("speakers", []):
-            xs.append(x)
-            ys.append(float(speaker.get("direction_degrees", 0.0)))
-            ss.append(20.0 + 80.0 * float(max(0.0, speaker.get("gain_weight", 0.0))))
-            cs.append(float(max(0.0, speaker.get("confidence", 0.0))))
+            if not bool(speaker.get("active", False)):
+                continue
+            speaker_id = int(speaker.get("speaker_id", 0))
+            track = centroid_tracks.setdefault(
+                speaker_id,
+                {"xs": [], "ys": [], "conf": []},
+            )
+            track["xs"].append(x)
+            track["ys"].append(float(speaker.get("direction_degrees", 0.0)))
+            track["conf"].append(float(max(0.0, speaker.get("confidence", 0.0))))
     gt_handles = []
     gt_labels = []
     gt_colors = ["#c1121f", "#003049", "#669bbc", "#fb8500", "#2a9d8f", "#6a4c93"]
@@ -287,28 +299,62 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
         gt_handles.append(line)
         gt_labels.append(f"GT speaker {int(item['speaker_id'])}: {float(item['angle_deg']):.1f} deg")
 
-    if not xs and not gt_handles:
-        plt.close(fig)
-        return
-    scatter = None
-    if xs:
-        scatter = ax.scatter(xs, ys, s=ss, c=cs, cmap="viridis", alpha=0.65, edgecolors="none", zorder=2)
+    raw_scatter = None
+    if raw_xs:
+        raw_scatter = ax.scatter(
+            raw_xs,
+            raw_ys,
+            s=12,
+            c=raw_cs,
+            cmap="viridis",
+            alpha=0.2,
+            edgecolors="none",
+            zorder=1,
+        )
+
+    centroid_handles = []
+    centroid_labels = []
+    centroid_palette = plt.get_cmap("tab10", max(1, len(centroid_tracks)))
+    for color_idx, speaker_id in enumerate(sorted(centroid_tracks)):
+        track = centroid_tracks[speaker_id]
+        color = centroid_palette(color_idx)
+        ax.plot(track["xs"], track["ys"], color=color, linewidth=2.0, alpha=0.9, zorder=3)
+        ax.scatter(track["xs"], track["ys"], s=28, color=[color], alpha=0.95, edgecolors="white", linewidths=0.3, zorder=4)
+        centroid_handles.append(ax.plot([], [], color=color, linewidth=2.0)[0])
+        centroid_labels.append(f"Active speaker centroid {speaker_id}")
     ax.set_title(title)
     ax.set_xlabel("time (s)")
     ax.set_ylabel("direction (deg)")
     ax.set_ylim(-5.0, 365.0)
+    ax.set_xlim(0.0, max(duration_s, 1.0))
     ax.grid(True, alpha=0.2)
-    if scatter is not None:
-        fig.colorbar(scatter, ax=ax, label="confidence")
-    if gt_handles:
-        pred_handle = None
-        if scatter is not None:
-            pred_handle = ax.scatter([], [], s=40, c="#6c757d", alpha=0.8, label="Predicted speakers")
-        legend_handles = list(gt_handles)
-        legend_labels = list(gt_labels)
-        if pred_handle is not None:
-            legend_handles.append(pred_handle)
-            legend_labels.append("Predicted speakers")
+    if not raw_xs and not centroid_tracks:
+        note = "No speaker predictions were found in the trace."
+        if trace:
+            note = "No speaker was found in these frames."
+        ax.text(
+            0.5,
+            0.5,
+            note,
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#6c757d",
+            bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#ced4da", "alpha": 0.9},
+            zorder=5,
+        )
+    if raw_scatter is not None:
+        fig.colorbar(raw_scatter, ax=ax, label="raw detection confidence")
+    legend_handles = list(gt_handles)
+    legend_labels = list(gt_labels)
+    if raw_scatter is not None:
+        legend_handles.append(ax.scatter([], [], s=18, c="#6c757d", alpha=0.25))
+        legend_labels.append("Raw detections")
+    if centroid_handles:
+        legend_handles.extend(centroid_handles)
+        legend_labels.extend(centroid_labels)
+    if legend_handles:
         ax.legend(legend_handles, legend_labels, loc="upper right")
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -383,10 +429,17 @@ def _run_recording_method_job(
     recording_dir: Path,
     method: str,
     out_dir: Path,
+    mic_array_profile: str,
     mic_geometry_xyz: np.ndarray,
-    separation_mode: str,
-    fast_frame_ms: int,
+    algorithm_mode: str,
     localization_window_ms: int,
+    localization_hop_ms: int,
+    localization_overlap: float,
+    localization_freq_low_hz: int,
+    localization_freq_high_hz: int,
+    speaker_history_size: int,
+    speaker_activation_min_predictions: int,
+    speaker_match_window_deg: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -406,29 +459,36 @@ def _run_recording_method_job(
 
     method_slug = _slug(method)
     run_dir = out_dir / "runs" / _slug(recording_id) / method_slug
-    summary = run_recording_pipeline(
+    req = SessionStartRequest(
+        algorithm_mode=str(algorithm_mode),
+        input_source="respeaker_live",
+        channel_count=int(mic_audio.shape[1]),
+        sample_rate_hz=int(sample_rate_hz),
+        monitor_source="processed",
+        mic_array_profile=str(mic_array_profile),
+        localization_hop_ms=int(localization_hop_ms),
+        localization_window_ms=int(localization_window_ms),
+        overlap=float(localization_overlap),
+        freq_low_hz=int(localization_freq_low_hz),
+        freq_high_hz=int(localization_freq_high_hz),
+        speaker_history_size=int(speaker_history_size),
+        speaker_activation_min_predictions=int(speaker_activation_min_predictions),
+        speaker_match_window_deg=float(speaker_match_window_deg),
+        focus_ratio=2.0,
+        localization_backend=str(localization_backend),
+        tracking_mode=str(tracking_mode),
+        beamforming_mode=str(method),
+        output_normalization_enabled=bool(output_normalization_enabled),
+        output_allow_amplification=bool(output_allow_amplification),
+        processing_mode="specific_speaker_enhancement",
+    )
+    summary = run_offline_live_causal(
+        req=req,
         mic_audio=mic_audio,
-        sample_rate_hz=sample_rate_hz,
         mic_geometry_xyz=mic_geometry_xyz,
         out_dir=run_dir,
         input_recording_path=recording_dir,
-        separation_mode=str(separation_mode),
-        fast_frame_ms=int(fast_frame_ms),
-        slow_chunk_ms=int(slow_chunk_ms),
-        slow_chunk_hop_ms=int(slow_chunk_hop_ms),
-        beamforming_mode=str(method),
-        fast_path_reference_mode=str(fast_path_reference_mode),
-        output_normalization_enabled=bool(output_normalization_enabled),
-        output_allow_amplification=bool(output_allow_amplification),
         capture_trace=True,
-        localization_backend=str(localization_backend),
-        localization_window_ms=int(localization_window_ms),
-        tracking_mode=str(tracking_mode),
-        control_mode=str(control_mode),
-        direction_long_memory_enabled=bool(direction_long_memory_enabled),
-        identity_backend=str(identity_backend),
-        identity_speaker_embedding_model=str(identity_speaker_embedding_model),
-        max_speakers_hint=int(max_speakers_hint),
     )
     proc, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
     proc = np.asarray(proc, dtype=np.float32).reshape(-1)
@@ -443,7 +503,7 @@ def _run_recording_method_job(
         "duration_s": float(n / max(fs, 1)),
         "channel_count": int(mic_audio.shape[1]),
         "raw_channel_filenames": ",".join(channel_filenames),
-        "separation_mode": str(separation_mode),
+        "separation_mode": "live_causal",
         "fast_rtf": float(summary["fast_rtf"]),
         "slow_rtf": float(summary["slow_rtf"]),
         "fast_avg_ms": float(summary["fast_avg_ms"]),
@@ -463,7 +523,7 @@ def _run_recording_method_job(
         **trace_metrics,
     }
 
-    label = f"{recording_id} | {method} | {separation_mode}"
+    label = f"{recording_id} | {method} | live_causal"
     viz_dir = run_dir / "visualizations"
     _plot_waveform_compare(raw_mix[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
     _plot_spectrogram_compare(raw_mix[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
@@ -480,15 +540,46 @@ def _build_parser() -> argparse.ArgumentParser:
         "--separation-mode",
         choices=["single_dominant_no_separator", "mock", "auto"],
         default="single_dominant_no_separator",
-        help="Realtime path backend to use before beamforming",
+        help="Deprecated for this benchmark. Offline runs now use the same causal path as live sessions.",
+    )
+    parser.add_argument(
+        "--algorithm-mode",
+        choices=[
+            "localization_only",
+            "spatial_baseline",
+            "speaker_tracking",
+            "speaker_tracking_long_memory",
+            "speaker_tracking_single_active",
+            "single_dominant_no_separator",
+        ],
+        default="single_dominant_no_separator",
     )
     parser.add_argument("--mic-array-profile", choices=["respeaker_v3_0457", "respeaker_cross_0640", "respeaker_xvf3800_0650"], default="respeaker_v3_0457")
-    parser.add_argument("--fast-frame-ms", type=int, default=50)
+    parser.add_argument("--fast-frame-ms", type=int, default=None, help="Fast-path frame cadence in ms. Defaults to localization hop when omitted.")
     parser.add_argument("--localization-window-ms", type=int, default=200)
+    parser.add_argument("--localization-hop-ms", type=int, default=50)
+    parser.add_argument("--localization-overlap", type=float, default=0.2)
+    parser.add_argument("--localization-freq-low-hz", type=int, default=200)
+    parser.add_argument("--localization-freq-high-hz", type=int, default=3000)
+    parser.add_argument(
+        "--speaker-centroid-history-size",
+        "--speaker-history-size",
+        dest="speaker_history_size",
+        type=int,
+        default=8,
+    )
+    parser.add_argument(
+        "--speaker-activation-observations",
+        "--speaker-activation-min-predictions",
+        dest="speaker_activation_min_predictions",
+        type=int,
+        default=3,
+    )
+    parser.add_argument("--speaker-match-window-deg", type=float, default=30.0)
     parser.add_argument("--slow-chunk-ms", type=int, default=2000)
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
-    parser.add_argument("--localization-backend", choices=["tiny_dp_ipd", "weighted_srp_dp", "srp_phat_legacy", "music_1src", "gcc_tdoa_1src", "snr_weighted_srp_phat", "peak_confidence_srp_phat", "particle_filter_tracker", "neural_mask_gcc_phat", "ipd_regressor"], default="weighted_srp_dp")
+    parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "music_1src"], default="srp_phat_localization")
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
     parser.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     parser.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")
@@ -506,11 +597,10 @@ def main() -> None:
     input_path = Path(args.input_path).resolve()
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-
     extracted_root, temp_dir = _extract_if_needed(input_path)
     try:
         resolved_root, recordings = _discover_recordings(extracted_root.resolve())
-        mic_geometry_xyz = mic_positions_xyz(str(args.mic_array_profile)).T
+        mic_geometry_xyz = mic_positions_xyz(str(args.mic_array_profile))
 
         print(
             json.dumps(
@@ -548,10 +638,17 @@ def main() -> None:
                 recording_dir=recording_dir,
                 method=method,
                 out_dir=out_dir,
+                mic_array_profile=str(args.mic_array_profile),
                 mic_geometry_xyz=mic_geometry_xyz,
-                separation_mode=str(args.separation_mode),
-                fast_frame_ms=int(args.fast_frame_ms),
+                algorithm_mode=str(args.algorithm_mode),
                 localization_window_ms=int(args.localization_window_ms),
+                localization_hop_ms=int(args.localization_hop_ms),
+                localization_overlap=float(args.localization_overlap),
+                localization_freq_low_hz=int(args.localization_freq_low_hz),
+                localization_freq_high_hz=int(args.localization_freq_high_hz),
+                speaker_history_size=int(args.speaker_history_size),
+                speaker_activation_min_predictions=int(args.speaker_activation_min_predictions),
+                speaker_match_window_deg=float(args.speaker_match_window_deg),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -609,9 +706,18 @@ def main() -> None:
             "resolved_input_root": str(resolved_root),
             "recordings": [recording_id for recording_id, _recording_dir in recordings],
             "methods": list(args.methods),
-            "separation_mode": str(args.separation_mode),
-            "fast_frame_ms": int(args.fast_frame_ms),
+            "separation_mode": "live_causal",
+            "algorithm_mode": str(args.algorithm_mode),
+            "fast_frame_ms": int(args.localization_hop_ms),
             "localization_window_ms": int(args.localization_window_ms),
+            "localization_hop_ms": int(args.localization_hop_ms),
+            "localization_overlap": float(args.localization_overlap),
+            "localization_freq_low_hz": int(args.localization_freq_low_hz),
+            "localization_freq_high_hz": int(args.localization_freq_high_hz),
+            "speaker_history_size": int(args.speaker_history_size),
+            "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
+            "speaker_match_window_deg": float(args.speaker_match_window_deg),
+            "localization_backend": str(args.localization_backend),
             "slow_chunk_ms": int(args.slow_chunk_ms),
             "slow_chunk_hop_ms": int(args.slow_chunk_hop_ms),
             "mic_array_profile": str(args.mic_array_profile),
