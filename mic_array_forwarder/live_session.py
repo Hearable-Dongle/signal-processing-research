@@ -284,6 +284,19 @@ class LiveDemoSession:
             self._raw_multichannel_parts.append(frame_mc.copy())
             self._raw_mix_parts.append(frame_mono.copy())
 
+    def _capture_raw_audio_frame(self, frame_mc: np.ndarray) -> None:
+        frame_arr = np.asarray(frame_mc, dtype=np.float32)
+        if frame_arr.ndim != 2:
+            return
+        if self._channel_map is not None:
+            if frame_arr.shape[1] <= max(self._channel_map):
+                return
+            frame_arr = frame_arr[:, self._channel_map]
+        raw_mono = np.mean(frame_arr, axis=1).astype(np.float32, copy=False)
+        with self._lock:
+            self._raw_frame_q.append(raw_mono.copy())
+        self._append_raw_audio(frame_arr, raw_mono)
+
     def _on_audio_chunk(self, frame_mono: np.ndarray) -> None:
         with self._lock:
             source = str(self._monitor_source)
@@ -356,6 +369,8 @@ class LiveDemoSession:
             observations = list(self._observations)
             monitor_source = str(self._monitor_source)
         catchup = compute_catchup_metrics(observations, stable_frames=3)
+        with self._lock:
+            actual_sample_rate_hz = int(self._raw_mix_sample_rate_hz)
         msg = MetricsMessage(
             timestamp_ms=_now_ms(),
             fast_rtf=float(stats.fast_rtf),
@@ -381,7 +396,7 @@ class LiveDemoSession:
         msg["device_name"] = self._last_device_name
         msg["input_source"] = self.req.input_source
         msg["channel_count"] = int(self.req.channel_count)
-        msg["sample_rate_hz"] = int(self.req.sample_rate_hz)
+        msg["sample_rate_hz"] = actual_sample_rate_hz
         msg["monitor_source"] = monitor_source
         msg["mic_array_profile"] = str(self.req.mic_array_profile)
         msg["channel_map"] = list(self._channel_map) if self._channel_map is not None else None
@@ -427,10 +442,6 @@ class LiveDemoSession:
                 continue
             if self._channel_map is not None:
                 frame_mc = frame_mc[:, self._channel_map]
-            raw_mono = np.mean(frame_mc, axis=1).astype(np.float32, copy=False)
-            with self._lock:
-                self._raw_frame_q.append(raw_mono.copy())
-            self._append_raw_audio(frame_mc, raw_mono)
             yield frame_mc.astype(np.float32, copy=False)
 
     def _run(self) -> None:
@@ -459,6 +470,7 @@ class LiveDemoSession:
 
             def callback(indata: np.ndarray, _frames: int, _time_info: Any, status: Any) -> None:
                 frame = np.asarray(indata, dtype=np.float32)
+                self._capture_raw_audio_frame(frame)
                 try:
                     audio_q.put_nowait(frame.copy())
                 except queue.Full:
@@ -478,8 +490,9 @@ class LiveDemoSession:
                 blocksize=frame_samples,
                 dtype="float32",
                 callback=callback,
-            ):
+            ) as stream:
                 with self._lock:
+                    self._raw_mix_sample_rate_hz = int(round(float(getattr(stream, "samplerate", sample_rate_hz))))
                     self._status = "running"
                 self._publish_event("started", detail=f"live capture on {self._last_device_name}")
 
