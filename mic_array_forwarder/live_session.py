@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -19,14 +20,15 @@ from mic_array_forwarder.models import (
     SpeakerStateItem,
     SpeakerStateMessage,
 )
-from mic_array_forwarder.live_causal import LiveCausalProcessor
+from realtime_pipeline.catchup_metrics import compute_catchup_metrics
+from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
+from realtime_pipeline.session_runtime import (
+    build_pipeline_config_from_request,
+    build_separation_backend_for_request,
+    public_speaker_rows,
+)
 from mic_array_forwarder.session import _wav_bytes_from_mono_float32
 from mic_array_forwarder.ws_codec import encode_audio_chunk
-from mic_array_forwarder.mode_presets import (
-    METHOD_LOCALIZATION_ONLY,
-    METHOD_SINGLE_DOMINANT_NO_SEPARATOR,
-    get_live_algorithm_preset,
-)
 from simulation.mic_array_profiles import mic_positions_xyz
 
 def _mic_geometry_from_profile(profile: str) -> np.ndarray:
@@ -36,21 +38,8 @@ def _mic_geometry_from_profile(profile: str) -> np.ndarray:
 def _now_ms() -> float:
     return time.time() * 1000.0
 
-
-def _normalize_angle_deg(v: float) -> float:
-    return float(v % 360.0)
-
-
-def _angle_error_deg(a: float, b: float) -> float:
-    return float(abs((float(a) - float(b) + 180.0) % 360.0 - 180.0))
-
-
 def _ratio_to_db(ratio: float) -> float:
     return float(20.0 * math.log10(max(float(ratio), 1e-6)))
-
-
-def _clip01(v: float) -> float:
-    return float(np.clip(float(v), 0.0, 1.0))
 
 
 def _find_input_device(sd: Any, query: str | None, min_channels: int) -> int | None:
@@ -102,14 +91,15 @@ class LiveDemoSession:
         self._raw_multichannel_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._processed_audio_parts: deque[np.ndarray] = deque(maxlen=4500)
         self._raw_mix_sample_rate_hz = int(req.sample_rate_hz)
-        self._processing_ms_total = 0.0
-        self._processed_frames = 0
-        self._last_tracker_debug: dict[str, Any] = {}
+        self._pipeline: RealtimeSpeakerPipeline | None = None
+        self._raw_frame_q: deque[np.ndarray] = deque(maxlen=256)
+        self._observations: list[dict[str, Any]] = []
+        self._obs_idx = 0
         self._last_device_name = ""
         self._monitor_source = str(req.monitor_source)
         self._mic_geometry_xyz = _mic_geometry_from_profile(str(req.mic_array_profile))
         self._channel_map = self._normalize_channel_map(req.channel_map, int(req.channel_count))
-        self._processor = LiveCausalProcessor(req=req, mic_geometry_xyz=self._mic_geometry_xyz)
+        self._audio_q: queue.Queue[np.ndarray | None] | None = None
 
     @staticmethod
     def _normalize_channel_map(raw: list[int] | None, channel_count: int) -> list[int] | None:
@@ -135,6 +125,14 @@ class LiveDemoSession:
 
     def stop(self) -> None:
         self._stop.set()
+        pipe = self._pipeline
+        if pipe is not None:
+            pipe.stop()
+        if self._audio_q is not None:
+            try:
+                self._audio_q.put_nowait(None)
+            except queue.Full:
+                pass
 
     def join(self, timeout: float | None = None) -> None:
         self._thread.join(timeout=timeout)
@@ -214,7 +212,7 @@ class LiveDemoSession:
             sid = int(speaker_id)
             self._selected_speaker_id = sid
             self._speaker_gain_delta_db.setdefault(sid, 0.0)
-        self._processor.set_selected_speaker(sid)
+        self._apply_focus_control()
 
     def adjust_speaker_gain(self, speaker_id: int, delta_db_step: int) -> float:
         if self.req.processing_mode != "specific_speaker_enhancement":
@@ -225,13 +223,13 @@ class LiveDemoSession:
             prev = float(self._speaker_gain_delta_db.get(sid, 0.0))
             curr = float(np.clip(prev + step, -12.0, 12.0))
             self._speaker_gain_delta_db[sid] = curr
-        self._processor.adjust_speaker_gain(sid, step)
+        self._apply_focus_control()
         return curr
 
     def clear_focus(self) -> None:
         with self._lock:
             self._selected_speaker_id = None
-        self._processor.set_selected_speaker(None)
+        self._apply_focus_control()
 
     def set_monitor_source(self, source: str) -> None:
         with self._lock:
@@ -261,52 +259,154 @@ class LiveDemoSession:
             self._raw_multichannel_parts.append(frame_mc.copy())
             self._raw_mix_parts.append(frame_mono.copy())
 
-    def _publish_audio_chunk(self, processed: np.ndarray, raw_mixed: np.ndarray) -> None:
+    def _on_audio_chunk(self, frame_mono: np.ndarray) -> None:
         with self._lock:
             source = str(self._monitor_source)
-            self._processed_audio_parts.append(np.asarray(processed, dtype=np.float32, copy=True))
-        if source == "raw_mixed":
-            frame = raw_mixed
-        else:
-            frame = processed
+            raw_frame = self._raw_frame_q.popleft() if self._raw_frame_q else None
+            self._processed_audio_parts.append(np.asarray(frame_mono, dtype=np.float32, copy=True))
+        frame = raw_frame if source == "raw_mixed" and raw_frame is not None else frame_mono
         payload = encode_audio_chunk(self._next_audio_timestamp_ms(), frame)
         with self._lock:
             self._audio_seq += 1
             self._audio_chunks.append((self._audio_seq, payload))
 
-    def _set_speaker_state(self, timestamp_ms: float, items: list[SpeakerStateItem]) -> None:
-        msg = SpeakerStateMessage(timestamp_ms=float(timestamp_ms), speakers=items, ground_truth=[]).model_dump()
+    def _nearest_speaker_id(self, speakers: list[SpeakerStateItem]) -> int | None:
+        if not speakers:
+            return None
+        with self._lock:
+            selected = self._selected_speaker_id
+        if selected is not None:
+            for item in speakers:
+                if int(item.speaker_id) == int(selected):
+                    return int(selected)
+        best = max(speakers, key=lambda s: (float(s.gain_weight), float(s.confidence)))
+        return int(best.speaker_id)
+
+    def _best_speaker_direction_deg(self, speakers: list[SpeakerStateItem]) -> float | None:
+        if not speakers:
+            return None
+        best = max(speakers, key=lambda s: (float(s.gain_weight), float(s.confidence)))
+        return float(best.direction_degrees) % 360.0
+
+    def _publish_speaker_state(self) -> None:
+        pipe = self._pipeline
+        if pipe is None:
+            return
+        rows = public_speaker_rows(pipe.shared_state.get_speaker_map_snapshot(), algorithm_mode=str(self.req.algorithm_mode))
+        speakers = [
+            SpeakerStateItem(
+                speaker_id=int(row["speaker_id"]),
+                direction_degrees=float(row["direction_degrees"]),
+                confidence=float(row["confidence"]),
+                active=bool(row["active"]),
+                activity_confidence=float(row["activity_confidence"]),
+                gain_weight=float(row["gain_weight"]),
+            )
+            for row in rows
+        ]
+        msg = SpeakerStateMessage(timestamp_ms=_now_ms(), speakers=speakers, ground_truth=[]).model_dump()
+        if self.req.processing_mode == "localize_and_beamform":
+            self._apply_focus_control(speakers=speakers)
+        nearest = self._nearest_speaker_id(speakers)
         with self._lock:
             self._speaker_state = msg
             self._speaker_state_version += 1
+            self._observations.append(
+                {
+                    "frame_idx": int(self._obs_idx),
+                    "timestamp_ms": float(msg["timestamp_ms"]),
+                    "mode": str(self.req.processing_mode),
+                    "locked_speaker_id": "" if self._selected_speaker_id is None else int(self._selected_speaker_id),
+                    "nearest_speaker_id": "" if nearest is None else int(nearest),
+                }
+            )
+            self._obs_idx += 1
 
     def _publish_metrics(self, queue_size: int) -> None:
-        fast_avg_ms = self._processing_ms_total / self._processed_frames if self._processed_frames else 0.0
+        pipe = self._pipeline
+        if pipe is None:
+            return
+        stats = pipe.stats_snapshot()
+        with self._lock:
+            observations = list(self._observations)
+            monitor_source = str(self._monitor_source)
+        catchup = compute_catchup_metrics(observations, stable_frames=3)
         msg = MetricsMessage(
             timestamp_ms=_now_ms(),
-            fast_rtf=float(fast_avg_ms / 10.0),
-            slow_rtf=0.0,
+            fast_rtf=float(stats.fast_rtf),
+            slow_rtf=float(stats.slow_rtf),
             fast_stage_avg_ms={
+                "srp": float(stats.fast_srp_avg_ms),
+                "beamform": float(stats.fast_beamform_avg_ms),
+                "safety": float(stats.fast_safety_avg_ms),
+                "sink": float(stats.fast_sink_avg_ms),
+                "enqueue": float(stats.fast_enqueue_avg_ms),
                 "capture_queue": float(queue_size),
-                "frame_process": float(fast_avg_ms),
             },
-            slow_stage_avg_ms={},
-            startup_lock_ms=0.0,
-            reacquire_catchup_ms_median=0.0,
-            nearest_change_catchup_ms_median=0.0,
+            slow_stage_avg_ms={
+                "separation": float(stats.slow_separation_avg_ms),
+                "identity": float(stats.slow_identity_avg_ms),
+                "direction_assignment": float(stats.slow_direction_avg_ms),
+                "publish": float(stats.slow_publish_avg_ms),
+            },
+            startup_lock_ms=float(catchup["startup_lock_ms"]),
+            reacquire_catchup_ms_median=float(catchup["reacquire_catchup_ms_median"]),
+            nearest_change_catchup_ms_median=float(catchup["nearest_change_catchup_ms_median"]),
         ).model_dump()
         msg["device_name"] = self._last_device_name
         msg["input_source"] = self.req.input_source
         msg["channel_count"] = int(self.req.channel_count)
         msg["sample_rate_hz"] = int(self.req.sample_rate_hz)
-        with self._lock:
-            msg["monitor_source"] = str(self._monitor_source)
-            msg["mic_array_profile"] = str(self.req.mic_array_profile)
-            msg["channel_map"] = list(self._channel_map) if self._channel_map is not None else None
-        msg["tracker_debug"] = dict(self._last_tracker_debug)
+        msg["monitor_source"] = monitor_source
+        msg["mic_array_profile"] = str(self.req.mic_array_profile)
+        msg["channel_map"] = list(self._channel_map) if self._channel_map is not None else None
         with self._lock:
             self._metrics_state = msg
             self._metrics_version += 1
+
+    def _apply_focus_control(self, speakers: list[SpeakerStateItem] | None = None) -> None:
+        pipe = self._pipeline
+        if pipe is None:
+            return
+        if self.req.processing_mode == "localize_and_beamform":
+            direction = self._best_speaker_direction_deg(speakers or [])
+            pipe.set_focus_control(focused_speaker_ids=None, focused_direction_deg=direction, user_boost_db=0.0)
+            return
+        with self._lock:
+            selected = self._selected_speaker_id
+            boost = 0.0 if selected is None else _ratio_to_db(self.req.focus_ratio) + float(self._speaker_gain_delta_db.get(selected, 0.0))
+        if selected is None:
+            pipe.set_focus_control(focused_speaker_ids=None, focused_direction_deg=None, user_boost_db=0.0)
+        else:
+            pipe.set_focus_control(focused_speaker_ids=[int(selected)], focused_direction_deg=None, user_boost_db=max(0.0, float(boost)))
+
+    def _is_pipeline_alive(self) -> bool:
+        pipe = self._pipeline
+        if pipe is None:
+            return False
+        fast_alive = bool(getattr(pipe, "_fast", None) and pipe._fast.is_alive())
+        slow_alive = bool(getattr(pipe, "_slow", None) and pipe._slow.is_alive())
+        return bool(fast_alive or slow_alive)
+
+    def _frame_iter(self, audio_q: queue.Queue[np.ndarray | None], channel_count: int) -> Iterator[np.ndarray]:
+        while True:
+            if self._stop.is_set() and audio_q.empty():
+                return
+            try:
+                frame_mc = audio_q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if frame_mc is None:
+                return
+            if frame_mc.ndim != 2 or frame_mc.shape[1] != channel_count:
+                continue
+            if self._channel_map is not None:
+                frame_mc = frame_mc[:, self._channel_map]
+            raw_mono = np.mean(frame_mc, axis=1).astype(np.float32, copy=False)
+            with self._lock:
+                self._raw_frame_q.append(raw_mono.copy())
+            self._append_raw_audio(frame_mc, raw_mono)
+            yield frame_mc.astype(np.float32, copy=False)
 
     def _run(self) -> None:
         try:
@@ -315,7 +415,8 @@ class LiveDemoSession:
             except ImportError as exc:  # pragma: no cover - environment-dependent path
                 raise RuntimeError("sounddevice is required for respeaker_live sessions") from exc
 
-            audio_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
+            audio_q: queue.Queue[np.ndarray | None] = queue.Queue(maxsize=64)
+            self._audio_q = audio_q
             sample_rate_hz = int(self.req.sample_rate_hz)
             channel_count = int(self.req.channel_count)
             frame_samples = max(1, int(sample_rate_hz * max(10, int(self.req.localization_hop_ms)) / 1000))
@@ -331,8 +432,6 @@ class LiveDemoSession:
             self._last_device_name = str(device_info.get("name", f"device-{device_idx}"))
 
             def callback(indata: np.ndarray, _frames: int, _time_info: Any, status: Any) -> None:
-                if status:
-                    self._last_tracker_debug["stream_status"] = str(status)
                 frame = np.asarray(indata, dtype=np.float32)
                 try:
                     audio_q.put_nowait(frame.copy())
@@ -358,33 +457,50 @@ class LiveDemoSession:
                     self._status = "running"
                 self._publish_event("started", detail=f"live capture on {self._last_device_name}")
 
+                cfg = build_pipeline_config_from_request(
+                    self.req,
+                    sample_rate_hz=sample_rate_hz,
+                    max_speakers_hint=max(int(self.req.max_speakers_hint), channel_count, 1),
+                )
+                mic_geometry_xyz = np.asarray(self._mic_geometry_xyz, dtype=float)
+                mic_geometry_xy = mic_geometry_xyz[:, :2] if mic_geometry_xyz.shape[1] >= 2 else mic_geometry_xyz.T[:2, :].T
+                self._pipeline = RealtimeSpeakerPipeline(
+                    config=cfg,
+                    mic_geometry_xyz=mic_geometry_xyz,
+                    mic_geometry_xy=np.asarray(mic_geometry_xy, dtype=float),
+                    frame_iterator=self._frame_iter(audio_q, channel_count),
+                    frame_sink=self._on_audio_chunk,
+                    separation_backend=build_separation_backend_for_request(self.req, cfg),
+                )
+                self._apply_focus_control()
+                self._pipeline.start()
+
                 next_metrics_push = time.perf_counter() + 1.0
-                while not self._stop.is_set():
-                    try:
-                        frame_mc = audio_q.get(timeout=0.2)
-                    except queue.Empty:
-                        continue
-
-                    t0 = time.perf_counter()
-                    if frame_mc.ndim != 2 or frame_mc.shape[1] != channel_count:
-                        continue
-                    if self._channel_map is not None:
-                        frame_mc = frame_mc[:, self._channel_map]
-                    raw_mono = np.mean(frame_mc, axis=1).astype(np.float32, copy=False)
-                    self._append_raw_audio(frame_mc, raw_mono)
-                    frame_timestamp_ms = float(self._audio_frame_idx * max(10, int(self.req.localization_hop_ms)))
-                    output, _raw_mono_unused, items, tracker_debug = self._processor.process_frame(frame_mc, frame_timestamp_ms)
-                    self._last_tracker_debug = dict(tracker_debug)
-                    self._set_speaker_state(frame_timestamp_ms, items)
-                    self._publish_audio_chunk(output, raw_mono)
-                    self._processing_ms_total += (time.perf_counter() - t0) * 1000.0
-                    self._processed_frames += 1
-
+                next_speaker_push = time.perf_counter()
+                speaker_period_s = max(float(cfg.slow_chunk_ms) / 1000.0, 0.05)
+                while True:
+                    if self._stop.is_set():
+                        pipe = self._pipeline
+                        if pipe is not None:
+                            pipe.stop()
+                        try:
+                            audio_q.put_nowait(None)
+                        except queue.Full:
+                            pass
                     now = time.perf_counter()
+                    if now >= next_speaker_push:
+                        self._publish_speaker_state()
+                        next_speaker_push = now + speaker_period_s
                     if now >= next_metrics_push:
                         self._publish_metrics(audio_q.qsize())
                         next_metrics_push = now + 1.0
+                    if not self._is_pipeline_alive():
+                        break
+                    time.sleep(0.02)
 
+                if self._pipeline is not None:
+                    self._pipeline.join(timeout=2.0)
+                self._publish_speaker_state()
                 self._publish_metrics(audio_q.qsize())
                 with self._lock:
                     self._status = "stopped"
@@ -393,6 +509,8 @@ class LiveDemoSession:
             with self._lock:
                 self._status = "error"
             self._publish_event("error", detail=str(exc))
+        finally:
+            self._audio_q = None
 
     def _write_summary(self) -> None:
         return

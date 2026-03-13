@@ -69,14 +69,16 @@ class RealtimeSpeakerPipeline:
             stop_event=self._stop,
             srp_override_provider=srp_override_provider,
         )
-        self._slow = SlowPathWorker(
-            config=config,
-            shared_state=self._state,
-            slow_queue=self._slow_q,
-            separation_backend=self._sep,
-            mic_geometry_xy=mic_geometry_xy,
-            stop_event=self._stop,
-        )
+        self._slow = None
+        if bool(config.slow_path_enabled):
+            self._slow = SlowPathWorker(
+                config=config,
+                shared_state=self._state,
+                slow_queue=self._slow_q,
+                separation_backend=self._sep,
+                mic_geometry_xy=mic_geometry_xy,
+                stop_event=self._stop,
+            )
 
     def _next_frame(self) -> np.ndarray | None:
         try:
@@ -90,7 +92,8 @@ class RealtimeSpeakerPipeline:
 
     def start(self) -> None:
         self._fast.start()
-        self._slow.start()
+        if self._slow is not None:
+            self._slow.start()
 
     def set_focus_control(
         self,
@@ -117,7 +120,8 @@ class RealtimeSpeakerPipeline:
 
     def join(self, timeout: float | None = None) -> None:
         self._fast.join(timeout=timeout)
-        self._slow.join(timeout=timeout)
+        if self._slow is not None:
+            self._slow.join(timeout=timeout)
 
     def run_blocking(self) -> None:
         self.start()
