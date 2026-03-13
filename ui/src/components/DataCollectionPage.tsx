@@ -28,6 +28,10 @@ type DirectionSample = {
   atMs: number;
 };
 
+type RawChannelPlayersProps = {
+  artifacts: RecordingArtifactManifest;
+};
+
 function apiUrl(path: string): string {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
@@ -65,6 +69,44 @@ function downloadBlob(filename: string, blob: Blob): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function RawChannelPlayers({ artifacts }: RawChannelPlayersProps) {
+  const channelEntries = useMemo(
+    () =>
+      artifacts.channels.map((channel) => ({
+        channelIndex: channel.channelIndex,
+        label: `raw ch${channel.channelIndex} · mic ${channel.channelIndex + 1}`,
+        url: (() => {
+          const audioBytes = new Uint8Array(channel.bytes.byteLength);
+          audioBytes.set(channel.bytes);
+          return URL.createObjectURL(new Blob([audioBytes], { type: "audio/wav" }));
+        })(),
+      })),
+    [artifacts]
+  );
+
+  useEffect(
+    () => () => {
+      for (const entry of channelEntries) {
+        URL.revokeObjectURL(entry.url);
+      }
+    },
+    [channelEntries]
+  );
+
+  return (
+    <div className="recording-list">
+      {channelEntries.map((entry) => (
+        <article key={`player-${entry.channelIndex}`} className="recording-card">
+          <h3>{entry.label}</h3>
+          <audio controls preload="none" src={entry.url}>
+            <track kind="captions" />
+          </audio>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 async function fetchRawArtifacts(sessionId: string, speakers: AnnotatedSpeaker[]): Promise<RecordingArtifactManifest> {
@@ -264,7 +306,7 @@ export function DataCollectionPage() {
           input_source: "respeaker_live",
           separation_mode: "mock",
           processing_mode: "specific_speaker_enhancement",
-          monitor_source: "processed",
+          monitor_source: "raw_mixed",
           sample_rate_hz: DEFAULT_SAMPLE_RATE_HZ,
           audio_device_query: deviceName,
           mic_array_profile: micArrayProfile,
@@ -575,6 +617,7 @@ export function DataCollectionPage() {
                   Raw channels: {recording.artifacts?.channels.length ?? 0}
                   {recording.artifacts ? ` @ ${recording.artifacts.sampleRateHz} Hz` : ""}
                 </p>
+                {recording.artifacts ? <RawChannelPlayers artifacts={recording.artifacts} /> : null}
                 <label htmlFor={`recording-notes-${recording.recordingId}`}>Recording notes</label>
                 <textarea
                   id={`recording-notes-${recording.recordingId}`}
