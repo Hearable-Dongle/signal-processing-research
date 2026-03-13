@@ -1,19 +1,22 @@
 ## Summary
 
-Add a live directionality preview to the data collection UI and align the XVF3800 frontend DOA display to the cable reference.
+Add scene annotation to Data Collection exports, use recording metadata as benchmark ground truth when present, and align the XVF3800 frontend/backend DOA convention.
 
 ## What Changed
 
-- added a frontend-only directionality visualization to the data collection page that follows live `speaker_state` updates during capture
-- updated the XVF3800 stage display so mic markers reflect the current physical labeling and channel mapping
-- rotated the frontend DOA display so `0°` is shown at the cable between mics 1 and 2
-- moved mic labels closer to the stage edge and simplified them to `1` through `4`, with channel mapping on hover
+- extended the Data Collection UI so each recording can carry notes plus a speaker list with names and DOAs, captured before recording and editable afterward
+- exported those annotations into each recording's `metadata.json` and surfaced the same summary in `collection.json`
+- updated `beamforming.benchmark.data_collection_benchmark` to prefer manual `metadata.json` speakers as ground truth for timeline overlays and static DOA metrics
+- changed the XVF3800 simulated/backend geometry to the actual square corner layout and removed the frontend-only `-45°` display compensation
+- removed user-facing live `channel_map` overrides so the UI uses a single XVF3800 convention
 
 ## Why
 
-This makes live data collection easier to sanity-check by showing whether channel ordering and directional tracking look plausible without changing the backend capture flow.
+This makes real recordings usable for algorithm tuning with manual scene labels, and it removes the DOA mismatch caused by a backend XVF3800 geometry that did not match the frontend visualization.
 
 ## Validation
 
-- `npm test -- --run src/App.test.tsx src/components/SpeakerStage.test.tsx`
+- `python3 -m py_compile beamforming/benchmark/data_collection_benchmark.py`
+- `./beamforming/beamforming-sim-env/bin/python - <<'PY' ... mic_positions_xyz('respeaker_xvf3800_0650') ... PY`
+- `npm test -- --run src/App.test.tsx src/components/SceneLauncher.test.tsx src/components/SpeakerStage.test.tsx`
 - `npm run build`

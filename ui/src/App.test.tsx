@@ -151,7 +151,7 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.mic_array_profile).toBe("respeaker_xvf3800_0650");
   expect(body.audio_device_query).toBe("USB Mic");
   expect(body.sample_rate_hz).toBe(48000);
-  expect(body.channel_map).toEqual([0, 1, 2, 3]);
+  expect(body.channel_map).toBeUndefined();
   expect(body.algorithm_mode).toBe("speaker_tracking_single_active");
   expect(body.localization_hop_ms).toBe(95);
   expect(body.localization_window_ms).toBe(300);
@@ -260,8 +260,13 @@ test("data collection exports raw channels for a captured set", async () => {
   expect(screen.getByLabelText("Collection id")).toBeInTheDocument();
   expect(screen.getByLabelText("Title")).toBeInTheDocument();
   expect(screen.getByLabelText("Notes")).toBeInTheDocument();
-  expect(screen.getByLabelText("Device")).toHaveValue("ReSpeaker");
+  expect(screen.getByLabelText("Device")).toHaveValue("XVF3800");
   expect(screen.getByLabelText("Mic array profile")).toHaveValue("respeaker_xvf3800_0650");
+  await user.type(screen.getByLabelText("Recording notes"), "speaker near whiteboard");
+  await user.clear(screen.getByLabelText("Pending speaker 1 name"));
+  await user.type(screen.getByLabelText("Pending speaker 1 name"), "amber-otter");
+  await user.clear(screen.getByLabelText("Pending speaker 1 DOA"));
+  await user.type(screen.getByLabelText("Pending speaker 1 DOA"), "45");
   await user.click(screen.getByRole("button", { name: "Record" }));
   await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
 
@@ -294,8 +299,12 @@ test("data collection exports raw channels for a captured set", async () => {
   );
   const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
   expect(body.mic_array_profile).toBe("respeaker_xvf3800_0650");
+  expect(body.channel_map).toBeUndefined();
 
   expect(await screen.findByText(/Saved recording with 2 raw channels/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/Recording notes recording-/i)).toHaveValue("speaker near whiteboard");
+  expect(screen.getByLabelText(/Speaker 1 name for recording-/i)).toHaveValue("amber-otter");
+  expect(screen.getByLabelText(/Speaker 1 DOA for recording-/i)).toHaveValue(45);
   await user.click(screen.getByRole("button", { name: "Export Set" }));
 
   expect(createObjectUrl).toHaveBeenCalled();

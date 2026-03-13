@@ -24,7 +24,6 @@ export type SessionLaunchConfig = {
   audioDeviceQuery: string;
   monitorSource: MonitorSource;
   sampleRateHz: number;
-  channelMap: string;
   micArrayProfile: MicArrayProfile;
 };
 
@@ -97,7 +96,6 @@ export function SceneLauncher({
   const [useGroundTruthSpeakerSources, setUseGroundTruthSpeakerSources] = useState(false);
   const [audioDeviceQuery, setAudioDeviceQuery] = useState("ReSpeaker");
   const [sampleRateHz, setSampleRateHz] = useState(48000);
-  const [channelMap, setChannelMap] = useState("0,1,2,3");
   const [micArrayProfile, setMicArrayProfile] = useState<MicArrayProfile>("respeaker_xvf3800_0650");
   const isBusy = status === "running" || status === "starting";
   const showSimulationSettings = inputSource === "simulation";
@@ -396,14 +394,6 @@ export function SceneLauncher({
                 onChange={(e) => setAudioDeviceQuery(e.target.value)}
                 placeholder="ReSpeaker"
               />
-              <label htmlFor="channel-map">Channel map (optional)</label>
-              <input
-                id="channel-map"
-                aria-label="Channel map (optional)"
-                value={channelMap}
-                onChange={(e) => setChannelMap(e.target.value)}
-                placeholder="0,1,2,3"
-              />
               <label htmlFor="sample-rate-hz">Sample rate (Hz)</label>
               <input
                 id="sample-rate-hz"
@@ -472,7 +462,6 @@ export function SceneLauncher({
                   audioDeviceQuery,
                   monitorSource,
                   sampleRateHz,
-                  channelMap,
                   micArrayProfile,
                 })
               }

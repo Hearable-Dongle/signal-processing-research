@@ -18,10 +18,9 @@ const MIC_MARKERS = [
 ];
 
 const CABLE_MARKER = { id: "cable", label: "cable", x: 50, y: 22 };
-const XVF3800_DISPLAY_OFFSET_DEG = -45;
 
 function polarToXY(directionDeg: number): { x: number; y: number } {
-  const radians = ((directionDeg + XVF3800_DISPLAY_OFFSET_DEG) * Math.PI) / 180;
+  const radians = (directionDeg * Math.PI) / 180;
   const radius = 42;
   const x = 50 + radius * Math.sin(radians);
   const y = 50 - radius * Math.cos(radians);

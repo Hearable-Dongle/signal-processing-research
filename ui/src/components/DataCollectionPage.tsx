@@ -3,16 +3,24 @@ import { useEffect, useMemo, useState } from "react";
 import { DemoWsClient } from "../api/ws";
 import { DirectionalityViz } from "./DirectionalityViz";
 import { SpeakerStage } from "./SpeakerStage";
-import type { DataCollectionSet, RawChannelFile, RawChannelsResponse, RecordingArtifactManifest, RecordingEntry } from "../types/dataCollection";
+import type {
+  AnnotatedSpeaker,
+  DataCollectionSet,
+  RawChannelFile,
+  RawChannelsResponse,
+  RecordingArtifactManifest,
+  RecordingEntry,
+} from "../types/dataCollection";
 import type { ServerMessage, Speaker } from "../types/contracts";
 import { createZipBlob, textFile } from "../utils/zip";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 const DEFAULT_SAMPLE_RATE_HZ = 48000;
-const DEFAULT_CHANNEL_MAP = "0,1,2,3";
-const DEFAULT_DEVICE = "ReSpeaker";
+const DEFAULT_DEVICE = "XVF3800";
 const DEFAULT_MIC_ARRAY_PROFILE = "respeaker_xvf3800_0650";
 const EMPTY_SPEAKERS: Speaker[] = [];
+const ADJECTIVES = ["amber", "brisk", "calm", "daring", "ember", "fuzzy", "golden", "harbor"];
+const ANIMALS = ["otter", "lynx", "falcon", "badger", "fox", "heron", "panda", "wren"];
 
 type DirectionSample = {
   directionDeg: number;
@@ -30,6 +38,24 @@ function nowIso(): string {
 
 function makeId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function makeDefaultSpeakerName(index: number): string {
+  const adjective = ADJECTIVES[index % ADJECTIVES.length];
+  const animal = ANIMALS[Math.floor(index / ADJECTIVES.length) % ANIMALS.length];
+  return `${adjective}-${animal}`;
+}
+
+function makeAnnotatedSpeaker(index: number): AnnotatedSpeaker {
+  return {
+    speakerName: makeDefaultSpeakerName(index),
+    directionDeg: 0,
+  };
+}
+
+function normalizeDirectionDeg(value: number): number {
+  const wrapped = value % 360;
+  return wrapped < 0 ? wrapped + 360 : wrapped;
 }
 
 function downloadBlob(filename: string, blob: Blob): void {
@@ -92,6 +118,8 @@ export function DataCollectionPage() {
   const [statusMessage, setStatusMessage] = useState("");
   const [speakers, setSpeakers] = useState<Speaker[]>(EMPTY_SPEAKERS);
   const [directionTrail, setDirectionTrail] = useState<DirectionSample[]>([]);
+  const [pendingRecordingNotes, setPendingRecordingNotes] = useState("");
+  const [pendingRecordingSpeakers, setPendingRecordingSpeakers] = useState<AnnotatedSpeaker[]>([makeAnnotatedSpeaker(0)]);
 
   const ws = useMemo(
     () =>
@@ -128,6 +156,77 @@ export function DataCollectionPage() {
 
   useEffect(() => () => ws.close(), [ws]);
 
+  function addPendingSpeaker(): void {
+    setPendingRecordingSpeakers((prev) => [...prev, makeAnnotatedSpeaker(prev.length)]);
+  }
+
+  function updatePendingSpeaker(index: number, field: keyof AnnotatedSpeaker, value: string): void {
+    setPendingRecordingSpeakers((prev) =>
+      prev.map((speaker, speakerIdx) =>
+        speakerIdx !== index
+          ? speaker
+          : {
+              ...speaker,
+              [field]:
+                field === "directionDeg"
+                  ? normalizeDirectionDeg(Number.parseFloat(value || "0") || 0)
+                  : value,
+            }
+      )
+    );
+  }
+
+  function removePendingSpeaker(index: number): void {
+    setPendingRecordingSpeakers((prev) => prev.filter((_, speakerIdx) => speakerIdx !== index));
+  }
+
+  function updateRecordingNotes(recordingId: string, notes: string): void {
+    setRecordings((prev) => prev.map((recording) => (recording.recordingId === recordingId ? { ...recording, notes } : recording)));
+  }
+
+  function updateRecordingSpeaker(recordingId: string, index: number, field: keyof AnnotatedSpeaker, value: string): void {
+    setRecordings((prev) =>
+      prev.map((recording) =>
+        recording.recordingId !== recordingId
+          ? recording
+          : {
+              ...recording,
+              speakers: recording.speakers.map((speaker, speakerIdx) =>
+                speakerIdx !== index
+                  ? speaker
+                  : {
+                      ...speaker,
+                      [field]:
+                        field === "directionDeg"
+                          ? normalizeDirectionDeg(Number.parseFloat(value || "0") || 0)
+                          : value,
+                    }
+              ),
+            }
+      )
+    );
+  }
+
+  function addRecordingSpeaker(recordingId: string): void {
+    setRecordings((prev) =>
+      prev.map((recording) =>
+        recording.recordingId !== recordingId
+          ? recording
+          : { ...recording, speakers: [...recording.speakers, makeAnnotatedSpeaker(recording.speakers.length)] }
+      )
+    );
+  }
+
+  function removeRecordingSpeaker(recordingId: string, index: number): void {
+    setRecordings((prev) =>
+      prev.map((recording) =>
+        recording.recordingId !== recordingId
+          ? recording
+          : { ...recording, speakers: recording.speakers.filter((_, speakerIdx) => speakerIdx !== index) }
+      )
+    );
+  }
+
   const canStartRecording = !currentSessionId && sessionStatus !== "starting" && sessionStatus !== "stopping";
   const canStopRecording = Boolean(currentSessionId);
 
@@ -146,7 +245,6 @@ export function DataCollectionPage() {
           sample_rate_hz: DEFAULT_SAMPLE_RATE_HZ,
           audio_device_query: deviceName,
           mic_array_profile: micArrayProfile,
-          channel_map: DEFAULT_CHANNEL_MAP.split(",").map((value) => Number(value)),
         }),
       });
       if (!resp.ok) {
@@ -187,6 +285,12 @@ export function DataCollectionPage() {
           stoppedAtIso: nowIso(),
           status: "ready",
           deviceName,
+          micArrayProfile,
+          notes: pendingRecordingNotes.trim(),
+          speakers: pendingRecordingSpeakers.map((speaker, index) => ({
+            speakerName: speaker.speakerName.trim() || makeDefaultSpeakerName(index),
+            directionDeg: normalizeDirectionDeg(speaker.directionDeg),
+          })),
           artifacts,
         },
       ]);
@@ -202,6 +306,12 @@ export function DataCollectionPage() {
           stoppedAtIso: nowIso(),
           status: "failed",
           deviceName,
+          micArrayProfile,
+          notes: pendingRecordingNotes.trim(),
+          speakers: pendingRecordingSpeakers.map((speaker, index) => ({
+            speakerName: speaker.speakerName.trim() || makeDefaultSpeakerName(index),
+            directionDeg: normalizeDirectionDeg(speaker.directionDeg),
+          })),
           error: err instanceof Error ? err.message : "Artifact collection failed.",
         },
       ]);
@@ -226,6 +336,7 @@ export function DataCollectionPage() {
       notes: collectionNotes.trim(),
       createdAtIso,
       deviceName,
+      micArrayProfile,
       recordings,
     };
 
@@ -239,6 +350,7 @@ export function DataCollectionPage() {
             notes: dataset.notes,
             createdAtIso: dataset.createdAtIso,
             deviceName: dataset.deviceName,
+            micArrayProfile: dataset.micArrayProfile,
             recordings: dataset.recordings.map((recording) => ({
               recordingId: recording.recordingId,
               sessionId: recording.sessionId,
@@ -246,6 +358,12 @@ export function DataCollectionPage() {
               stoppedAtIso: recording.stoppedAtIso,
               status: recording.status,
               deviceName: recording.deviceName,
+              micArrayProfile: recording.micArrayProfile,
+              notes: recording.notes,
+              speakers: recording.speakers.map((speaker) => ({
+                speakerName: speaker.speakerName,
+                directionDeg: speaker.directionDeg,
+              })),
               error: recording.error ?? null,
               sampleRateHz: recording.artifacts?.sampleRateHz ?? null,
               channels:
@@ -271,6 +389,12 @@ export function DataCollectionPage() {
                 stoppedAtIso: recording.stoppedAtIso,
                 status: recording.status,
                 deviceName: recording.deviceName,
+                micArrayProfile: recording.micArrayProfile,
+                notes: recording.notes,
+                speakers: recording.speakers.map((speaker) => ({
+                  speakerName: speaker.speakerName,
+                  directionDeg: speaker.directionDeg,
+                })),
                 error: recording.error ?? null,
                 sampleRateHz: recording.artifacts?.sampleRateHz ?? null,
               },
@@ -315,8 +439,8 @@ export function DataCollectionPage() {
 
           <label htmlFor="device-name">Device</label>
           <select id="device-name" aria-label="Device" value={deviceName} onChange={(e) => setDeviceName(e.target.value)}>
-            <option value="ReSpeaker">ReSpeaker</option>
             <option value="XVF3800">XVF3800</option>
+            <option value="ReSpeaker">ReSpeaker</option>
           </select>
 
           <label htmlFor="mic-array-profile">Mic array profile</label>
@@ -351,6 +475,50 @@ export function DataCollectionPage() {
           {statusMessage ? <p className="status">{statusMessage}</p> : null}
         </section>
 
+        <section className="panel">
+          <h2>Next Recording Scene</h2>
+          <label htmlFor="recording-notes">Recording notes</label>
+          <textarea
+            id="recording-notes"
+            aria-label="Recording notes"
+            rows={4}
+            value={pendingRecordingNotes}
+            onChange={(e) => setPendingRecordingNotes(e.target.value)}
+          />
+          <div className="recording-list">
+            {pendingRecordingSpeakers.map((speaker, index) => (
+              <article key={`pending-speaker-${index}`} className="recording-card">
+                <h3>Speaker {index + 1}</h3>
+                <label htmlFor={`pending-speaker-name-${index}`}>Name</label>
+                <input
+                  id={`pending-speaker-name-${index}`}
+                  aria-label={`Pending speaker ${index + 1} name`}
+                  value={speaker.speakerName}
+                  onChange={(e) => updatePendingSpeaker(index, "speakerName", e.target.value)}
+                />
+                <label htmlFor={`pending-speaker-doa-${index}`}>DOA (deg)</label>
+                <input
+                  id={`pending-speaker-doa-${index}`}
+                  aria-label={`Pending speaker ${index + 1} DOA`}
+                  type="number"
+                  value={speaker.directionDeg}
+                  onChange={(e) => updatePendingSpeaker(index, "directionDeg", e.target.value)}
+                />
+                <div className="actions">
+                  <button type="button" onClick={() => removePendingSpeaker(index)} disabled={pendingRecordingSpeakers.length <= 1}>
+                    Remove Speaker
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="actions">
+            <button type="button" onClick={addPendingSpeaker}>
+              Add Speaker
+            </button>
+          </div>
+        </section>
+
         <div className="data-visual-stack">
           <SpeakerStage
             speakers={speakers}
@@ -375,10 +543,55 @@ export function DataCollectionPage() {
                 <h3>{recording.recordingId}</h3>
                 <p className="recording-meta">{recording.status} · {recording.deviceName}</p>
                 <p className="recording-meta">Session: {recording.sessionId}</p>
+                <p className="recording-meta">Mic profile: {recording.micArrayProfile}</p>
                 <p className="recording-meta">
                   Raw channels: {recording.artifacts?.channels.length ?? 0}
                   {recording.artifacts ? ` @ ${recording.artifacts.sampleRateHz} Hz` : ""}
                 </p>
+                <label htmlFor={`recording-notes-${recording.recordingId}`}>Recording notes</label>
+                <textarea
+                  id={`recording-notes-${recording.recordingId}`}
+                  aria-label={`Recording notes ${recording.recordingId}`}
+                  rows={3}
+                  value={recording.notes}
+                  onChange={(e) => updateRecordingNotes(recording.recordingId, e.target.value)}
+                />
+                <div className="recording-list">
+                  {recording.speakers.map((speaker, index) => (
+                    <article key={`${recording.recordingId}-speaker-${index}`} className="recording-card">
+                      <h3>Speaker {index + 1}</h3>
+                      <label htmlFor={`${recording.recordingId}-speaker-name-${index}`}>Name</label>
+                      <input
+                        id={`${recording.recordingId}-speaker-name-${index}`}
+                        aria-label={`Speaker ${index + 1} name for ${recording.recordingId}`}
+                        value={speaker.speakerName}
+                        onChange={(e) => updateRecordingSpeaker(recording.recordingId, index, "speakerName", e.target.value)}
+                      />
+                      <label htmlFor={`${recording.recordingId}-speaker-doa-${index}`}>DOA (deg)</label>
+                      <input
+                        id={`${recording.recordingId}-speaker-doa-${index}`}
+                        aria-label={`Speaker ${index + 1} DOA for ${recording.recordingId}`}
+                        type="number"
+                        value={speaker.directionDeg}
+                        onChange={(e) => updateRecordingSpeaker(recording.recordingId, index, "directionDeg", e.target.value)}
+                      />
+                      <div className="actions">
+                        <button
+                          type="button"
+                          onClick={() => removeRecordingSpeaker(recording.recordingId, index)}
+                          disabled={recording.speakers.length <= 1}
+                        >
+                          Remove Speaker
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                <div className="actions">
+                  <button type="button" onClick={() => addRecordingSpeaker(recording.recordingId)}>
+                    Add Speaker
+                  </button>
+                </div>
                 {recording.error ? <p className="status">{recording.error}</p> : null}
               </article>
             ))}
