@@ -151,7 +151,7 @@ test("live mode reveals only ReSpeaker-specific settings", async () => {
 
   expect(screen.getByLabelText("Audio device query")).toBeInTheDocument();
   expect(screen.getByLabelText("Mic array profile")).toBeInTheDocument();
-  expect(screen.getByLabelText("Channel map (optional)")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Channel map (optional)")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Sample rate (Hz)")).toBeInTheDocument();
   expect(screen.getByLabelText("Algorithm mode")).toBeInTheDocument();
   expect(screen.getByLabelText("Algorithm mode")).toHaveValue("localization_only");

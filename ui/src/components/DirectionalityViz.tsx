@@ -11,10 +11,8 @@ type Props = {
   trail: DirectionSample[];
 };
 
-const XVF3800_DISPLAY_OFFSET_DEG = -45;
-
 function polarToXY(directionDeg: number, radius: number): { x: number; y: number } {
-  const radians = ((directionDeg + XVF3800_DISPLAY_OFFSET_DEG) * Math.PI) / 180;
+  const radians = (directionDeg * Math.PI) / 180;
   return {
     x: 50 + radius * Math.sin(radians),
     y: 50 - radius * Math.cos(radians),

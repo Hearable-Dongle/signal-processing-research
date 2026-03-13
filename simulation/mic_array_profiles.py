@@ -25,10 +25,10 @@ def mic_positions_xyz(profile: str) -> np.ndarray:
         r = 0.065 / 2.0  # 65.0 mm across, square geometry.
         return np.array(
             [
-                [r, 0.0, 0.0],
-                [0.0, r, 0.0],
-                [-r, 0.0, 0.0],
-                [0.0, -r, 0.0],
+                [r, r, 0.0],
+                [-r, r, 0.0],
+                [-r, -r, 0.0],
+                [r, -r, 0.0],
             ],
             dtype=np.float64,
         )

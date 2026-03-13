@@ -212,7 +212,7 @@ def _plot_spectrogram_compare(raw: np.ndarray, proc: np.ndarray, fs: int, out_pa
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
     plt.close(fig)
-def _load_ground_truth_tracks(recording_dir: Path) -> list[dict]:
+def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float) -> list[dict]:
     metadata_path = recording_dir / "metadata.json"
     if not metadata_path.exists():
         return []
@@ -220,6 +220,25 @@ def _load_ground_truth_tracks(recording_dir: Path) -> list[dict]:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return []
+    manual_speakers = list(metadata.get("speakers", []))
+    if manual_speakers:
+        tracks: list[dict] = []
+        for idx, item in enumerate(manual_speakers):
+            try:
+                angle_deg = float(item.get("directionDeg", 0.0))
+            except (TypeError, ValueError):
+                continue
+            tracks.append(
+                {
+                    "speaker_id": int(idx + 1),
+                    "speaker_name": str(item.get("speakerName", f"speaker-{idx + 1}")),
+                    "start_sec": 0.0,
+                    "end_sec": float(max(duration_s, 0.0)),
+                    "angle_deg": angle_deg,
+                    "source": "manual_metadata",
+                }
+            )
+        return tracks
     scene_config_path = metadata.get("sceneConfigPath")
     if not scene_config_path:
         return []
@@ -245,12 +264,66 @@ def _load_ground_truth_tracks(recording_dir: Path) -> list[dict]:
         tracks.append(
             {
                 "speaker_id": int(item.get("speaker_id", len(tracks))),
+                "speaker_name": str(item.get("speaker_name", f"speaker-{len(tracks) + 1}")),
                 "start_sec": float(window[0]),
                 "end_sec": float(window[1]),
                 "angle_deg": float(item.get("angle_deg", 0.0)),
+                "source": "simulation",
             }
         )
     return tracks
+
+
+def _angular_error_deg(a_deg: float, b_deg: float) -> float:
+    return abs((float(a_deg) - float(b_deg) + 180.0) % 360.0 - 180.0)
+
+
+def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict]) -> dict[str, float | str]:
+    if not ground_truth_tracks:
+        return {
+            "ground_truth_source": "",
+            "ground_truth_speaker_count": 0,
+            "gt_final_mae_deg": float("nan"),
+            "gt_final_acc_10": float("nan"),
+            "gt_final_acc_20": float("nan"),
+            "gt_trace_active_mae_deg": float("nan"),
+            "gt_trace_active_acc_10": float("nan"),
+            "gt_trace_active_acc_20": float("nan"),
+        }
+
+    gt_angles = [float(item["angle_deg"]) for item in ground_truth_tracks]
+    gt_source = str(ground_truth_tracks[0].get("source", ""))
+    final_speakers = list(summary.get("speaker_map_final", []))
+    final_angles = [float(item.get("direction_degrees", 0.0)) for item in final_speakers]
+    if final_angles:
+        final_errors = [min(_angular_error_deg(gt_angle, pred_angle) for pred_angle in final_angles) for gt_angle in gt_angles]
+    else:
+        final_errors = []
+
+    trace_rows = list(summary.get("speaker_map_trace", []))
+    active_errors: list[float] = []
+    for row in trace_rows:
+        active_angles = [float(item.get("direction_degrees", 0.0)) for item in row.get("speakers", []) if bool(item.get("active", False))]
+        if not active_angles:
+            continue
+        for gt_angle in gt_angles:
+            active_errors.append(min(_angular_error_deg(gt_angle, pred_angle) for pred_angle in active_angles))
+
+    def _acc(errors: list[float], threshold: float) -> float:
+        if not errors:
+            return float("nan")
+        return float(np.mean(np.asarray(errors, dtype=np.float64) <= float(threshold)))
+
+    return {
+        "ground_truth_source": gt_source,
+        "ground_truth_speaker_count": int(len(gt_angles)),
+        "gt_final_mae_deg": float(np.mean(final_errors)) if final_errors else float("nan"),
+        "gt_final_acc_10": _acc(final_errors, 10.0),
+        "gt_final_acc_20": _acc(final_errors, 20.0),
+        "gt_trace_active_mae_deg": float(np.mean(active_errors)) if active_errors else float("nan"),
+        "gt_trace_active_acc_10": _acc(active_errors, 10.0),
+        "gt_trace_active_acc_20": _acc(active_errors, 20.0),
+    }
 
 
 def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_truth_tracks: list[dict] | None = None) -> None:
@@ -297,7 +370,8 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
             zorder=4,
         )
         gt_handles.append(line)
-        gt_labels.append(f"GT speaker {int(item['speaker_id'])}: {float(item['angle_deg']):.1f} deg")
+        gt_name = str(item.get("speaker_name", f"speaker {int(item['speaker_id'])}"))
+        gt_labels.append(f"GT {gt_name}: {float(item['angle_deg']):.1f} deg")
 
     raw_scatter = None
     if raw_xs:
@@ -497,12 +571,14 @@ def _run_recording_method_job(
     fs = int(proc_sr if proc_sr > 0 else sample_rate_hz)
     n = min(raw_mix.size, proc.size)
     trace_metrics = _trace_metrics(summary)
-    ground_truth_tracks = _load_ground_truth_tracks(recording_dir)
+    duration_s = float(n / max(fs, 1))
+    ground_truth_tracks = _load_ground_truth_tracks(recording_dir, duration_s=duration_s)
+    gt_metrics = _ground_truth_metrics(summary, ground_truth_tracks)
     row = {
         "recording": recording_id,
         "method": method,
         "sample_rate_hz": fs,
-        "duration_s": float(n / max(fs, 1)),
+        "duration_s": duration_s,
         "channel_count": int(mic_audio.shape[1]),
         "raw_channel_filenames": ",".join(channel_filenames),
         "separation_mode": str(summary.get("separation_mode", "realtime_pipeline")),
@@ -523,6 +599,7 @@ def _run_recording_method_job(
         "max_confidence_final": float(max((float(speaker.get("confidence", 0.0)) for speaker in summary.get("speaker_map_final", [])), default=0.0)),
         "mean_gain_weight_final": float(np.mean([float(speaker.get("gain_weight", 0.0)) for speaker in summary.get("speaker_map_final", [])])) if summary.get("speaker_map_final") else 0.0,
         **trace_metrics,
+        **gt_metrics,
     }
 
     label = f"{recording_id} | {method} | realtime_pipeline"

@@ -264,7 +264,6 @@ export function RealtimeDemoPage({
       audioDeviceQuery,
       monitorSource: nextMonitorSource,
       sampleRateHz,
-      channelMap,
       micArrayProfile,
     } = config;
     const playbackSampleRateHz = inputSource === "respeaker_live" ? sampleRateHz : DEFAULT_SAMPLE_RATE;
@@ -305,10 +304,6 @@ export function RealtimeDemoPage({
           use_ground_truth_location: inputSource === "simulation" ? useGroundTruthLocation : undefined,
           use_ground_truth_speaker_sources: inputSource === "simulation" ? useGroundTruthSpeakerSources : undefined,
           audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
-          channel_map:
-            inputSource === "respeaker_live" && channelMap.trim()
-              ? channelMap.split(",").map((v) => Number(v.trim())).filter((v) => Number.isFinite(v))
-              : undefined,
         }),
       });
     } catch {
