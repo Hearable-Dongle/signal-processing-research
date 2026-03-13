@@ -34,7 +34,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
     ) from exc
 
 from mic_array_forwarder.models import SessionStartRequest
-from mic_array_forwarder.live_causal import run_offline_live_causal
+from realtime_pipeline.session_runtime import run_offline_session_pipeline
 from simulation.mic_array_profiles import mic_positions_xyz
 
 try:
@@ -482,7 +482,7 @@ def _run_recording_method_job(
         output_allow_amplification=bool(output_allow_amplification),
         processing_mode="specific_speaker_enhancement",
     )
-    summary = run_offline_live_causal(
+    summary = run_offline_session_pipeline(
         req=req,
         mic_audio=mic_audio,
         mic_geometry_xyz=mic_geometry_xyz,
@@ -503,7 +503,7 @@ def _run_recording_method_job(
         "duration_s": float(n / max(fs, 1)),
         "channel_count": int(mic_audio.shape[1]),
         "raw_channel_filenames": ",".join(channel_filenames),
-        "separation_mode": "live_causal",
+        "separation_mode": str(summary.get("separation_mode", "realtime_pipeline")),
         "fast_rtf": float(summary["fast_rtf"]),
         "slow_rtf": float(summary["slow_rtf"]),
         "fast_avg_ms": float(summary["fast_avg_ms"]),
@@ -523,7 +523,7 @@ def _run_recording_method_job(
         **trace_metrics,
     }
 
-    label = f"{recording_id} | {method} | live_causal"
+    label = f"{recording_id} | {method} | realtime_pipeline"
     viz_dir = run_dir / "visualizations"
     _plot_waveform_compare(raw_mix[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
     _plot_spectrogram_compare(raw_mix[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
@@ -706,7 +706,7 @@ def main() -> None:
             "resolved_input_root": str(resolved_root),
             "recordings": [recording_id for recording_id, _recording_dir in recordings],
             "methods": list(args.methods),
-            "separation_mode": "live_causal",
+            "separation_mode": "realtime_pipeline",
             "algorithm_mode": str(args.algorithm_mode),
             "fast_frame_ms": int(args.localization_hop_ms),
             "localization_window_ms": int(args.localization_window_ms),
