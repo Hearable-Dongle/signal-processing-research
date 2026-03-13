@@ -197,6 +197,7 @@ test("simulation start sends algorithm mode plus ground-truth toggles", async ()
 
 test("data collection exports raw channels for a captured set", async () => {
   const user = userEvent.setup();
+  (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket;
   Object.defineProperty(URL, "createObjectURL", {
     value: URL.createObjectURL ?? vi.fn(),
     writable: true,
@@ -262,6 +263,30 @@ test("data collection exports raw channels for a captured set", async () => {
   expect(screen.getByLabelText("Device")).toHaveValue("ReSpeaker");
   expect(screen.getByLabelText("Mic array profile")).toHaveValue("respeaker_xvf3800_0650");
   await user.click(screen.getByRole("button", { name: "Record" }));
+  await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
+
+  MockWebSocket.instances[0]?.onmessage?.({
+    data: JSON.stringify({
+      schema_version: "v1",
+      type: "speaker_state",
+      timestamp_ms: 0,
+      speakers: [
+        {
+          speaker_id: 7,
+          direction_degrees: 0,
+          confidence: 0.8,
+          active: true,
+          activity_confidence: 0.7,
+          gain_weight: 1.0,
+        },
+      ],
+      ground_truth: [],
+    }),
+  });
+
+  expect(await screen.findByTestId("speaker-stage")).toBeInTheDocument();
+  expect(screen.getByTestId("directionality-viz")).toBeInTheDocument();
+  expect(screen.getByTestId("tracked-cable")).toHaveTextContent("cable");
   await user.click(await screen.findByRole("button", { name: "Stop" }));
 
   const startCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>

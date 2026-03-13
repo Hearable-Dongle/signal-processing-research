@@ -1,125 +1,19 @@
-Add framewise Optuna tuning for localization methods
-
 ## Summary
 
-This PR adds a new Optuna-based tuning system for framewise, realtime-style
-localization evaluation on `testing_specific_angles`.
-
-It does not use the older scene-level `localization.benchmark.run` path.
-Instead, it evaluates sliding-window predictions against the active speaker at
-each timestamp, which matches the current realtime localization use case.
+Add a live directionality preview to the data collection UI and align the XVF3800 frontend DOA display to the cable reference.
 
 ## What Changed
 
-- Added a reusable framewise tuning evaluator in
-  `localization/tuning/framewise_common.py`
-- Added a direct Optuna runner in
-  `localization/tuning/run_optuna_framewise_respeaker_v3.py`
-- Added a multi-method launcher in
-  `localization/tuning/launch_optuna_framewise_methods.py`
-- Added smoke coverage for the framewise Optuna runner
-- Updated `localization/README.md`
-- Added `localization/tuning/FRAMEWISE_TUNING.md`
+- added a frontend-only directionality visualization to the data collection page that follows live `speaker_state` updates during capture
+- updated the XVF3800 stage display so mic markers reflect the current physical labeling and channel mapping
+- rotated the frontend DOA display so `0°` is shown at the cable between mics 1 and 2
+- moved mic labels closer to the stage edge and simplified them to `1` through `4`, with channel mapping on hover
 
-## Tuned Methods
+## Why
 
-Initial method set:
-
-- `SRP-PHAT`
-- `GMDA`
-- `SSZ`
-
-Profile:
-
-- `respeaker_v3_0457`
-
-## Search Space
-
-Shared:
-
-- `window_ms`: `50..300`, step `50`
-- `hop_ms`: `30..100`, step `5`
-- `overlap`: `0.25..0.90`, step `0.05`
-- `freq_low_hz`: `100..1500`, step `50`
-- `freq_high_hz`: `max(freq_low_hz + 400, 1500)..6000`, step `100`
-
-Method-specific:
-
-- `GMDA`: `power_thresh_percentile`, `mdl_beta`
-- `SSZ`: `epsilon`, `d_freq`
-
-## Objective
-
-Trials optimize a balanced framewise score weighted toward:
-
-- lower MAE
-- higher `Acc@25`
-- smaller runtime penalty
-
-The score is saved per trial along with:
-
-- `mae_deg_mean`
-- `acc_at_10_mean`
-- `acc_at_20_mean`
-- `acc_at_25_mean`
-- `median_deg_mean`
-- `p90_deg_mean`
-- `coverage_rate_mean`
-- `runtime_ms_mean`
-
-## Storage / Dashboard
-
-Each method writes a local SQLite study so it can be inspected with
-`optuna-dashboard`.
-
-Output root:
-
-- `localization/tuning/results/framewise_respeaker_v3_optuna/<run_id>/`
-
-Each run includes:
-
-- `dashboard_commands.txt`
-- `overall_best_configs.csv`
-- `overall_best_configs.json`
-
-Each method includes:
-
-- `study.db`
-- `best_params.json`
-- `best_full_eval.csv`
-- `best_full_eval.json`
-- `best_scene_rows.csv`
-- `best_timeline_rows.csv`
-- `trials_export.csv`
-- `trials_export.json`
-
-## Parallelism
-
-Parallelism is supported in two layers:
-
-- one coordinator per method
-- multiple worker processes per study
-
-Trials can also parallelize scene evaluation while preserving sequential window
-processing inside each scene.
+This makes live data collection easier to sanity-check by showing whether channel ordering and directional tracking look plausible without changing the backend capture flow.
 
 ## Validation
 
-Validated in this workspace with:
-
-```bash
-PYTHONPATH=. pytest -q localization/tests/test_tuning_framewise_common.py localization/tests/test_run_optuna_framewise_smoke.py localization/tests/test_tuning_common.py
-```
-
-And with a smoke run:
-
-```bash
-PYTHONPATH=. python -m localization.tuning.run_optuna_framewise_respeaker_v3 \
-  --methods SRP-PHAT \
-  --duration-min 0.02 \
-  --subset-per-bucket 1 \
-  --max-scenes 1 \
-  --top-n-full-eval 1 \
-  --srp-workers 1 \
-  --trial-scene-workers 1
-```
+- `npm test -- --run src/App.test.tsx src/components/SpeakerStage.test.tsx`
+- `npm run build`
