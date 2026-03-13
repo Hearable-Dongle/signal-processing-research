@@ -7,7 +7,7 @@ from typing import Callable
 
 import numpy as np
 
-from .contracts import PipelineConfig, SRPPeakSnapshot
+from .contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
 from .shared_state import SharedPipelineState, Timer
 from .srp_tracker import SRPPeakTracker
 
@@ -416,6 +416,8 @@ class FastPathWorker(threading.Thread):
         return smoothed
 
     def _enqueue_slow(self, frame: np.ndarray) -> None:
+        if not bool(self._cfg.slow_path_enabled):
+            return
         try:
             self._slow_queue.put_nowait(frame.copy())
         except queue.Full:
@@ -428,6 +430,33 @@ class FastPathWorker(threading.Thread):
                 self._slow_queue.put_nowait(frame.copy())
             except queue.Full:
                 self._state.incr_dropped_fast_to_slow(1)
+
+    def _publish_localization_only_speaker_map(
+        self,
+        *,
+        timestamp_ms: float,
+        peaks: list[float],
+        scores: list[float] | None,
+    ) -> None:
+        if not peaks:
+            self._state.publish_speaker_map({})
+            return
+        peak_scores = scores if scores is not None else [1.0] * len(peaks)
+        speaker_map: dict[int, SpeakerGainDirection] = {}
+        for idx, doa_deg in enumerate(peaks, start=1):
+            score = float(peak_scores[idx - 1]) if idx - 1 < len(peak_scores) else 1.0
+            conf = float(np.clip(score, 0.0, 1.0))
+            speaker_map[idx] = SpeakerGainDirection(
+                speaker_id=idx,
+                direction_degrees=float(doa_deg),
+                gain_weight=1.0 if idx == 1 else conf,
+                confidence=conf,
+                active=True,
+                activity_confidence=conf,
+                updated_at_ms=float(timestamp_ms),
+                predicted_direction_deg=float(doa_deg),
+            )
+        self._state.publish_speaker_map(speaker_map)
 
     def _beamform_single_direction(self, x: np.ndarray, doa_deg: float, speech_activity: float) -> np.ndarray:
         mode = str(self._cfg.beamforming_mode).strip().lower()
@@ -485,6 +514,12 @@ class FastPathWorker(threading.Thread):
                         peaks = list(snapshot.peaks_deg)
                         scores = None if snapshot.peak_scores is None else list(snapshot.peak_scores)
                     self._state.publish_srp_snapshot(snapshot)
+                    if not bool(self._cfg.slow_path_enabled):
+                        self._publish_localization_only_speaker_map(
+                            timestamp_ms=now_ms,
+                            peaks=peaks,
+                            scores=scores,
+                        )
                     srp_ms += (perf_counter() - t0) * 1000.0
 
                     speaker_map = self._state.get_speaker_map_snapshot()
@@ -532,14 +567,16 @@ class FastPathWorker(threading.Thread):
                 )
                 self._frame_idx += 1
         finally:
-            try:
-                self._slow_queue.put_nowait(None)
-            except queue.Full:
-                try:
-                    _ = self._slow_queue.get_nowait()
-                except queue.Empty:
-                    return
+            if bool(self._cfg.slow_path_enabled):
                 try:
                     self._slow_queue.put_nowait(None)
                 except queue.Full:
-                    return
+                    try:
+                        _ = self._slow_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    else:
+                        try:
+                            self._slow_queue.put_nowait(None)
+                        except queue.Full:
+                            pass

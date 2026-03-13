@@ -34,6 +34,7 @@ def build_pipeline_config_from_request(
         sample_rate_hz=int(sample_rate_hz),
         fast_frame_ms=max(10, int(req.localization_hop_ms)),
         slow_chunk_ms=int(req.slow_chunk_ms),
+        slow_path_enabled=str(algorithm.algorithm_mode) != "localization_only",
         max_speakers_hint=max(1, int(max_speakers_hint)),
         convtasnet_model_name=str(req.convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(req.convtasnet_model_sample_rate_hz),
