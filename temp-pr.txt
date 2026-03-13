@@ -1,22 +1,23 @@
 ## Summary
 
-Add scene annotation to Data Collection exports, use recording metadata as benchmark ground truth when present, and align the XVF3800 frontend/backend DOA convention.
+Improve XVF3800 data collection by aligning backend/frontend channel and DOA conventions, exporting raw-channel diagnostics, and fixing raw audio capture so saved WAVs are buffered before pipeline drops.
 
 ## What Changed
 
-- extended the Data Collection UI so each recording can carry notes plus a speaker list with names and DOAs, captured before recording and editable afterward
-- exported those annotations into each recording's `metadata.json` and surfaced the same summary in `collection.json`
-- updated `beamforming.benchmark.data_collection_benchmark` to prefer manual `metadata.json` speakers as ground truth for timeline overlays and static DOA metrics
-- changed the XVF3800 simulated/backend geometry to the actual square corner layout and removed the frontend-only `-45°` display compensation
-- removed user-facing live `channel_map` overrides so the UI uses a single XVF3800 convention
+- defaulted live XVF3800 capture to device channels `2..5` and aligned them with mic `1..4`
+- aligned XVF3800 DOA so `0°` is at the cable edge and removed the frontend-only rotation compensation
+- added per-recording scene annotations in Data Collection and exported them into `metadata.json`
+- taught `beamforming.benchmark.data_collection_benchmark` to use recording `metadata.json` as ground truth when present
+- exported raw-channel plots and raw per-channel WAV playback for Data Collection recordings
+- fixed live raw audio export to buffer directly from the input callback and use the actual stream sample rate, avoiding corrupted/static WAVs when the processing queue drops frames
 
 ## Why
 
-This makes real recordings usable for algorithm tuning with manual scene labels, and it removes the DOA mismatch caused by a backend XVF3800 geometry that did not match the frontend visualization.
+This makes real XVF3800 recordings usable for algorithm tuning, keeps channel/DOA conventions consistent across UI and backend, and prevents raw capture artifacts caused by saving audio too late in the live pipeline.
 
 ## Validation
 
 - `python3 -m py_compile beamforming/benchmark/data_collection_benchmark.py`
-- `./beamforming/beamforming-sim-env/bin/python - <<'PY' ... mic_positions_xyz('respeaker_xvf3800_0650') ... PY`
+- `./beamforming/beamforming-sim-env/bin/python -m py_compile mic_array_forwarder/live_session.py mic_array_forwarder/app.py`
 - `npm test -- --run src/App.test.tsx src/components/SceneLauncher.test.tsx src/components/SpeakerStage.test.tsx`
 - `npm run build`

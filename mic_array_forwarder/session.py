@@ -40,6 +40,7 @@ from .models import (
     SpeakerStateMessage,
 )
 from .ws_codec import encode_audio_chunk
+from .tools.channel_plot_utils import default_channel_labels, render_multichannel_plot_png_bytes
 
 
 def _now_ms() -> float:
@@ -261,6 +262,20 @@ class DemoSession:
         if idx < 0 or idx >= raw.shape[1]:
             return b""
         return _wav_bytes_from_mono_float32(raw[:, idx], sample_rate_hz)
+
+    def get_raw_channel_plot_png_bytes(self, subtitle: str = "") -> bytes:
+        with self._lock:
+            raw = None if self._raw_multichannel is None else self._raw_multichannel.copy()
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
+        if raw is None or raw.ndim != 2 or raw.shape[1] <= 0:
+            return b""
+        return render_multichannel_plot_png_bytes(
+            data=raw,
+            sample_rate_hz=sample_rate_hz,
+            channel_labels=default_channel_labels(raw.shape[1]),
+            title="Raw mic channels",
+            subtitle=subtitle or f"{self.session_id} · simulation",
+        )
 
     def select_speaker(self, speaker_id: int) -> None:
         if self.req.processing_mode != "specific_speaker_enhancement":

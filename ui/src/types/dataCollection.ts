@@ -7,6 +7,10 @@ export type RawChannelFile = {
 export type RecordingArtifactManifest = {
   sampleRateHz: number;
   channels: RawChannelFile[];
+  rawChannelPlot?: {
+    filename: string;
+    bytes: Uint8Array;
+  };
 };
 
 export type AnnotatedSpeaker = {
