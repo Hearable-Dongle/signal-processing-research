@@ -28,6 +28,7 @@ from realtime_pipeline.session_runtime import (
     public_speaker_rows,
 )
 from mic_array_forwarder.session import _wav_bytes_from_mono_float32
+from mic_array_forwarder.tools.channel_plot_utils import default_channel_labels, render_multichannel_plot_png_bytes
 from mic_array_forwarder.ws_codec import encode_audio_chunk
 from simulation.mic_array_profiles import mic_positions_xyz
 
@@ -212,6 +213,22 @@ class LiveDemoSession:
         if raw.ndim != 2 or idx < 0 or idx >= raw.shape[1]:
             return b""
         return _wav_bytes_from_mono_float32(raw[:, idx], sample_rate_hz)
+
+    def get_raw_channel_plot_png_bytes(self, subtitle: str = "") -> bytes:
+        with self._lock:
+            if not self._raw_multichannel_parts:
+                return b""
+            raw = np.concatenate(list(self._raw_multichannel_parts), axis=0)
+            sample_rate_hz = int(self._raw_mix_sample_rate_hz)
+        if raw.ndim != 2 or raw.shape[1] <= 0:
+            return b""
+        return render_multichannel_plot_png_bytes(
+            data=raw,
+            sample_rate_hz=sample_rate_hz,
+            channel_labels=default_channel_labels(raw.shape[1]),
+            title="Raw mic channels",
+            subtitle=subtitle or f"{self.session_id} · {self._last_device_name or self.req.audio_device_query or 'live capture'}",
+        )
 
     def select_speaker(self, speaker_id: int) -> None:
         if self.req.processing_mode != "specific_speaker_enhancement":

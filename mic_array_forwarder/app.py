@@ -122,6 +122,15 @@ def get_raw_channel_wav(session_id: str, channel_index: int) -> Response:
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
+@app.get("/api/session/{session_id}/raw-channels-plot.png")
+def get_raw_channels_plot(session_id: str, subtitle: str = Query(default="")) -> Response:
+    session = manager.get_session(session_id)
+    png_bytes = session.get_raw_channel_plot_png_bytes(subtitle=subtitle)
+    if not png_bytes:
+        raise HTTPException(status_code=404, detail="raw channel plot not available")
+    return Response(content=png_bytes, media_type="image/png")
+
+
 def _parse_client_message(
     raw: dict,
 ) -> SelectSpeakerMessage | AdjustSpeakerGainMessage | ClearFocusMessage | SetMonitorSourceMessage | StopSessionMessage:
@@ -200,3 +209,4 @@ async def ws_session(websocket: WebSocket, session_id: str) -> None:
                 ErrorMessage(schema_version=SCHEMA_VERSION, error=str(exc), timestamp_ms=0.0).model_dump()
             )
             await asyncio.sleep(0.05)
+from fastapi import Query

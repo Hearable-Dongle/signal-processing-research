@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from mic_array_forwarder.tools.channel_plot_utils import default_channel_labels, render_multichannel_plot_png_bytes
+
 
 def _find_input_device(sd: Any, query: str | None, min_channels: int) -> int | None:
     devices = sd.query_devices()
@@ -34,15 +36,6 @@ def _ordinal(n: int) -> str:
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suffix}"
 
-
-def _smooth_envelope(x: np.ndarray, win: int) -> np.ndarray:
-    arr = np.asarray(x, dtype=np.float64).reshape(-1)
-    if arr.size == 0 or win <= 1:
-        return arr
-    kernel = np.ones(int(win), dtype=np.float64) / float(win)
-    return np.convolve(arr, kernel, mode="same")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Record a guided mic tap sequence and save per-channel amplitude plots.")
     parser.add_argument("--audio-device-query", default="ReSpeaker", help="Substring to match input device")
@@ -58,15 +51,6 @@ def main() -> int:
     parser.add_argument("--out-path", default="tap_plot.png", help="Output image path")
     parser.add_argument("--envelope-ms", type=float, default=15.0, help="Envelope smoothing window in ms")
     args = parser.parse_args()
-
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError as exc:
-        print("matplotlib is required for this script", file=sys.stderr)
-        raise SystemExit(1) from exc
 
     try:
         import sounddevice as sd
@@ -137,48 +121,22 @@ def main() -> int:
         return 1
 
     times = np.arange(data.shape[0], dtype=np.float64) / float(sr)
-    envelope_win = max(1, int(round((float(args.envelope_ms) / 1000.0) * sr)))
     out_path = Path(args.out_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    fig, axes = plt.subplots(capture_channels, 1, figsize=(14, max(3, 2.2 * capture_channels)), sharex=True)
-    axes_arr = np.atleast_1d(axes)
-    colors = plt.cm.tab10(np.linspace(0.0, 1.0, max(capture_channels, 2)))
-    envelopes: list[np.ndarray] = []
-    raw_peaks: list[float] = []
-
-    for ch in range(capture_channels):
-        raw = np.abs(np.asarray(data[:, ch], dtype=np.float64))
-        env = _smooth_envelope(raw, envelope_win)
-        envelopes.append(env)
-        raw_peaks.append(float(np.max(raw)) if raw.size else 0.0)
-
-    global_ymax = max([float(np.max(env)) if env.size else 0.0 for env in envelopes] + [1e-6])
-
-    for ch in range(capture_channels):
-        env = envelopes[ch]
-        axes_arr[ch].plot(times, env, color=colors[ch], linewidth=1.0)
-        axes_arr[ch].set_ylabel(f"ch {ch}")
-        axes_arr[ch].grid(True, alpha=0.2)
-        axes_arr[ch].set_ylim(0.0, global_ymax)
-        peak = raw_peaks[ch]
-        axes_arr[ch].set_title(f"Channel {ch} peak={peak:.4f}", loc="left", fontsize=10)
-        for mic_idx in range(mic_count):
-            start_s = mic_idx * seconds_per_mic
-            end_s = start_s + seconds_per_mic
-            axes_arr[ch].axvspan(start_s, end_s, color="black", alpha=0.03 if mic_idx % 2 == 0 else 0.06)
-            axes_arr[ch].axvline(start_s, color="gray", alpha=0.25, linewidth=0.8)
-        axes_arr[ch].axvline(total_seconds, color="gray", alpha=0.25, linewidth=0.8)
-
-    axes_arr[-1].set_xlabel("time (s)")
-    for mic_idx in range(mic_count):
-        center_s = (mic_idx + 0.5) * seconds_per_mic
-        axes_arr[0].text(center_s, axes_arr[0].get_ylim()[1] * 0.95, f"tap {_ordinal(mic_idx + 1)} mic", ha="center", va="top")
-
-    fig.suptitle("Mic Tap Capture by Channel")
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=180)
-    plt.close(fig)
+    prompt_windows = [
+        (mic_idx * seconds_per_mic, (mic_idx + 1) * seconds_per_mic, f"tap {_ordinal(mic_idx + 1)} mic")
+        for mic_idx in range(mic_count)
+    ]
+    png_bytes = render_multichannel_plot_png_bytes(
+        data=data,
+        sample_rate_hz=sr,
+        channel_labels=default_channel_labels(capture_channels),
+        title="Mic Tap Capture by Channel",
+        subtitle=f"{device_info.get('name', 'unknown')} · {sr} Hz",
+        envelope_ms=float(args.envelope_ms),
+        prompt_windows=prompt_windows,
+    )
+    out_path.write_bytes(png_bytes)
 
     print(f"Saved plot to {out_path}")
     print(f"Port max input channels: {max_input_channels}")

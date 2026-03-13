@@ -67,7 +67,7 @@ function downloadBlob(filename: string, blob: Blob): void {
   URL.revokeObjectURL(url);
 }
 
-async function fetchRawArtifacts(sessionId: string): Promise<RecordingArtifactManifest> {
+async function fetchRawArtifacts(sessionId: string, speakers: AnnotatedSpeaker[]): Promise<RecordingArtifactManifest> {
   let manifestResp: Response | null = null;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const candidate = await fetch(apiUrl(`/api/session/${sessionId}/raw-channels`));
@@ -101,7 +101,30 @@ async function fetchRawArtifacts(sessionId: string): Promise<RecordingArtifactMa
       bytes: new Uint8Array(await wavResp.arrayBuffer()),
     });
   }
-  return { sampleRateHz: manifest.sample_rate_hz, channels };
+  let rawChannelPlot: RecordingArtifactManifest["rawChannelPlot"];
+  try {
+    const subtitle = rawChannelPlotSubtitle(speakers);
+    const query = subtitle ? `?subtitle=${encodeURIComponent(subtitle)}` : "";
+    const plotResp = await fetch(apiUrl(`/api/session/${sessionId}/raw-channels-plot.png${query}`));
+    if (plotResp.ok) {
+      rawChannelPlot = {
+        filename: "raw_channels.png",
+        bytes: new Uint8Array(await plotResp.arrayBuffer()),
+      };
+    }
+  } catch {
+    rawChannelPlot = undefined;
+  }
+  return { sampleRateHz: manifest.sample_rate_hz, channels, rawChannelPlot };
+}
+
+function rawChannelPlotSubtitle(speakers: AnnotatedSpeaker[]): string {
+  if (!speakers.length) {
+    return "";
+  }
+  return speakers
+    .map((speaker) => `${speaker.speakerName.trim() || "speaker"} ${normalizeDirectionDeg(speaker.directionDeg).toFixed(0)}°`)
+    .join(" · ");
 }
 
 export function DataCollectionPage() {
@@ -270,12 +293,16 @@ export function DataCollectionPage() {
     }
     const sessionId = currentSessionId;
     const startedAtIso = currentRecordingStartIso ?? nowIso();
+    const capturedSpeakers = pendingRecordingSpeakers.map((speaker, index) => ({
+      speakerName: speaker.speakerName.trim() || makeDefaultSpeakerName(index),
+      directionDeg: normalizeDirectionDeg(speaker.directionDeg),
+    }));
     setSessionStatus("stopping");
     setStatusMessage(`Stopping session ${sessionId} and downloading raw channels.`);
     try {
       ws.close();
       await fetch(apiUrl(`/api/session/${sessionId}/stop`), { method: "POST" });
-      const artifacts = await fetchRawArtifacts(sessionId);
+      const artifacts = await fetchRawArtifacts(sessionId, capturedSpeakers);
       setRecordings((prev) => [
         ...prev,
         {
@@ -287,10 +314,7 @@ export function DataCollectionPage() {
           deviceName,
           micArrayProfile,
           notes: pendingRecordingNotes.trim(),
-          speakers: pendingRecordingSpeakers.map((speaker, index) => ({
-            speakerName: speaker.speakerName.trim() || makeDefaultSpeakerName(index),
-            directionDeg: normalizeDirectionDeg(speaker.directionDeg),
-          })),
+          speakers: capturedSpeakers,
           artifacts,
         },
       ]);
@@ -308,10 +332,7 @@ export function DataCollectionPage() {
           deviceName,
           micArrayProfile,
           notes: pendingRecordingNotes.trim(),
-          speakers: pendingRecordingSpeakers.map((speaker, index) => ({
-            speakerName: speaker.speakerName.trim() || makeDefaultSpeakerName(index),
-            directionDeg: normalizeDirectionDeg(speaker.directionDeg),
-          })),
+          speakers: capturedSpeakers,
           error: err instanceof Error ? err.message : "Artifact collection failed.",
         },
       ]);
@@ -403,6 +424,12 @@ export function DataCollectionPage() {
             )
           ),
         ];
+        if (recording.artifacts?.rawChannelPlot) {
+          files.push({
+            path: `recordings/${recording.recordingId}/visualizations/${recording.artifacts.rawChannelPlot.filename}`,
+            bytes: recording.artifacts.rawChannelPlot.bytes,
+          });
+        }
         if (!recording.artifacts) {
           return files;
         }
