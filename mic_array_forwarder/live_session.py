@@ -98,22 +98,28 @@ class LiveDemoSession:
         self._last_device_name = ""
         self._monitor_source = str(req.monitor_source)
         self._mic_geometry_xyz = _mic_geometry_from_profile(str(req.mic_array_profile))
-        self._channel_map = self._normalize_channel_map(req.channel_map, int(req.channel_count))
+        self._capture_channel_count, self._channel_map = self._resolve_capture_layout(req)
         self._audio_q: queue.Queue[np.ndarray | None] | None = None
 
     @staticmethod
-    def _normalize_channel_map(raw: list[int] | None, channel_count: int) -> list[int] | None:
-        if raw is None:
-            return None
+    def _resolve_capture_layout(req: SessionStartRequest) -> tuple[int, list[int] | None]:
+        if req.channel_map is None:
+            if str(req.mic_array_profile) == "respeaker_xvf3800_0650":
+                return 6, [2, 3, 4, 5]
+            return int(req.channel_count), None
         try:
-            items = [int(v) for v in raw]
+            items = [int(v) for v in req.channel_map]
         except (TypeError, ValueError):
-            return None
-        if len(items) != channel_count:
-            return None
-        if sorted(items) != list(range(channel_count)):
-            return None
-        return items
+            if str(req.mic_array_profile) == "respeaker_xvf3800_0650":
+                return 6, [2, 3, 4, 5]
+            return int(req.channel_count), None
+        if not items:
+            return int(req.channel_count), None
+        if len(set(items)) != len(items) or min(items) < 0:
+            if str(req.mic_array_profile) == "respeaker_xvf3800_0650":
+                return 6, [2, 3, 4, 5]
+            return int(req.channel_count), None
+        return max(int(req.channel_count), max(items) + 1), items
 
     @property
     def status(self) -> str:
@@ -188,6 +194,8 @@ class LiveDemoSession:
         return _wav_bytes_from_mono_float32(raw, sample_rate_hz)
 
     def get_raw_channel_count(self) -> int:
+        if self._channel_map is not None:
+            return int(len(self._channel_map))
         return int(self.req.channel_count)
 
     def get_raw_sample_rate_hz(self) -> int:
@@ -388,7 +396,7 @@ class LiveDemoSession:
         slow_alive = bool(getattr(pipe, "_slow", None) and pipe._slow.is_alive())
         return bool(fast_alive or slow_alive)
 
-    def _frame_iter(self, audio_q: queue.Queue[np.ndarray | None], channel_count: int) -> Iterator[np.ndarray]:
+    def _frame_iter(self, audio_q: queue.Queue[np.ndarray | None], capture_channel_count: int) -> Iterator[np.ndarray]:
         while True:
             if self._stop.is_set() and audio_q.empty():
                 return
@@ -398,7 +406,7 @@ class LiveDemoSession:
                 continue
             if frame_mc is None:
                 return
-            if frame_mc.ndim != 2 or frame_mc.shape[1] != channel_count:
+            if frame_mc.ndim != 2 or frame_mc.shape[1] != capture_channel_count:
                 continue
             if self._channel_map is not None:
                 frame_mc = frame_mc[:, self._channel_map]
@@ -418,10 +426,11 @@ class LiveDemoSession:
             audio_q: queue.Queue[np.ndarray | None] = queue.Queue(maxsize=64)
             self._audio_q = audio_q
             sample_rate_hz = int(self.req.sample_rate_hz)
-            channel_count = int(self.req.channel_count)
+            capture_channel_count = int(self._capture_channel_count)
+            output_channel_count = int(len(self._channel_map)) if self._channel_map is not None else int(self.req.channel_count)
             frame_samples = max(1, int(sample_rate_hz * max(10, int(self.req.localization_hop_ms)) / 1000))
 
-            device_idx = _find_input_device(sd, self.req.audio_device_query, channel_count)
+            device_idx = _find_input_device(sd, self.req.audio_device_query, capture_channel_count)
             if device_idx is None:
                 raise RuntimeError(
                     "No matching input device found for live session. "
@@ -447,7 +456,7 @@ class LiveDemoSession:
 
             with sd.InputStream(
                 device=device_idx,
-                channels=channel_count,
+                channels=capture_channel_count,
                 samplerate=sample_rate_hz,
                 blocksize=frame_samples,
                 dtype="float32",
@@ -460,7 +469,7 @@ class LiveDemoSession:
                 cfg = build_pipeline_config_from_request(
                     self.req,
                     sample_rate_hz=sample_rate_hz,
-                    max_speakers_hint=max(int(self.req.max_speakers_hint), channel_count, 1),
+                    max_speakers_hint=max(int(self.req.max_speakers_hint), output_channel_count, 1),
                 )
                 mic_geometry_xyz = np.asarray(self._mic_geometry_xyz, dtype=float)
                 mic_geometry_xy = mic_geometry_xyz[:, :2] if mic_geometry_xyz.shape[1] >= 2 else mic_geometry_xyz.T[:2, :].T
@@ -468,7 +477,7 @@ class LiveDemoSession:
                     config=cfg,
                     mic_geometry_xyz=mic_geometry_xyz,
                     mic_geometry_xy=np.asarray(mic_geometry_xy, dtype=float),
-                    frame_iterator=self._frame_iter(audio_q, channel_count),
+                    frame_iterator=self._frame_iter(audio_q, capture_channel_count),
                     frame_sink=self._on_audio_chunk,
                     separation_backend=build_separation_backend_for_request(self.req, cfg),
                 )
