@@ -7,22 +7,23 @@ type Props = {
   processingMode: ProcessingMode;
   selectedSpeakerId: number | null;
   onSpeakerTap: (speakerId: number) => void;
+  showGroundTruth?: boolean;
 };
 
 const MIC_MARKERS = [
-  { id: "mic-1", label: "1", x: 50, y: 31 },
-  { id: "mic-2", label: "2", x: 69, y: 50 },
-  { id: "mic-3", label: "3", x: 50, y: 69 },
-  { id: "mic-4", label: "4", x: 31, y: 50 },
+  { id: "mic-1", label: "1", channelLabel: "ch2", x: 74, y: 26 },
+  { id: "mic-2", label: "2", channelLabel: "ch3", x: 26, y: 26 },
+  { id: "mic-3", label: "3", channelLabel: "ch4", x: 26, y: 74 },
+  { id: "mic-4", label: "4", channelLabel: "ch5", x: 74, y: 74 },
 ];
 
-const CABLE_MARKER = { id: "cable", label: "cable", x: 59.5, y: 40.5 };
+const CABLE_MARKER = { id: "cable", label: "cable", x: 50, y: 22 };
 
 function polarToXY(directionDeg: number): { x: number; y: number } {
   const radians = (directionDeg * Math.PI) / 180;
   const radius = 42;
-  const x = 50 + radius * Math.cos(radians);
-  const y = 50 - radius * Math.sin(radians);
+  const x = 50 + radius * Math.sin(radians);
+  const y = 50 - radius * Math.cos(radians);
   return { x, y };
 }
 
@@ -35,6 +36,7 @@ function MicArrayMarkers({ prefix }: { prefix: string }) {
           className="mic-array-marker"
           data-testid={`${prefix}-${marker.id}`}
           style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+          title={`${marker.label} · ${marker.channelLabel}`}
         >
           {marker.label}
         </div>
@@ -50,10 +52,17 @@ function MicArrayMarkers({ prefix }: { prefix: string }) {
   );
 }
 
-export function SpeakerStage({ speakers, groundTruth, processingMode, selectedSpeakerId, onSpeakerTap }: Props) {
+export function SpeakerStage({
+  speakers,
+  groundTruth,
+  processingMode,
+  selectedSpeakerId,
+  onSpeakerTap,
+  showGroundTruth = true,
+}: Props) {
   const activeSpeakers = speakers.filter((speaker) => speaker.active);
   const showTrackedRoom = processingMode !== "beamform_from_ground_truth";
-  const showGroundTruthBlock = true;
+  const showGroundTruthBlock = showGroundTruth;
 
   return (
     <section className="panel speaker-stage">

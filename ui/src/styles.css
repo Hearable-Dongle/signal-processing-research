@@ -370,6 +370,11 @@ button:disabled {
   align-items: start;
 }
 
+.data-visual-stack {
+  display: grid;
+  gap: 1rem;
+}
+
 .empty-state {
   color: #6c625b;
 }
@@ -514,6 +519,119 @@ button:disabled {
 .beamformer-weight-meta,
 .beamformer-weight-value {
   color: #5c5f68;
+}
+
+.directionality-panel {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.directionality-header {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.directionality-header h2 {
+  margin: 0;
+}
+
+.directionality-copy,
+.directionality-note {
+  margin: 0;
+  color: #5f584f;
+  font-size: 0.88rem;
+}
+
+.directionality-wrap {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.directionality-viz {
+  width: min(78vw, 320px);
+  height: auto;
+  margin: 0 auto;
+  display: block;
+}
+
+.directionality-ring-bg {
+  fill: url(#directionality-bg);
+  stroke: #e0cabc;
+  stroke-width: 1.2;
+}
+
+.directionality-ring {
+  fill: none;
+  stroke: #d7bcad;
+  stroke-width: 1.2;
+}
+
+.directionality-ring-inner {
+  stroke-dasharray: 2 2;
+}
+
+.directionality-zero-axis {
+  stroke: #8c5a42;
+  stroke-width: 1.1;
+  stroke-dasharray: 2.5 2.5;
+}
+
+.directionality-zero-label {
+  fill: #7c513d;
+  font-size: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.directionality-wedge {
+  fill: rgba(189, 79, 39, 0.48);
+  stroke: rgba(189, 79, 39, 0.8);
+  stroke-width: 0.8;
+}
+
+.directionality-spoke {
+  stroke: rgba(87, 51, 35, 0.5);
+  stroke-width: 0.8;
+}
+
+.directionality-node,
+.directionality-center {
+  fill: #8f3c1e;
+  stroke: #fff6ef;
+  stroke-width: 1;
+}
+
+.directionality-trail-dot {
+  fill: #c76438;
+}
+
+.directionality-legend {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.directionality-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #4b443e;
+  font-size: 0.88rem;
+}
+
+.directionality-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.directionality-chip-live {
+  background: #bd4f27;
+}
+
+.directionality-chip-trace {
+  background: rgba(199, 100, 56, 0.32);
+  border: 1px solid rgba(199, 100, 56, 0.7);
 }
 
 .metrics-panel {

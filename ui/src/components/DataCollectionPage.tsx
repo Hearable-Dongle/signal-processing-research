@@ -1,6 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { DemoWsClient } from "../api/ws";
+import { DirectionalityViz } from "./DirectionalityViz";
+import { SpeakerStage } from "./SpeakerStage";
 import type { DataCollectionSet, RawChannelFile, RawChannelsResponse, RecordingArtifactManifest, RecordingEntry } from "../types/dataCollection";
+import type { ServerMessage, Speaker } from "../types/contracts";
 import { createZipBlob, textFile } from "../utils/zip";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -8,6 +12,13 @@ const DEFAULT_SAMPLE_RATE_HZ = 48000;
 const DEFAULT_CHANNEL_MAP = "0,1,2,3";
 const DEFAULT_DEVICE = "ReSpeaker";
 const DEFAULT_MIC_ARRAY_PROFILE = "respeaker_xvf3800_0650";
+const EMPTY_SPEAKERS: Speaker[] = [];
+
+type DirectionSample = {
+  directionDeg: number;
+  intensity: number;
+  atMs: number;
+};
 
 function apiUrl(path: string): string {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
@@ -79,6 +90,43 @@ export function DataCollectionPage() {
   const [currentRecordingStartIso, setCurrentRecordingStartIso] = useState<string | null>(null);
   const [recordings, setRecordings] = useState<RecordingEntry[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
+  const [speakers, setSpeakers] = useState<Speaker[]>(EMPTY_SPEAKERS);
+  const [directionTrail, setDirectionTrail] = useState<DirectionSample[]>([]);
+
+  const ws = useMemo(
+    () =>
+      new DemoWsClient({
+        onServerMessage: (msg: ServerMessage) => {
+          if (msg.type !== "speaker_state") {
+            return;
+          }
+          setSpeakers(msg.speakers);
+          const visibleSpeakers = msg.speakers.filter((speaker) => speaker.active);
+          if (!visibleSpeakers.length) {
+            return;
+          }
+          const atMs = Date.now();
+          setDirectionTrail((prev) => {
+            const next = [
+              ...prev,
+              ...visibleSpeakers.map((speaker) => ({
+                directionDeg: speaker.direction_degrees,
+                intensity: Math.max(speaker.activity_confidence, speaker.confidence, 0.2),
+                atMs,
+              })),
+            ];
+            return next.slice(-120);
+          });
+        },
+        onAudioChunk: () => undefined,
+        onClose: () => {
+          setSpeakers([]);
+        },
+      }),
+    []
+  );
+
+  useEffect(() => () => ws.close(), [ws]);
 
   const canStartRecording = !currentSessionId && sessionStatus !== "starting" && sessionStatus !== "stopping";
   const canStopRecording = Boolean(currentSessionId);
@@ -107,6 +155,9 @@ export function DataCollectionPage() {
       const payload = (await resp.json()) as { session_id: string };
       setCurrentSessionId(payload.session_id);
       setCurrentRecordingStartIso(nowIso());
+      setSpeakers([]);
+      setDirectionTrail([]);
+      ws.connect(payload.session_id);
       setSessionStatus("capturing");
       setStatusMessage(`Recording collection ${collectionId} into session ${payload.session_id}.`);
     } catch (err) {
@@ -124,6 +175,7 @@ export function DataCollectionPage() {
     setSessionStatus("stopping");
     setStatusMessage(`Stopping session ${sessionId} and downloading raw channels.`);
     try {
+      ws.close();
       await fetch(apiUrl(`/api/session/${sessionId}/stop`), { method: "POST" });
       const artifacts = await fetchRawArtifacts(sessionId);
       setRecordings((prev) => [
@@ -158,6 +210,7 @@ export function DataCollectionPage() {
     } finally {
       setCurrentSessionId(null);
       setCurrentRecordingStartIso(null);
+      setSpeakers([]);
     }
   }
 
@@ -297,6 +350,18 @@ export function DataCollectionPage() {
           </div>
           {statusMessage ? <p className="status">{statusMessage}</p> : null}
         </section>
+
+        <div className="data-visual-stack">
+          <SpeakerStage
+            speakers={speakers}
+            groundTruth={[]}
+            processingMode="localize_and_beamform"
+            selectedSpeakerId={null}
+            onSpeakerTap={() => undefined}
+            showGroundTruth={false}
+          />
+          <DirectionalityViz speakers={speakers} trail={directionTrail} />
+        </div>
       </div>
 
       <section className="panel">
