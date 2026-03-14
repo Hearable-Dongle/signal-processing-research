@@ -729,7 +729,9 @@ class SRPPHATLocalization:
                 diff = self.mic_pos[:, i] - self.mic_pos[:, j]
                 tau = (dirs @ diff) / self.c  # (A,)
                 phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]
-                steered = np.real(phat[:, np.newaxis] * np.exp(-1j * phase))
+                # Zi * conj(Zj) has phase exp(-jw(tau_i - tau_j)), so SRP
+                # must steer with the conjugate sign to align the pair term.
+                steered = np.real(phat[:, np.newaxis] * np.exp(1j * phase))
                 frame_spec += np.sum(steered * msc[:, np.newaxis], axis=0)
             frame_specs.append(frame_spec)
             frame_times.append(float(t_vec[t_idx]) if t_idx < len(t_vec) else float(start / self.fs))
