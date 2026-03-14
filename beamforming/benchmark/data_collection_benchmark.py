@@ -702,7 +702,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--localization-pair-selection-mode", choices=["all", "adjacent_only"], default="all")
     parser.add_argument("--localization-vad-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--capon-peak-min-sharpness", type=float, default=0.12)
-    parser.add_argument("--capon-peak-min-margin", type=float, default=0.08)
+    parser.add_argument("--capon-peak-min-margin", type=float, default=0.04)
     parser.add_argument(
         "--speaker-centroid-history-size",
         "--speaker-history-size",

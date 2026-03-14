@@ -1,4 +1,4 @@
-PR title example: Align XVF3800 DOA displays with source-bearing annotations
+PR title example: Add Capon MVDR local refinement for DOA
 
 Concise description:
-Treat Data Collection annotations as the source of truth for XVF3800 and convert backend arrival-direction DOAs into source-bearing in the frontend live views and data-collection benchmark outputs.
+Add a single-speaker Capon-seeded local MVDR/Capon refinement backend, wire it through the realtime and benchmark entrypoints, and relax the default refinement margin threshold to reduce over-abstention.

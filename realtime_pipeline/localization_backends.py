@@ -85,7 +85,7 @@ class LocalizationBackendBase:
         vad_enabled: bool = True,
         capon_spectrum_ema_alpha: float = 0.78,
         capon_peak_min_sharpness: float = 0.12,
-        capon_peak_min_margin: float = 0.08,
+        capon_peak_min_margin: float = 0.04,
         capon_hold_frames: int = 2,
     ):
         self.mic_pos = np.asarray(mic_pos, dtype=np.float64)
@@ -210,7 +210,7 @@ def build_localization_backend(
     vad_enabled: bool = True,
     capon_spectrum_ema_alpha: float = 0.78,
     capon_peak_min_sharpness: float = 0.12,
-    capon_peak_min_margin: float = 0.08,
+    capon_peak_min_margin: float = 0.04,
     capon_hold_frames: int = 2,
 ) -> LocalizationBackendBase:
     common = dict(
