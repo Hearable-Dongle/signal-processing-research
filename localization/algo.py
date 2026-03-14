@@ -607,6 +607,19 @@ class SRPPHATLocalization:
         self.rms_ratio_threshold = float(kwargs.get("rms_ratio_threshold", 1.2))
         self.flux_threshold = float(kwargs.get("flux_threshold", 0.12))
         self.noise_floor_alpha = float(kwargs.get("noise_floor_alpha", 0.95))
+        self.pair_selection_mode = str(kwargs.get("pair_selection_mode", "all"))
+
+    def _selected_pairs(self, m_mics: int) -> list[tuple[int, int]]:
+        pairs = [(i, j) for i in range(m_mics) for j in range(i + 1, m_mics)]
+        if self.pair_selection_mode != "adjacent_only" or len(pairs) <= 1:
+            return pairs
+        pair_distances = []
+        for i, j in pairs:
+            diff = np.asarray(self.mic_pos[:, i] - self.mic_pos[:, j], dtype=np.float64)
+            pair_distances.append((float(np.linalg.norm(diff)), (i, j)))
+        min_distance = min(distance for distance, _pair in pair_distances)
+        tol = max(1e-6, min_distance * 0.05)
+        return [pair for distance, pair in pair_distances if distance <= min_distance + tol]
 
     def _speech_features(self, chunk: np.ndarray, prev_mag: np.ndarray | None, noise_floor: float):
         mono = np.mean(chunk, axis=0)
@@ -671,7 +684,16 @@ class SRPPHATLocalization:
 
         if Zxx_roi.shape[1] == 0:
             return [], np.zeros(360), []
-        pairs = [(i, j) for i in range(M_mics) for j in range(i + 1, M_mics)]
+        pairs = self._selected_pairs(M_mics)
+        pair_freq_masks: dict[tuple[int, int], np.ndarray] = {}
+        for i, j in pairs:
+            diff = np.asarray(self.mic_pos[:, i] - self.mic_pos[:, j], dtype=np.float64)
+            pair_distance_m = float(np.linalg.norm(diff))
+            if pair_distance_m <= 1e-9:
+                pair_freq_masks[(i, j)] = np.ones_like(relevant_freqs, dtype=bool)
+                continue
+            pair_alias_hz = float(self.c / (2.0 * pair_distance_m))
+            pair_freq_masks[(i, j)] = relevant_freqs <= pair_alias_hz
         search_angles = np.linspace(0, 2 * np.pi, 360, endpoint=False)
         dirs = np.stack([np.cos(search_angles), np.sin(search_angles), np.zeros_like(search_angles)], axis=1)
         frame_specs = []
@@ -691,6 +713,9 @@ class SRPPHATLocalization:
             noise_floor = self._update_noise_floor(noise_floor, rms, speech_active)
             frame_spec = np.zeros(search_angles.shape[0], dtype=float)
             for i, j in pairs:
+                pair_mask = pair_freq_masks[(i, j)]
+                if not np.any(pair_mask):
+                    continue
                 cross = Zxx_roi[i, :, t_idx] * np.conj(Zxx_roi[j, :, t_idx])
                 phat = cross / np.maximum(np.abs(cross), 1e-10)
                 auto_i = np.abs(Zxx_roi[i, :, t_idx]) ** 2
@@ -699,6 +724,8 @@ class SRPPHATLocalization:
                 msc = np.clip(msc, 0.0, 1.0)
                 if np.max(msc) > 1e-10:
                     msc = msc / np.max(msc)
+                phat = np.where(pair_mask, phat, 0.0)
+                msc = np.where(pair_mask, msc, 0.0)
                 diff = self.mic_pos[:, i] - self.mic_pos[:, j]
                 tau = (dirs @ diff) / self.c  # (A,)
                 phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]

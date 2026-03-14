@@ -93,6 +93,7 @@ class PipelineConfig:
     srp_overlap: float = 0.5
     srp_freq_min_hz: int = 200
     srp_freq_max_hz: int = 3000
+    localization_pair_selection_mode: str = "all"
     srp_max_sources: int = 8
     srp_prior_enabled: bool = True
     srp_peak_min_score: float = 0.05

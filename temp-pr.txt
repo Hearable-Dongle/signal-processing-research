@@ -1,1 +1,1 @@
-Add a single-speaker runtime option for localization-only benchmarking and align XVF3800 benchmark DOA plots/metrics with the cable-referenced UI convention.
+Add XVF3800 spatial-aliasing experiment controls for SRP localization: per-pair alias masking and an `adjacent_only` pair-selection mode, with benchmark support for single-speaker localization-only evaluation.

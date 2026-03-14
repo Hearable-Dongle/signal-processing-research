@@ -33,6 +33,7 @@ class SessionStartRequest(BaseModel):
     overlap: float = 0.2
     freq_low_hz: int = 200
     freq_high_hz: int = 3000
+    localization_pair_selection_mode: Literal["all", "adjacent_only"] = "all"
     speaker_history_size: int = 8
     speaker_activation_min_predictions: int = 3
     speaker_match_window_deg: float = 30.0

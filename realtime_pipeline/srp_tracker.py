@@ -81,6 +81,7 @@ class SRPPeakTracker:
         small_aperture_bias: bool = True,
         sound_speed_m_s: float = 343.0,
         tracking_mode: str = "multi_peak_v2",
+        pair_selection_mode: str = "all",
         max_tracks: int | None = None,
         max_assoc_distance_deg: float = 20.0,
         track_hold_frames: int = 5,
@@ -151,6 +152,7 @@ class SRPPeakTracker:
             grid_size=grid_size,
             min_separation_deg=min_peak_separation_deg,
             small_aperture_bias=small_aperture_bias,
+            pair_selection_mode=pair_selection_mode,
         )
         self._max_sources = int(max_sources)
         self._single_source_backends = {

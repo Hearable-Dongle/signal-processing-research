@@ -61,6 +61,7 @@ def build_pipeline_config_from_request(
         srp_overlap=float(req.overlap),
         srp_freq_min_hz=int(req.freq_low_hz),
         srp_freq_max_hz=int(req.freq_high_hz),
+        localization_pair_selection_mode=str(req.localization_pair_selection_mode),
     )
 
 
