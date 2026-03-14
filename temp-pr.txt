@@ -1,1 +1,1 @@
-Add a single-speaker runtime option for localization-only benchmarking and align XVF3800 benchmark DOA plots/metrics with the cable-referenced UI convention.
+Add per-pair GCC alias masking to `srp_phat_localization` and benchmark it side-by-side on XVF3800 real recordings using the single-speaker localization-only path.
