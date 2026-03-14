@@ -22,6 +22,15 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
     ) from exc
 
 try:
+    from scipy.optimize import linear_sum_assignment
+except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific dependency guard
+    missing = exc.name or "scipy"
+    raise SystemExit(
+        f"Missing dependency '{missing}'. Install the beamforming benchmark dependencies first, "
+        f"for example: `python3 -m pip install -r beamforming/requirements.txt`."
+    ) from exc
+
+try:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -325,6 +334,30 @@ def _angular_error_deg(a_deg: float, b_deg: float) -> float:
     return abs((float(a_deg) - float(b_deg) + 180.0) % 360.0 - 180.0)
 
 
+def _active_ground_truth_tracks_at_time(ground_truth_tracks: list[dict], timestamp_s: float) -> list[dict]:
+    active: list[dict] = []
+    t = float(timestamp_s)
+    for item in ground_truth_tracks:
+        start_sec = float(item.get("start_sec", 0.0))
+        end_sec = float(item.get("end_sec", 0.0))
+        if start_sec <= t < end_sec:
+            active.append(item)
+    return active
+
+
+def _match_angle_sets(gt_angles: list[float], pred_angles: list[float]) -> tuple[list[float], int, int, int]:
+    if not gt_angles or not pred_angles:
+        return [], 0, len(gt_angles), len(pred_angles)
+    cost = np.asarray(
+        [[_angular_error_deg(gt_angle, pred_angle) for pred_angle in pred_angles] for gt_angle in gt_angles],
+        dtype=np.float64,
+    )
+    rows, cols = linear_sum_assignment(cost)
+    errors = [float(cost[int(r), int(c)]) for r, c in zip(rows, cols)]
+    matched = len(errors)
+    return errors, matched, max(0, len(gt_angles) - matched), max(0, len(pred_angles) - matched)
+
+
 def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic_array_profile: str) -> dict[str, float | str]:
     if not ground_truth_tracks:
         return {
@@ -333,35 +366,48 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic
             "gt_final_mae_deg": float("nan"),
             "gt_final_acc_10": float("nan"),
             "gt_final_acc_20": float("nan"),
+            "gt_final_match_rate": float("nan"),
             "gt_trace_active_mae_deg": float("nan"),
             "gt_trace_active_acc_10": float("nan"),
             "gt_trace_active_acc_20": float("nan"),
+            "gt_trace_active_match_rate": float("nan"),
         }
 
-    gt_angles = [float(item["angle_deg"]) for item in ground_truth_tracks]
+    gt_speaker_keys = {
+        (str(item.get("speaker_name", "")), int(item.get("speaker_id", 0)))
+        for item in ground_truth_tracks
+    }
     gt_source = str(ground_truth_tracks[0].get("source", ""))
     final_speakers = list(summary.get("speaker_map_final", []))
-    final_angles = [
+    final_active_angles = [
         _backend_prediction_to_display_angle_deg(float(item.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
         for item in final_speakers
+        if bool(item.get("active", False))
     ]
-    if final_angles:
-        final_errors = [min(_angular_error_deg(gt_angle, pred_angle) for pred_angle in final_angles) for gt_angle in gt_angles]
-    else:
-        final_errors = []
+    duration_s = float(summary.get("duration_s", 0.0))
+    final_gt_tracks = _active_ground_truth_tracks_at_time(ground_truth_tracks, max(0.0, duration_s - 1e-6))
+    final_gt_angles = [float(item["angle_deg"]) for item in final_gt_tracks]
+    final_errors, final_matches, final_missed_gt, _final_extra_pred = _match_angle_sets(final_gt_angles, final_active_angles)
 
     trace_rows = list(summary.get("speaker_map_trace", []))
     active_errors: list[float] = []
+    total_active_gt = 0
+    total_matched_gt = 0
     for row in trace_rows:
+        timestamp_s = float(row.get("timestamp_ms", 0.0)) / 1000.0
+        active_gt_tracks = _active_ground_truth_tracks_at_time(ground_truth_tracks, timestamp_s)
+        active_gt_angles = [float(item["angle_deg"]) for item in active_gt_tracks]
+        if not active_gt_angles:
+            continue
         active_angles = [
             _backend_prediction_to_display_angle_deg(float(item.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
             for item in row.get("speakers", [])
             if bool(item.get("active", False))
         ]
-        if not active_angles:
-            continue
-        for gt_angle in gt_angles:
-            active_errors.append(min(_angular_error_deg(gt_angle, pred_angle) for pred_angle in active_angles))
+        frame_errors, matched, _missed_gt, _extra_pred = _match_angle_sets(active_gt_angles, active_angles)
+        active_errors.extend(frame_errors)
+        total_active_gt += int(len(active_gt_angles))
+        total_matched_gt += int(matched)
 
     def _acc(errors: list[float], threshold: float) -> float:
         if not errors:
@@ -370,13 +416,15 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic
 
     return {
         "ground_truth_source": gt_source,
-        "ground_truth_speaker_count": int(len(gt_angles)),
+        "ground_truth_speaker_count": int(len(gt_speaker_keys)),
         "gt_final_mae_deg": float(np.mean(final_errors)) if final_errors else float("nan"),
         "gt_final_acc_10": _acc(final_errors, 10.0),
         "gt_final_acc_20": _acc(final_errors, 20.0),
+        "gt_final_match_rate": (float(final_matches) / float(len(final_gt_angles))) if final_gt_angles else float("nan"),
         "gt_trace_active_mae_deg": float(np.mean(active_errors)) if active_errors else float("nan"),
         "gt_trace_active_acc_10": _acc(active_errors, 10.0),
         "gt_trace_active_acc_20": _acc(active_errors, 20.0),
+        "gt_trace_active_match_rate": (float(total_matched_gt) / float(total_active_gt)) if total_active_gt > 0 else float("nan"),
     }
 
 
@@ -558,6 +606,16 @@ def _plot_summary_bars(summary_rows: list[dict], out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_dir / "summary_bars.png", dpi=160)
     plt.close(fig)
+
+
+def _mean_numeric(rows: list[dict], key: str) -> float:
+    vals = [float(row[key]) for row in rows if key in row]
+    if not vals:
+        return float("nan")
+    arr = np.asarray(vals, dtype=np.float64)
+    if np.all(np.isnan(arr)):
+        return float("nan")
+    return float(np.nanmean(arr))
 
 
 def _run_recording_method_job(
@@ -859,15 +917,23 @@ def main() -> None:
                 {
                     "method": method,
                     "n_recordings": len(rows),
-                    "fast_rtf_mean": float(np.mean([float(row["fast_rtf"]) for row in rows])),
-                    "slow_rtf_mean": float(np.mean([float(row["slow_rtf"]) for row in rows])),
-                    "clip_rate_processed_mean": float(np.mean([float(row["clip_rate_processed"]) for row in rows])),
-                    "rms_gain_db_mean": float(np.mean([float(row["rms_gain_db"]) for row in rows])),
-                    "high_band_noise_ratio_processed_mean": float(np.mean([float(row["high_band_noise_ratio_processed"]) for row in rows])),
-                    "speaker_count_final_mean": float(np.mean([float(row["speaker_count_final"]) for row in rows])),
-                    "active_speaker_count_final_mean": float(np.mean([float(row["active_speaker_count_final"]) for row in rows])),
-                    "dominant_confidence_avg_mean": float(np.mean([float(row["dominant_confidence_avg"]) for row in rows])),
-                    "dominant_direction_step_p95_deg_mean": float(np.mean([float(row["dominant_direction_step_p95_deg"]) for row in rows])),
+                    "fast_rtf_mean": _mean_numeric(rows, "fast_rtf"),
+                    "slow_rtf_mean": _mean_numeric(rows, "slow_rtf"),
+                    "clip_rate_processed_mean": _mean_numeric(rows, "clip_rate_processed"),
+                    "rms_gain_db_mean": _mean_numeric(rows, "rms_gain_db"),
+                    "high_band_noise_ratio_processed_mean": _mean_numeric(rows, "high_band_noise_ratio_processed"),
+                    "speaker_count_final_mean": _mean_numeric(rows, "speaker_count_final"),
+                    "active_speaker_count_final_mean": _mean_numeric(rows, "active_speaker_count_final"),
+                    "dominant_confidence_avg_mean": _mean_numeric(rows, "dominant_confidence_avg"),
+                    "dominant_direction_step_p95_deg_mean": _mean_numeric(rows, "dominant_direction_step_p95_deg"),
+                    "gt_final_mae_mean": _mean_numeric(rows, "gt_final_mae_deg"),
+                    "gt_final_acc_10_mean": _mean_numeric(rows, "gt_final_acc_10"),
+                    "gt_final_acc_20_mean": _mean_numeric(rows, "gt_final_acc_20"),
+                    "gt_final_match_rate_mean": _mean_numeric(rows, "gt_final_match_rate"),
+                    "gt_trace_active_mae_mean": _mean_numeric(rows, "gt_trace_active_mae_deg"),
+                    "gt_trace_active_acc_10_mean": _mean_numeric(rows, "gt_trace_active_acc_10"),
+                    "gt_trace_active_acc_20_mean": _mean_numeric(rows, "gt_trace_active_acc_20"),
+                    "gt_trace_active_match_rate_mean": _mean_numeric(rows, "gt_trace_active_match_rate"),
                 }
             )
         summary_rows.sort(key=lambda row: row["method"])
