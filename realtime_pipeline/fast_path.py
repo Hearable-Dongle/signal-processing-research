@@ -355,6 +355,7 @@ class FastPathWorker(threading.Thread):
             small_aperture_bias=config.localization_small_aperture_bias,
             sound_speed_m_s=config.sound_speed_m_s,
             tracking_mode=config.tracking_mode,
+            pair_selection_mode=str(config.localization_pair_selection_mode),
             max_tracks=config.localization_max_tracks,
             max_assoc_distance_deg=config.localization_max_assoc_distance_deg,
             track_hold_frames=config.localization_track_hold_frames,

@@ -607,6 +607,19 @@ class SRPPHATLocalization:
         self.rms_ratio_threshold = float(kwargs.get("rms_ratio_threshold", 1.2))
         self.flux_threshold = float(kwargs.get("flux_threshold", 0.12))
         self.noise_floor_alpha = float(kwargs.get("noise_floor_alpha", 0.95))
+        self.pair_selection_mode = str(kwargs.get("pair_selection_mode", "all"))
+
+    def _selected_pairs(self, m_mics: int) -> list[tuple[int, int]]:
+        pairs = [(i, j) for i in range(m_mics) for j in range(i + 1, m_mics)]
+        if self.pair_selection_mode != "adjacent_only" or len(pairs) <= 1:
+            return pairs
+        pair_distances = []
+        for i, j in pairs:
+            diff = np.asarray(self.mic_pos[:, i] - self.mic_pos[:, j], dtype=np.float64)
+            pair_distances.append((float(np.linalg.norm(diff)), (i, j)))
+        min_distance = min(distance for distance, _pair in pair_distances)
+        tol = max(1e-6, min_distance * 0.05)
+        return [pair for distance, pair in pair_distances if distance <= min_distance + tol]
 
     def _speech_features(self, chunk: np.ndarray, prev_mag: np.ndarray | None, noise_floor: float):
         mono = np.mean(chunk, axis=0)
@@ -671,7 +684,7 @@ class SRPPHATLocalization:
 
         if Zxx_roi.shape[1] == 0:
             return [], np.zeros(360), []
-        pairs = [(i, j) for i in range(M_mics) for j in range(i + 1, M_mics)]
+        pairs = self._selected_pairs(M_mics)
         pair_freq_masks: dict[tuple[int, int], np.ndarray] = {}
         for i, j in pairs:
             diff = np.asarray(self.mic_pos[:, i] - self.mic_pos[:, j], dtype=np.float64)

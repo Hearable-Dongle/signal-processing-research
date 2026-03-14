@@ -1,1 +1,1 @@
-Add per-pair GCC alias masking to `srp_phat_localization` and benchmark it side-by-side on XVF3800 real recordings using the single-speaker localization-only path.
+Add XVF3800 spatial-aliasing experiment controls for SRP localization: per-pair alias masking and an `adjacent_only` pair-selection mode, with benchmark support for single-speaker localization-only evaluation.

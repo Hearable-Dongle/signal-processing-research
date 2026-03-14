@@ -79,6 +79,7 @@ class LocalizationBackendBase:
         grid_size: int = 72,
         min_separation_deg: float = 15.0,
         small_aperture_bias: bool = True,
+        pair_selection_mode: str = "all",
     ):
         self.mic_pos = np.asarray(mic_pos, dtype=np.float64)
         self.fs = int(fs)
@@ -90,6 +91,7 @@ class LocalizationBackendBase:
         self.grid_size = int(grid_size)
         self.min_separation_deg = float(min_separation_deg)
         self.small_aperture_bias = bool(small_aperture_bias)
+        self.pair_selection_mode = str(pair_selection_mode)
 
     def process(self, audio: np.ndarray) -> LocalizationBackendResult:
         raise NotImplementedError
@@ -124,6 +126,7 @@ class _LocalizationAlgoAdapter(LocalizationBackendBase):
             overlap=self.overlap,
             freq_range=self.freq_range,
             max_sources=self.max_sources,
+            pair_selection_mode=self.pair_selection_mode,
         )
 
     def process(self, audio: np.ndarray) -> LocalizationBackendResult:
@@ -172,6 +175,7 @@ def build_localization_backend(
     grid_size: int = 72,
     min_separation_deg: float = 15.0,
     small_aperture_bias: bool = True,
+    pair_selection_mode: str = "all",
 ) -> LocalizationBackendBase:
     common = dict(
         mic_pos=mic_pos,
@@ -184,6 +188,7 @@ def build_localization_backend(
         grid_size=grid_size,
         min_separation_deg=min_separation_deg,
         small_aperture_bias=small_aperture_bias,
+        pair_selection_mode=pair_selection_mode,
     )
     name = str(name)
     if name in {"srp_phat_legacy", "srp_phat_localization"}:

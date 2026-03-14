@@ -541,6 +541,7 @@ def _run_recording_method_job(
     localization_overlap: float,
     localization_freq_low_hz: int,
     localization_freq_high_hz: int,
+    localization_pair_selection_mode: str,
     speaker_history_size: int,
     speaker_activation_min_predictions: int,
     speaker_match_window_deg: float,
@@ -576,6 +577,7 @@ def _run_recording_method_job(
         overlap=float(localization_overlap),
         freq_low_hz=int(localization_freq_low_hz),
         freq_high_hz=int(localization_freq_high_hz),
+        localization_pair_selection_mode=str(localization_pair_selection_mode),
         speaker_history_size=int(speaker_history_size),
         speaker_activation_min_predictions=int(speaker_activation_min_predictions),
         speaker_match_window_deg=float(speaker_match_window_deg),
@@ -681,6 +683,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--localization-overlap", type=float, default=0.2)
     parser.add_argument("--localization-freq-low-hz", type=int, default=200)
     parser.add_argument("--localization-freq-high-hz", type=int, default=3000)
+    parser.add_argument("--localization-pair-selection-mode", choices=["all", "adjacent_only"], default="all")
     parser.add_argument(
         "--speaker-centroid-history-size",
         "--speaker-history-size",
@@ -768,6 +771,7 @@ def main() -> None:
                 localization_overlap=float(args.localization_overlap),
                 localization_freq_low_hz=int(args.localization_freq_low_hz),
                 localization_freq_high_hz=int(args.localization_freq_high_hz),
+                localization_pair_selection_mode=str(args.localization_pair_selection_mode),
                 speaker_history_size=int(args.speaker_history_size),
                 speaker_activation_min_predictions=int(args.speaker_activation_min_predictions),
                 speaker_match_window_deg=float(args.speaker_match_window_deg),
@@ -838,6 +842,7 @@ def main() -> None:
             "localization_overlap": float(args.localization_overlap),
             "localization_freq_low_hz": int(args.localization_freq_low_hz),
             "localization_freq_high_hz": int(args.localization_freq_high_hz),
+            "localization_pair_selection_mode": str(args.localization_pair_selection_mode),
             "speaker_history_size": int(args.speaker_history_size),
             "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
             "speaker_match_window_deg": float(args.speaker_match_window_deg),
