@@ -58,12 +58,22 @@ def _normalize_angle_deg(v: float) -> float:
     return float(v % 360.0)
 
 
-def _to_display_angle_deg(angle_deg: float, *, mic_array_profile: str) -> float:
+def _raw_math_angle_to_display_angle_deg(angle_deg: float, *, mic_array_profile: str) -> float:
     angle = _normalize_angle_deg(float(angle_deg))
     if str(mic_array_profile) == "respeaker_xvf3800_0650":
         # Backend/localization math uses +x as 0 deg; the UI uses the cable edge
         # between mics 1 and 2 as 0 deg, which is +y for the XVF3800 geometry.
         return _normalize_angle_deg(90.0 - angle)
+    return angle
+
+
+def _backend_prediction_to_display_angle_deg(angle_deg: float, *, mic_array_profile: str) -> float:
+    angle = _normalize_angle_deg(float(angle_deg))
+    if str(mic_array_profile) == "respeaker_xvf3800_0650":
+        # Backend localization emits incoming-wave direction. Manual annotations
+        # from Data Collection are source bearing, so flip by 180 deg before
+        # rotating into the UI convention.
+        return _normalize_angle_deg(270.0 - angle)
     return angle
 
 
@@ -280,7 +290,7 @@ def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float, mic_arr
                 "speaker_name": str(item.get("speaker_name", f"speaker-{len(tracks) + 1}")),
                 "start_sec": float(window[0]),
                 "end_sec": float(window[1]),
-                "angle_deg": _to_display_angle_deg(float(item.get("angle_deg", 0.0)), mic_array_profile=mic_array_profile),
+                "angle_deg": _raw_math_angle_to_display_angle_deg(float(item.get("angle_deg", 0.0)), mic_array_profile=mic_array_profile),
                 "source": "simulation",
             }
         )
@@ -308,7 +318,7 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic
     gt_source = str(ground_truth_tracks[0].get("source", ""))
     final_speakers = list(summary.get("speaker_map_final", []))
     final_angles = [
-        _to_display_angle_deg(float(item.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
+        _backend_prediction_to_display_angle_deg(float(item.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
         for item in final_speakers
     ]
     if final_angles:
@@ -320,7 +330,7 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic
     active_errors: list[float] = []
     for row in trace_rows:
         active_angles = [
-            _to_display_angle_deg(float(item.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
+            _backend_prediction_to_display_angle_deg(float(item.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
             for item in row.get("speakers", [])
             if bool(item.get("active", False))
         ]
@@ -369,7 +379,7 @@ def _plot_speaker_timeline(
         x = float(row.get("frame_index", 0)) * frame_step_s
         for angle_deg, score in zip(row.get("raw_peaks_deg", []), row.get("raw_peak_scores", [])):
             raw_xs.append(x)
-            raw_ys.append(_to_display_angle_deg(float(angle_deg), mic_array_profile=mic_array_profile))
+            raw_ys.append(_backend_prediction_to_display_angle_deg(float(angle_deg), mic_array_profile=mic_array_profile))
             raw_cs.append(float(max(0.0, score)))
         for speaker in row.get("speakers", []):
             if not bool(speaker.get("active", False)):
@@ -381,7 +391,7 @@ def _plot_speaker_timeline(
             )
             track["xs"].append(x)
             track["ys"].append(
-                _to_display_angle_deg(float(speaker.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
+                _backend_prediction_to_display_angle_deg(float(speaker.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
             )
             track["conf"].append(float(max(0.0, speaker.get("confidence", 0.0))))
     gt_handles = []
@@ -542,6 +552,7 @@ def _run_recording_method_job(
     localization_freq_low_hz: int,
     localization_freq_high_hz: int,
     localization_pair_selection_mode: str,
+    localization_vad_enabled: bool,
     speaker_history_size: int,
     speaker_activation_min_predictions: int,
     speaker_match_window_deg: float,
@@ -578,6 +589,7 @@ def _run_recording_method_job(
         freq_low_hz=int(localization_freq_low_hz),
         freq_high_hz=int(localization_freq_high_hz),
         localization_pair_selection_mode=str(localization_pair_selection_mode),
+        localization_vad_enabled=bool(localization_vad_enabled),
         speaker_history_size=int(speaker_history_size),
         speaker_activation_min_predictions=int(speaker_activation_min_predictions),
         speaker_match_window_deg=float(speaker_match_window_deg),
@@ -684,6 +696,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--localization-freq-low-hz", type=int, default=200)
     parser.add_argument("--localization-freq-high-hz", type=int, default=3000)
     parser.add_argument("--localization-pair-selection-mode", choices=["all", "adjacent_only"], default="all")
+    parser.add_argument("--localization-vad-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--speaker-centroid-history-size",
         "--speaker-history-size",
@@ -772,6 +785,7 @@ def main() -> None:
                 localization_freq_low_hz=int(args.localization_freq_low_hz),
                 localization_freq_high_hz=int(args.localization_freq_high_hz),
                 localization_pair_selection_mode=str(args.localization_pair_selection_mode),
+                localization_vad_enabled=bool(args.localization_vad_enabled),
                 speaker_history_size=int(args.speaker_history_size),
                 speaker_activation_min_predictions=int(args.speaker_activation_min_predictions),
                 speaker_match_window_deg=float(args.speaker_match_window_deg),
@@ -843,6 +857,7 @@ def main() -> None:
             "localization_freq_low_hz": int(args.localization_freq_low_hz),
             "localization_freq_high_hz": int(args.localization_freq_high_hz),
             "localization_pair_selection_mode": str(args.localization_pair_selection_mode),
+            "localization_vad_enabled": bool(args.localization_vad_enabled),
             "speaker_history_size": int(args.speaker_history_size),
             "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
             "speaker_match_window_deg": float(args.speaker_match_window_deg),
