@@ -81,6 +81,11 @@ class LocalizationBackendBase:
         min_separation_deg: float = 15.0,
         small_aperture_bias: bool = True,
         pair_selection_mode: str = "all",
+        vad_enabled: bool = True,
+        capon_spectrum_ema_alpha: float = 0.78,
+        capon_peak_min_sharpness: float = 0.12,
+        capon_peak_min_margin: float = 0.08,
+        capon_hold_frames: int = 2,
     ):
         self.mic_pos = np.asarray(mic_pos, dtype=np.float64)
         self.fs = int(fs)
@@ -93,6 +98,11 @@ class LocalizationBackendBase:
         self.min_separation_deg = float(min_separation_deg)
         self.small_aperture_bias = bool(small_aperture_bias)
         self.pair_selection_mode = str(pair_selection_mode)
+        self.vad_enabled = bool(vad_enabled)
+        self.capon_spectrum_ema_alpha = float(capon_spectrum_ema_alpha)
+        self.capon_peak_min_sharpness = float(capon_peak_min_sharpness)
+        self.capon_peak_min_margin = float(capon_peak_min_margin)
+        self.capon_hold_frames = int(capon_hold_frames)
 
     def process(self, audio: np.ndarray) -> LocalizationBackendResult:
         raise NotImplementedError
@@ -128,14 +138,22 @@ class _LocalizationAlgoAdapter(LocalizationBackendBase):
             freq_range=self.freq_range,
             max_sources=self.max_sources,
             pair_selection_mode=self.pair_selection_mode,
+            vad_enabled=self.vad_enabled,
+            capon_spectrum_ema_alpha=self.capon_spectrum_ema_alpha,
+            capon_peak_min_sharpness=self.capon_peak_min_sharpness,
+            capon_peak_min_margin=self.capon_peak_min_margin,
+            capon_hold_frames=self.capon_hold_frames,
         )
 
     def process(self, audio: np.ndarray) -> LocalizationBackendResult:
         doas_rad, p_theta, history = self._localizer.process(audio)
         peaks_deg = normalize_doa_list([float(np.degrees(v) % 360.0) for v in doas_rad], max_targets=self.max_sources)
         spec = _normalize_spectrum(p_theta)
+        explicit_peak_scores = list(getattr(self._localizer, "last_peak_scores", []) or [])
         peak_scores: list[float] = []
-        if spec is not None and spec.size > 0:
+        if explicit_peak_scores:
+            peak_scores = [float(v) for v in explicit_peak_scores[: len(peaks_deg)]]
+        elif spec is not None and spec.size > 0:
             for doa in peaks_deg:
                 idx = int(round((float(doa) % 360.0) / 360.0 * (spec.size - 1)))
                 idx = max(0, min(spec.size - 1, idx))
@@ -149,6 +167,7 @@ class _LocalizationAlgoAdapter(LocalizationBackendBase):
                 "spectrum_bins": int(np.asarray(p_theta).size if p_theta is not None else 0),
                 "history_len": int(len(history) if history is not None else 0),
                 "localization_source": "localization.algo",
+                **(dict(getattr(self._localizer, "last_debug", {})) if getattr(self._localizer, "last_debug", None) else {}),
             },
         )
 
@@ -182,6 +201,11 @@ def build_localization_backend(
     min_separation_deg: float = 15.0,
     small_aperture_bias: bool = True,
     pair_selection_mode: str = "all",
+    vad_enabled: bool = True,
+    capon_spectrum_ema_alpha: float = 0.78,
+    capon_peak_min_sharpness: float = 0.12,
+    capon_peak_min_margin: float = 0.08,
+    capon_hold_frames: int = 2,
 ) -> LocalizationBackendBase:
     common = dict(
         mic_pos=mic_pos,
@@ -195,6 +219,11 @@ def build_localization_backend(
         min_separation_deg=min_separation_deg,
         small_aperture_bias=small_aperture_bias,
         pair_selection_mode=pair_selection_mode,
+        vad_enabled=vad_enabled,
+        capon_spectrum_ema_alpha=capon_spectrum_ema_alpha,
+        capon_peak_min_sharpness=capon_peak_min_sharpness,
+        capon_peak_min_margin=capon_peak_min_margin,
+        capon_hold_frames=capon_hold_frames,
     )
     name = str(name)
     if name in {"srp_phat_legacy", "srp_phat_localization"}:

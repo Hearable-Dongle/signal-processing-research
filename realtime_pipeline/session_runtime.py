@@ -62,6 +62,11 @@ def build_pipeline_config_from_request(
         srp_freq_min_hz=int(req.freq_low_hz),
         srp_freq_max_hz=int(req.freq_high_hz),
         localization_pair_selection_mode=str(req.localization_pair_selection_mode),
+        localization_vad_enabled=bool(req.localization_vad_enabled),
+        capon_spectrum_ema_alpha=float(req.capon_spectrum_ema_alpha),
+        capon_peak_min_sharpness=float(req.capon_peak_min_sharpness),
+        capon_peak_min_margin=float(req.capon_peak_min_margin),
+        capon_hold_frames=int(req.capon_hold_frames),
     )
 
 
