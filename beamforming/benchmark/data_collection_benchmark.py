@@ -703,7 +703,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
     parser.add_argument("--assume-single-speaker", action="store_true")
-    parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "music_1src"], default="srp_phat_localization")
+    parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "capon_1src", "music_1src"], default="srp_phat_localization")
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
     parser.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     parser.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")

@@ -320,6 +320,7 @@ class FastPathWorker(threading.Thread):
         dominant_lock_mode = str(config.tracking_mode).strip().lower() == "dominant_lock_v1"
         single_source_backend = (
             config.localization_backend in {
+                "capon_1src",
                 "music_1src",
             }
             or bool(config.single_source_mode_enabled)
