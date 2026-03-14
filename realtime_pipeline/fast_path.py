@@ -332,7 +332,7 @@ class FastPathWorker(threading.Thread):
             if single_source_backend
             else (config.srp_freq_min_hz, config.srp_freq_max_hz)
         )
-        tracker_max_sources = 1 if single_source_backend else config.srp_max_sources
+        tracker_max_sources = 1 if (single_source_backend or bool(config.assume_single_speaker)) else config.srp_max_sources
         self._tracker = SRPPeakTracker(
             mic_pos=self._mic_geometry_xyz if self._mic_geometry_xyz.shape[0] == 3 else self._mic_geometry_xyz.T,
             fs=config.sample_rate_hz,
@@ -441,6 +441,9 @@ class FastPathWorker(threading.Thread):
         if not peaks:
             self._state.publish_speaker_map({})
             return
+        if bool(self._cfg.assume_single_speaker):
+            peaks = list(peaks[:1])
+            scores = None if scores is None else list(scores[:1])
         peak_scores = scores if scores is not None else [1.0] * len(peaks)
         speaker_map: dict[int, SpeakerGainDirection] = {}
         for idx, doa_deg in enumerate(peaks, start=1):

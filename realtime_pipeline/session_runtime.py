@@ -30,12 +30,14 @@ def build_pipeline_config_from_request(
     max_speakers_hint: int,
 ) -> PipelineConfig:
     algorithm = get_simulation_algorithm_preset(req.algorithm_mode)
+    assume_single_speaker = bool(req.assume_single_speaker)
     return PipelineConfig(
         sample_rate_hz=int(sample_rate_hz),
         fast_frame_ms=max(10, int(req.localization_hop_ms)),
         slow_chunk_ms=int(req.slow_chunk_ms),
         slow_path_enabled=str(algorithm.algorithm_mode) != "localization_only",
-        max_speakers_hint=max(1, int(max_speakers_hint)),
+        max_speakers_hint=1 if assume_single_speaker else max(1, int(max_speakers_hint)),
+        assume_single_speaker=assume_single_speaker,
         convtasnet_model_name=str(req.convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(req.convtasnet_model_sample_rate_hz),
         convtasnet_input_sample_rate_hz=int(req.convtasnet_input_sample_rate_hz),
@@ -256,6 +258,7 @@ def run_offline_session_pipeline(
         "srp_freq_max_hz": int(cfg.srp_freq_max_hz),
         "tracking_mode": str(cfg.tracking_mode),
         "control_mode": str(cfg.control_mode),
+        "assume_single_speaker": bool(cfg.assume_single_speaker),
         "direction_long_memory_enabled": bool(cfg.direction_long_memory_enabled),
         "direction_long_memory_window_ms": float(cfg.direction_long_memory_window_ms),
     }

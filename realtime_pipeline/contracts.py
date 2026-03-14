@@ -106,6 +106,7 @@ class PipelineConfig:
     sound_speed_m_s: float = 343.0
     process_partial_chunk: bool = True
     max_speakers_hint: int = 8
+    assume_single_speaker: bool = False
     prefer_multispeaker_module: bool = True
     multispeaker_model_dir: str = "multispeaker_separation/models"
     multispeaker_backend: str = "pytorch"
