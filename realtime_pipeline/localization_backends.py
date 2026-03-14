@@ -5,13 +5,14 @@ from dataclasses import dataclass
 import numpy as np
 
 from beamforming.localization_bridge import normalize_doa_list
-from localization.algo import CaponLocalization, MUSICLocalization, SRPPHATLocalization
+from localization.algo import CaponLocalization, CaponMVDRRefineLocalization, MUSICLocalization, SRPPHATLocalization
 
 
 SUPPORTED_LOCALIZATION_BACKENDS = (
     "srp_phat_legacy",
     "srp_phat_localization",
     "capon_1src",
+    "capon_mvdr_refine_1src",
     "music_1src",
 )
 
@@ -187,6 +188,11 @@ class Capon1SrcBackend(_LocalizationAlgoAdapter):
         super().__init__(backend_name=backend_name, algo_cls=CaponLocalization, **kwargs)
 
 
+class CaponMVDRRefine1SrcBackend(_LocalizationAlgoAdapter):
+    def __init__(self, *, backend_name: str = "capon_mvdr_refine_1src", **kwargs):
+        super().__init__(backend_name=backend_name, algo_cls=CaponMVDRRefineLocalization, **kwargs)
+
+
 def build_localization_backend(
     name: str,
     *,
@@ -230,6 +236,8 @@ def build_localization_backend(
         return LegacySRPBackend(backend_name=name, **common)
     if name == "capon_1src":
         return Capon1SrcBackend(backend_name=name, **common)
+    if name == "capon_mvdr_refine_1src":
+        return CaponMVDRRefine1SrcBackend(backend_name=name, **common)
     if name == "music_1src":
         return Music1SrcBackend(backend_name=name, **common)
     supported = ", ".join(SUPPORTED_LOCALIZATION_BACKENDS)

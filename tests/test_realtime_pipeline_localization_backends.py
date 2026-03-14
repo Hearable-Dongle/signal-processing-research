@@ -86,6 +86,31 @@ def test_capon_1src_smoke_localizes_single_source() -> None:
     assert _angular_error_deg(result.peaks_deg[0], 35.0) <= 30.0
 
 
+def test_capon_mvdr_refine_1src_smoke_localizes_single_source() -> None:
+    sr = 16000
+    mic_pos = mic_positions_xyz("respeaker_v3_0457").T
+    audio = _simulate_far_field_signal(35.0, sr=sr, duration_s=0.32, mic_pos_xyz=mic_pos)
+    backend = build_localization_backend(
+        "capon_mvdr_refine_1src",
+        mic_pos=mic_pos,
+        fs=sr,
+        nfft=256,
+        overlap=0.5,
+        freq_range=(300, 2500),
+        max_sources=1,
+        grid_size=72,
+        min_separation_deg=15.0,
+        small_aperture_bias=True,
+    )
+    result = backend.process(audio)
+    assert result.debug["backend"] == "capon_mvdr_refine_1src"
+    assert result.debug["localization_source"] == "localization.algo"
+    assert "coarse_peak_deg" in result.debug
+    assert "refined_peak_deg" in result.debug
+    assert result.peaks_deg
+    assert _angular_error_deg(result.peaks_deg[0], 35.0) <= 30.0
+
+
 def test_srp_phat_localization_smoke_localizes_single_source_without_180_flip() -> None:
     sr = 16000
     mic_pos = mic_positions_xyz("respeaker_v3_0457").T
@@ -106,6 +131,28 @@ def test_srp_phat_localization_smoke_localizes_single_source_without_180_flip() 
     assert result.debug["backend"] == "srp_phat_localization"
     assert result.peaks_deg
     assert _angular_error_deg(result.peaks_deg[0], 35.0) <= 30.0
+
+
+@pytest.mark.parametrize("backend_name", ["srp_phat_localization", "capon_1src", "capon_mvdr_refine_1src"])
+def test_vad_enabled_backends_abstain_on_silence(backend_name: str) -> None:
+    sr = 16000
+    mic_pos = mic_positions_xyz("respeaker_v3_0457").T
+    audio = np.zeros((mic_pos.shape[1], int(sr * 0.32)), dtype=np.float32)
+    backend = build_localization_backend(
+        backend_name,
+        mic_pos=mic_pos,
+        fs=sr,
+        nfft=256,
+        overlap=0.5,
+        freq_range=(300, 2500),
+        max_sources=1,
+        grid_size=72,
+        min_separation_deg=15.0,
+        small_aperture_bias=True,
+        vad_enabled=True,
+    )
+    result = backend.process(audio)
+    assert result.peaks_deg == []
 
 
 @pytest.mark.parametrize(

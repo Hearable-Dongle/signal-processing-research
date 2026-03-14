@@ -22,6 +22,7 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
     assert req.localization_backend == "srp_phat_localization"
+    assert req.localization_vad_enabled is True
     assert req.tracking_mode == "multi_peak_v2"
     assert req.processing_mode == "specific_speaker_enhancement"
     assert req.monitor_source == "processed"
@@ -30,6 +31,8 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req2.localization_backend == "music_1src"
     req3 = SessionStartRequest(localization_backend="capon_1src")
     assert req3.localization_backend == "capon_1src"
+    req4 = SessionStartRequest(localization_backend="capon_mvdr_refine_1src")
+    assert req4.localization_backend == "capon_mvdr_refine_1src"
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,

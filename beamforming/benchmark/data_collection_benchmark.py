@@ -553,6 +553,8 @@ def _run_recording_method_job(
     localization_freq_high_hz: int,
     localization_pair_selection_mode: str,
     localization_vad_enabled: bool,
+    capon_peak_min_sharpness: float,
+    capon_peak_min_margin: float,
     speaker_history_size: int,
     speaker_activation_min_predictions: int,
     speaker_match_window_deg: float,
@@ -590,6 +592,8 @@ def _run_recording_method_job(
         freq_high_hz=int(localization_freq_high_hz),
         localization_pair_selection_mode=str(localization_pair_selection_mode),
         localization_vad_enabled=bool(localization_vad_enabled),
+        capon_peak_min_sharpness=float(capon_peak_min_sharpness),
+        capon_peak_min_margin=float(capon_peak_min_margin),
         speaker_history_size=int(speaker_history_size),
         speaker_activation_min_predictions=int(speaker_activation_min_predictions),
         speaker_match_window_deg=float(speaker_match_window_deg),
@@ -697,6 +701,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--localization-freq-high-hz", type=int, default=3000)
     parser.add_argument("--localization-pair-selection-mode", choices=["all", "adjacent_only"], default="all")
     parser.add_argument("--localization-vad-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--capon-peak-min-sharpness", type=float, default=0.12)
+    parser.add_argument("--capon-peak-min-margin", type=float, default=0.08)
     parser.add_argument(
         "--speaker-centroid-history-size",
         "--speaker-history-size",
@@ -716,7 +722,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
     parser.add_argument("--assume-single-speaker", action="store_true")
-    parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "capon_1src", "music_1src"], default="srp_phat_localization")
+    parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "capon_1src", "capon_mvdr_refine_1src", "music_1src"], default="srp_phat_localization")
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
     parser.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     parser.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")
@@ -786,6 +792,8 @@ def main() -> None:
                 localization_freq_high_hz=int(args.localization_freq_high_hz),
                 localization_pair_selection_mode=str(args.localization_pair_selection_mode),
                 localization_vad_enabled=bool(args.localization_vad_enabled),
+                capon_peak_min_sharpness=float(args.capon_peak_min_sharpness),
+                capon_peak_min_margin=float(args.capon_peak_min_margin),
                 speaker_history_size=int(args.speaker_history_size),
                 speaker_activation_min_predictions=int(args.speaker_activation_min_predictions),
                 speaker_match_window_deg=float(args.speaker_match_window_deg),
@@ -858,6 +866,8 @@ def main() -> None:
             "localization_freq_high_hz": int(args.localization_freq_high_hz),
             "localization_pair_selection_mode": str(args.localization_pair_selection_mode),
             "localization_vad_enabled": bool(args.localization_vad_enabled),
+            "capon_peak_min_sharpness": float(args.capon_peak_min_sharpness),
+            "capon_peak_min_margin": float(args.capon_peak_min_margin),
             "speaker_history_size": int(args.speaker_history_size),
             "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
             "speaker_match_window_deg": float(args.speaker_match_window_deg),

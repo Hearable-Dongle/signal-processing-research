@@ -321,6 +321,7 @@ class FastPathWorker(threading.Thread):
         single_source_backend = (
             config.localization_backend in {
                 "capon_1src",
+                "capon_mvdr_refine_1src",
                 "music_1src",
             }
             or bool(config.single_source_mode_enabled)

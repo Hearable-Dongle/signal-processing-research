@@ -66,7 +66,7 @@ def main() -> int:
     parser.add_argument("--monitor-source", choices=["processed", "raw_mixed"], default="processed")
     parser.add_argument(
         "--localization-backend",
-        choices=["srp_phat_legacy", "srp_phat_localization", "capon_1src", "music_1src"],
+        choices=["srp_phat_legacy", "srp_phat_localization", "capon_1src", "capon_mvdr_refine_1src", "music_1src"],
         default="srp_phat_localization",
     )
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")

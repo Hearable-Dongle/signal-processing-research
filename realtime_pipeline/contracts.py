@@ -48,7 +48,7 @@ class PipelineConfig:
     slow_chunk_hop_ms: int | None = None
     slow_path_enabled: bool = True
     fast_path_reference_mode: str = "speaker_map"  # one of: speaker_map, srp_peak
-    localization_backend: str = "srp_phat_localization"  # one of: srp_phat_legacy, srp_phat_localization, srp_phat_mvdr_refine, music_1src
+    localization_backend: str = "srp_phat_localization"  # one of: srp_phat_legacy, srp_phat_localization, srp_phat_mvdr_refine, capon_1src, capon_mvdr_refine_1src, music_1src
     tracking_mode: str = "multi_peak_v2"  # one of: legacy, multi_peak_v2, dominant_lock_v1
     control_mode: str = "spatial_peak_mode"  # one of: spatial_peak_mode, speaker_tracking_mode
     localization_window_ms: int = 160

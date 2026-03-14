@@ -821,6 +821,8 @@ class CaponLocalization:
         self._hold_remaining = 0
         self.last_debug: dict[str, float | int | str | bool] = {}
         self.last_peak_scores: list[float] = []
+        self.refine_window_deg = float(kwargs.get("capon_refine_window_deg", 20.0))
+        self.refine_step_deg = float(kwargs.get("capon_refine_step_deg", 2.0))
 
     def _speech_active(self, audio: np.ndarray) -> bool:
         if not self.vad_enabled:
@@ -855,29 +857,7 @@ class CaponLocalization:
             return False
         return (float(voiced_frames) / float(total_frames)) >= self.vad_min_speech_ratio
 
-    def process(self, audio):
-        speech_active = self._speech_active(audio)
-        self.last_debug = {
-            "vad_enabled": bool(self.vad_enabled),
-            "window_speech_active": bool(speech_active),
-        }
-        if not speech_active:
-            self._spectrum_accum = None
-            if self._last_accepted_angle is not None and self._hold_remaining > 0:
-                self._hold_remaining -= 1
-                self.last_peak_scores = [float(max(0.0, self._last_accepted_score * 0.9))]
-                self.last_debug.update(
-                    {
-                        "output_mode": "held",
-                        "capon_confidence": float(max(0.0, self._last_accepted_score * 0.9)),
-                        "capon_peak_sharpness": 0.0,
-                        "capon_peak_margin": 0.0,
-                    }
-                )
-                return [float(self._last_accepted_angle)], np.zeros(self.grid_size), []
-            self.last_peak_scores = []
-            return [], np.zeros(self.grid_size), []
-        m_mics, _n_samples = audio.shape
+    def _compute_stft_roi(self, audio: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
         noverlap = min(int(round(self.nfft * self.overlap)), self.nfft - 1)
         f_vec, _t_vec, Zxx = signal.stft(
             audio,
@@ -893,11 +873,13 @@ class CaponLocalization:
         relevant_freqs = f_vec[f_mask].astype(float)
         Zxx_roi = Zxx[:, f_mask, :]
         if Zxx_roi.shape[1] == 0 or Zxx_roi.shape[2] == 0:
-            return [], np.zeros(self.grid_size), []
+            return None
+        return relevant_freqs, Zxx_roi
 
-        search_angles = np.linspace(0, 2 * np.pi, self.grid_size, endpoint=False)
+    def _capon_spectrum_from_roi(self, relevant_freqs: np.ndarray, Zxx_roi: np.ndarray, search_angles: np.ndarray) -> np.ndarray:
+        m_mics = int(Zxx_roi.shape[0])
         dirs = np.stack([np.cos(search_angles), np.sin(search_angles), np.zeros_like(search_angles)], axis=1)
-        spectrum = np.zeros(self.grid_size, dtype=np.float64)
+        spectrum = np.zeros(search_angles.shape[0], dtype=np.float64)
         eye = np.eye(m_mics, dtype=np.complex128)
 
         for f_idx, freq_hz in enumerate(relevant_freqs):
@@ -927,6 +909,9 @@ class CaponLocalization:
         vmax = float(np.max(spectrum))
         if vmax > 0.0:
             spectrum /= vmax
+        return spectrum
+
+    def _smooth_spectrum(self, spectrum: np.ndarray) -> np.ndarray:
         if self._spectrum_accum is None or self._spectrum_accum.shape != spectrum.shape:
             self._spectrum_accum = np.asarray(spectrum, dtype=np.float64)
         else:
@@ -935,10 +920,10 @@ class CaponLocalization:
         smooth_spectrum = np.asarray(self._spectrum_accum, dtype=np.float64)
         if np.max(smooth_spectrum) > 0.0:
             smooth_spectrum = smooth_spectrum / np.max(smooth_spectrum)
+        return smooth_spectrum
 
-        if smooth_spectrum.size == 0:
-            self.last_peak_scores = []
-            return [], smooth_spectrum, []
+    def _score_peak(self, spectrum: np.ndarray, *, exclusion_deg: float = 12.0) -> dict[str, float | int | None | bool]:
+        smooth_spectrum = np.asarray(spectrum, dtype=np.float64)
         best_idx = int(np.argmax(smooth_spectrum))
         best_score = float(smooth_spectrum[best_idx])
         left = float(smooth_spectrum[(best_idx - 1) % smooth_spectrum.size])
@@ -949,7 +934,7 @@ class CaponLocalization:
         peak_sharpness = float(max(0.0, best_score - global_baseline))
         second_idx = None
         second_score = 0.0
-        exclusion = max(2, int(round(12.0 / (360.0 / self.grid_size))))
+        exclusion = max(2, int(round(float(exclusion_deg) / (360.0 / max(smooth_spectrum.size, 1)))))
         for idx, score in sorted(enumerate(smooth_spectrum.tolist()), key=lambda item: item[1], reverse=True):
             if abs(idx - best_idx) <= exclusion or (smooth_spectrum.size - abs(idx - best_idx)) <= exclusion:
                 continue
@@ -959,6 +944,60 @@ class CaponLocalization:
         peak_margin = float(max(0.0, best_score - second_score))
         confidence = float(np.clip(0.5 * best_score + 0.25 * peak_sharpness + 0.25 * peak_margin, 0.0, 1.0))
         accepted = bool(peak_sharpness >= self.peak_min_sharpness and peak_margin >= self.peak_min_margin)
+        return {
+            "best_idx": int(best_idx),
+            "best_score": float(best_score),
+            "second_idx": None if second_idx is None else int(second_idx),
+            "local_contrast": float(local_contrast),
+            "peak_sharpness": float(peak_sharpness),
+            "peak_margin": float(peak_margin),
+            "confidence": float(confidence),
+            "accepted": bool(accepted),
+        }
+
+    def process(self, audio):
+        speech_active = self._speech_active(audio)
+        self.last_debug = {
+            "vad_enabled": bool(self.vad_enabled),
+            "window_speech_active": bool(speech_active),
+        }
+        if not speech_active:
+            self._spectrum_accum = None
+            if self._last_accepted_angle is not None and self._hold_remaining > 0:
+                self._hold_remaining -= 1
+                self.last_peak_scores = [float(max(0.0, self._last_accepted_score * 0.9))]
+                self.last_debug.update(
+                    {
+                        "output_mode": "held",
+                        "capon_confidence": float(max(0.0, self._last_accepted_score * 0.9)),
+                        "capon_peak_sharpness": 0.0,
+                        "capon_peak_margin": 0.0,
+                    }
+                )
+                return [float(self._last_accepted_angle)], np.zeros(self.grid_size), []
+            self.last_peak_scores = []
+            return [], np.zeros(self.grid_size), []
+        roi = self._compute_stft_roi(audio)
+        if roi is None:
+            return [], np.zeros(self.grid_size), []
+        relevant_freqs, Zxx_roi = roi
+
+        search_angles = np.linspace(0, 2 * np.pi, self.grid_size, endpoint=False)
+        spectrum = self._capon_spectrum_from_roi(relevant_freqs, Zxx_roi, search_angles)
+        smooth_spectrum = self._smooth_spectrum(spectrum)
+
+        if smooth_spectrum.size == 0:
+            self.last_peak_scores = []
+            return [], smooth_spectrum, []
+        peak_eval = self._score_peak(smooth_spectrum)
+        best_idx = int(peak_eval["best_idx"])
+        best_score = float(peak_eval["best_score"])
+        second_idx = peak_eval["second_idx"]
+        local_contrast = float(peak_eval["local_contrast"])
+        peak_sharpness = float(peak_eval["peak_sharpness"])
+        peak_margin = float(peak_eval["peak_margin"])
+        confidence = float(peak_eval["confidence"])
+        accepted = bool(peak_eval["accepted"])
         self.last_debug.update(
             {
                 "capon_peak_index": int(best_idx),
@@ -987,6 +1026,104 @@ class CaponLocalization:
         self.last_debug["output_mode"] = "abstained"
         self.last_peak_scores = []
         return [], smooth_spectrum, []
+
+
+class CaponMVDRRefineLocalization(CaponLocalization):
+    def process(self, audio):
+        speech_active = self._speech_active(audio)
+        self.last_debug = {
+            "vad_enabled": bool(self.vad_enabled),
+            "window_speech_active": bool(speech_active),
+        }
+        if not speech_active:
+            self._spectrum_accum = None
+            if self._last_accepted_angle is not None and self._hold_remaining > 0:
+                self._hold_remaining -= 1
+                held_score = float(max(0.0, self._last_accepted_score * 0.9))
+                self.last_peak_scores = [held_score]
+                self.last_debug.update(
+                    {
+                        "output_mode": "held",
+                        "coarse_peak_deg": None,
+                        "coarse_peak_score": 0.0,
+                        "refined_peak_deg": float(np.degrees(self._last_accepted_angle) % 360.0),
+                        "refined_peak_score": held_score,
+                        "capon_confidence": held_score,
+                    }
+                )
+                return [float(self._last_accepted_angle)], np.zeros(self.grid_size), []
+            self.last_peak_scores = []
+            return [], np.zeros(self.grid_size), []
+
+        roi = self._compute_stft_roi(audio)
+        if roi is None:
+            return [], np.zeros(self.grid_size), []
+        relevant_freqs, Zxx_roi = roi
+
+        coarse_angles = np.linspace(0, 2 * np.pi, self.grid_size, endpoint=False)
+        coarse_spectrum = self._capon_spectrum_from_roi(relevant_freqs, Zxx_roi, coarse_angles)
+        smooth_coarse_spectrum = self._smooth_spectrum(coarse_spectrum)
+        if smooth_coarse_spectrum.size == 0:
+            self.last_peak_scores = []
+            return [], smooth_coarse_spectrum, []
+
+        coarse_eval = self._score_peak(smooth_coarse_spectrum)
+        coarse_idx = int(coarse_eval["best_idx"])
+        coarse_peak_rad = float(coarse_angles[coarse_idx])
+        coarse_peak_deg = float(np.degrees(coarse_peak_rad) % 360.0)
+
+        step_deg = max(self.refine_step_deg, 0.5)
+        half_window = max(self.refine_window_deg, step_deg)
+        local_offsets_deg = np.arange(-half_window, half_window + 0.5 * step_deg, step_deg, dtype=np.float64)
+        local_angles_deg = (coarse_peak_deg + local_offsets_deg) % 360.0
+        local_angles_rad = np.deg2rad(local_angles_deg)
+        local_spectrum = self._capon_spectrum_from_roi(relevant_freqs, Zxx_roi, local_angles_rad)
+        local_eval = self._score_peak(local_spectrum, exclusion_deg=max(2.0 * step_deg, 6.0))
+        refined_idx = int(local_eval["best_idx"])
+        refined_peak_rad = float(local_angles_rad[refined_idx])
+        refined_peak_deg = float(local_angles_deg[refined_idx])
+        refined_confidence = float(np.clip(
+            0.55 * float(local_eval["confidence"]) + 0.30 * float(coarse_eval["confidence"]) + 0.15 * float(local_eval["best_score"]),
+            0.0,
+            1.0,
+        ))
+        accepted = bool(local_eval["accepted"])
+
+        self.last_debug.update(
+            {
+                "coarse_peak_deg": coarse_peak_deg,
+                "coarse_peak_score": float(coarse_eval["best_score"]),
+                "refined_peak_deg": refined_peak_deg,
+                "refined_peak_score": float(local_eval["best_score"]),
+                "refinement_window_deg": float(half_window),
+                "refinement_step_deg": float(step_deg),
+                "capon_peak_sharpness": float(local_eval["peak_sharpness"]),
+                "capon_local_contrast": float(local_eval["local_contrast"]),
+                "capon_peak_margin": float(local_eval["peak_margin"]),
+                "capon_confidence": refined_confidence,
+                "local_refine_angles_deg": [float(v) for v in local_angles_deg.tolist()],
+                "local_refine_spectrum": [float(v) for v in np.asarray(local_spectrum, dtype=np.float64).tolist()],
+            }
+        )
+
+        if accepted:
+            self._last_accepted_angle = refined_peak_rad
+            self._last_accepted_score = refined_confidence
+            self._hold_remaining = int(max(0, self.hold_frames))
+            self.last_debug["output_mode"] = "accepted"
+            self.last_peak_scores = [refined_confidence]
+            return [refined_peak_rad], np.asarray(local_spectrum, dtype=np.float64), []
+
+        if self._last_accepted_angle is not None and self._hold_remaining > 0:
+            self._hold_remaining -= 1
+            self.last_debug["output_mode"] = "held"
+            held_score = float(max(0.0, self._last_accepted_score * 0.9))
+            self.last_peak_scores = [held_score]
+            return [float(self._last_accepted_angle)], np.asarray(local_spectrum, dtype=np.float64), []
+
+        self.last_debug["output_mode"] = "abstained"
+        self.last_peak_scores = []
+        return [], np.asarray(local_spectrum, dtype=np.float64), []
 
 
 class PyroomacousticsDOABase:

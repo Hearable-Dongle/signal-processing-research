@@ -167,6 +167,7 @@ class SRPPeakTracker:
         self._max_sources = int(max_sources)
         self._single_source_backends = {
             "capon_1src",
+            "capon_mvdr_refine_1src",
             "music_1src",
         }
         self._single_state_x: np.ndarray | None = None
