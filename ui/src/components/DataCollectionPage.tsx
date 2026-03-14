@@ -11,6 +11,7 @@ import type {
   RawChannelsResponse,
   RecordingArtifactManifest,
   RecordingEntry,
+  SpeakingPeriod,
 } from "../types/dataCollection";
 import type { ServerMessage, Speaker } from "../types/contracts";
 import { backendArrivalToUiSourceBearingDeg } from "../utils/direction";
@@ -55,13 +56,45 @@ function makeDefaultSpeakerName(index: number): string {
 function makeAnnotatedSpeaker(index: number): AnnotatedSpeaker {
   return {
     speakerName: makeDefaultSpeakerName(index),
-    directionDeg: 0,
+    speakingPeriods: [makeSpeakingPeriod()],
   };
 }
 
 function normalizeDirectionDeg(value: number): number {
   const wrapped = value % 360;
   return wrapped < 0 ? wrapped + 360 : wrapped;
+}
+
+function normalizeTimeSec(value: number): number {
+  return Math.max(0, Number.isFinite(value) ? value : 0);
+}
+
+function makeSpeakingPeriod(): SpeakingPeriod {
+  return {
+    startSec: 0,
+    endSec: 0,
+    directionDeg: 0,
+  };
+}
+
+function sanitizeSpeakingPeriod(period: SpeakingPeriod): SpeakingPeriod {
+  const startSec = normalizeTimeSec(period.startSec);
+  const endSec = Math.max(startSec, normalizeTimeSec(period.endSec));
+  return {
+    startSec,
+    endSec,
+    directionDeg: normalizeDirectionDeg(period.directionDeg),
+  };
+}
+
+function sanitizeAnnotatedSpeaker(speaker: AnnotatedSpeaker, index: number): AnnotatedSpeaker {
+  const speakingPeriods = speaker.speakingPeriods.length
+    ? speaker.speakingPeriods.map(sanitizeSpeakingPeriod)
+    : [makeSpeakingPeriod()];
+  return {
+    speakerName: speaker.speakerName.trim() || makeDefaultSpeakerName(index),
+    speakingPeriods,
+  };
 }
 
 function downloadBlob(filename: string, blob: Blob): void {
@@ -167,7 +200,11 @@ function rawChannelPlotSubtitle(speakers: AnnotatedSpeaker[]): string {
     return "";
   }
   return speakers
-    .map((speaker) => `${speaker.speakerName.trim() || "speaker"} ${normalizeDirectionDeg(speaker.directionDeg).toFixed(0)}°`)
+    .map((speaker, index) => {
+      const safeSpeaker = sanitizeAnnotatedSpeaker(speaker, index);
+      const period = safeSpeaker.speakingPeriods[0];
+      return `${safeSpeaker.speakerName} ${normalizeDirectionDeg(period.directionDeg).toFixed(0)}° ${period.startSec.toFixed(1)}-${period.endSec.toFixed(1)}s`;
+    })
     .join(" · ");
 }
 
@@ -231,17 +268,42 @@ export function DataCollectionPage() {
     setPendingRecordingSpeakers((prev) => [...prev, makeAnnotatedSpeaker(prev.length)]);
   }
 
-  function updatePendingSpeaker(index: number, field: keyof AnnotatedSpeaker, value: string): void {
+  function updatePendingSpeakerName(index: number, value: string): void {
     setPendingRecordingSpeakers((prev) =>
       prev.map((speaker, speakerIdx) =>
         speakerIdx !== index
           ? speaker
           : {
               ...speaker,
-              [field]:
-                field === "directionDeg"
-                  ? normalizeDirectionDeg(Number.parseFloat(value || "0") || 0)
-                  : value,
+              speakerName: value,
+            }
+      )
+    );
+  }
+
+  function updatePendingSpeakingPeriod(
+    speakerIndex: number,
+    periodIndex: number,
+    field: keyof SpeakingPeriod,
+    value: string
+  ): void {
+    setPendingRecordingSpeakers((prev) =>
+      prev.map((speaker, currentSpeakerIdx) =>
+        currentSpeakerIdx !== speakerIndex
+          ? speaker
+          : {
+              ...speaker,
+              speakingPeriods: speaker.speakingPeriods.map((period, currentPeriodIdx) =>
+                currentPeriodIdx !== periodIndex
+                  ? period
+                  : {
+                      ...period,
+                      [field]:
+                        field === "directionDeg"
+                          ? normalizeDirectionDeg(Number.parseFloat(value || "0") || 0)
+                          : normalizeTimeSec(Number.parseFloat(value || "0") || 0),
+                    }
+              ),
             }
       )
     );
@@ -251,11 +313,37 @@ export function DataCollectionPage() {
     setPendingRecordingSpeakers((prev) => prev.filter((_, speakerIdx) => speakerIdx !== index));
   }
 
+  function addPendingSpeakingPeriod(speakerIndex: number): void {
+    setPendingRecordingSpeakers((prev) =>
+      prev.map((speaker, currentSpeakerIdx) =>
+        currentSpeakerIdx !== speakerIndex
+          ? speaker
+          : { ...speaker, speakingPeriods: [...speaker.speakingPeriods, makeSpeakingPeriod()] }
+      )
+    );
+  }
+
+  function removePendingSpeakingPeriod(speakerIndex: number, periodIndex: number): void {
+    setPendingRecordingSpeakers((prev) =>
+      prev.map((speaker, currentSpeakerIdx) =>
+        currentSpeakerIdx !== speakerIndex
+          ? speaker
+          : {
+              ...speaker,
+              speakingPeriods:
+                speaker.speakingPeriods.length <= 1
+                  ? speaker.speakingPeriods
+                  : speaker.speakingPeriods.filter((_, currentPeriodIdx) => currentPeriodIdx !== periodIndex),
+            }
+      )
+    );
+  }
+
   function updateRecordingNotes(recordingId: string, notes: string): void {
     setRecordings((prev) => prev.map((recording) => (recording.recordingId === recordingId ? { ...recording, notes } : recording)));
   }
 
-  function updateRecordingSpeaker(recordingId: string, index: number, field: keyof AnnotatedSpeaker, value: string): void {
+  function updateRecordingSpeakerName(recordingId: string, index: number, value: string): void {
     setRecordings((prev) =>
       prev.map((recording) =>
         recording.recordingId !== recordingId
@@ -267,10 +355,43 @@ export function DataCollectionPage() {
                   ? speaker
                   : {
                       ...speaker,
-                      [field]:
-                        field === "directionDeg"
-                          ? normalizeDirectionDeg(Number.parseFloat(value || "0") || 0)
-                          : value,
+                      speakerName: value,
+                    }
+              ),
+            }
+      )
+    );
+  }
+
+  function updateRecordingSpeakingPeriod(
+    recordingId: string,
+    speakerIndex: number,
+    periodIndex: number,
+    field: keyof SpeakingPeriod,
+    value: string
+  ): void {
+    setRecordings((prev) =>
+      prev.map((recording) =>
+        recording.recordingId !== recordingId
+          ? recording
+          : {
+              ...recording,
+              speakers: recording.speakers.map((speaker, currentSpeakerIdx) =>
+                currentSpeakerIdx !== speakerIndex
+                  ? speaker
+                  : {
+                      ...speaker,
+                      speakingPeriods: speaker.speakingPeriods.map((period, currentPeriodIdx) =>
+                        currentPeriodIdx !== periodIndex
+                          ? period
+                          : {
+                              ...period,
+                              [field]:
+                                field === "directionDeg"
+                                  ? normalizeDirectionDeg(Number.parseFloat(value || "0") || 0)
+                                  : normalizeTimeSec(Number.parseFloat(value || "0") || 0),
+                            }
+                      ),
                     }
               ),
             }
@@ -294,6 +415,46 @@ export function DataCollectionPage() {
         recording.recordingId !== recordingId
           ? recording
           : { ...recording, speakers: recording.speakers.filter((_, speakerIdx) => speakerIdx !== index) }
+      )
+    );
+  }
+
+  function addRecordingSpeakingPeriod(recordingId: string, speakerIndex: number): void {
+    setRecordings((prev) =>
+      prev.map((recording) =>
+        recording.recordingId !== recordingId
+          ? recording
+          : {
+              ...recording,
+              speakers: recording.speakers.map((speaker, currentSpeakerIdx) =>
+                currentSpeakerIdx !== speakerIndex
+                  ? speaker
+                  : { ...speaker, speakingPeriods: [...speaker.speakingPeriods, makeSpeakingPeriod()] }
+              ),
+            }
+      )
+    );
+  }
+
+  function removeRecordingSpeakingPeriod(recordingId: string, speakerIndex: number, periodIndex: number): void {
+    setRecordings((prev) =>
+      prev.map((recording) =>
+        recording.recordingId !== recordingId
+          ? recording
+          : {
+              ...recording,
+              speakers: recording.speakers.map((speaker, currentSpeakerIdx) =>
+                currentSpeakerIdx !== speakerIndex
+                  ? speaker
+                  : {
+                      ...speaker,
+                      speakingPeriods:
+                        speaker.speakingPeriods.length <= 1
+                          ? speaker.speakingPeriods
+                          : speaker.speakingPeriods.filter((_, currentPeriodIdx) => currentPeriodIdx !== periodIndex),
+                    }
+              ),
+            }
       )
     );
   }
@@ -341,10 +502,7 @@ export function DataCollectionPage() {
     }
     const sessionId = currentSessionId;
     const startedAtIso = currentRecordingStartIso ?? nowIso();
-    const capturedSpeakers = pendingRecordingSpeakers.map((speaker, index) => ({
-      speakerName: speaker.speakerName.trim() || makeDefaultSpeakerName(index),
-      directionDeg: normalizeDirectionDeg(speaker.directionDeg),
-    }));
+    const capturedSpeakers = pendingRecordingSpeakers.map((speaker, index) => sanitizeAnnotatedSpeaker(speaker, index));
     setSessionStatus("stopping");
     setStatusMessage(`Stopping session ${sessionId} and downloading raw channels.`);
     try {
@@ -431,7 +589,11 @@ export function DataCollectionPage() {
               notes: recording.notes,
               speakers: recording.speakers.map((speaker) => ({
                 speakerName: speaker.speakerName,
-                directionDeg: speaker.directionDeg,
+                speakingPeriods: speaker.speakingPeriods.map((period) => ({
+                  startSec: period.startSec,
+                  endSec: period.endSec,
+                  directionDeg: period.directionDeg,
+                })),
               })),
               error: recording.error ?? null,
               sampleRateHz: recording.artifacts?.sampleRateHz ?? null,
@@ -462,7 +624,11 @@ export function DataCollectionPage() {
                 notes: recording.notes,
                 speakers: recording.speakers.map((speaker) => ({
                   speakerName: speaker.speakerName,
-                  directionDeg: speaker.directionDeg,
+                  speakingPeriods: speaker.speakingPeriods.map((period) => ({
+                    startSec: period.startSec,
+                    endSec: period.endSec,
+                    directionDeg: period.directionDeg,
+                  })),
                 })),
                 error: recording.error ?? null,
                 sampleRateHz: recording.artifacts?.sampleRateHz ?? null,
@@ -569,17 +735,56 @@ export function DataCollectionPage() {
                   id={`pending-speaker-name-${index}`}
                   aria-label={`Pending speaker ${index + 1} name`}
                   value={speaker.speakerName}
-                  onChange={(e) => updatePendingSpeaker(index, "speakerName", e.target.value)}
+                  onChange={(e) => updatePendingSpeakerName(index, e.target.value)}
                 />
-                <label htmlFor={`pending-speaker-doa-${index}`}>DOA (deg)</label>
-                <input
-                  id={`pending-speaker-doa-${index}`}
-                  aria-label={`Pending speaker ${index + 1} DOA`}
-                  type="number"
-                  value={speaker.directionDeg}
-                  onChange={(e) => updatePendingSpeaker(index, "directionDeg", e.target.value)}
-                />
+                <div className="recording-list">
+                  {speaker.speakingPeriods.map((period, periodIndex) => (
+                    <article key={`pending-speaker-${index}-period-${periodIndex}`} className="recording-card">
+                      <h3>Period {periodIndex + 1}</h3>
+                      <label htmlFor={`pending-speaker-${index}-start-${periodIndex}`}>Start (s)</label>
+                      <input
+                        id={`pending-speaker-${index}-start-${periodIndex}`}
+                        aria-label={`Pending speaker ${index + 1} period ${periodIndex + 1} start`}
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={period.startSec}
+                        onChange={(e) => updatePendingSpeakingPeriod(index, periodIndex, "startSec", e.target.value)}
+                      />
+                      <label htmlFor={`pending-speaker-${index}-end-${periodIndex}`}>End (s)</label>
+                      <input
+                        id={`pending-speaker-${index}-end-${periodIndex}`}
+                        aria-label={`Pending speaker ${index + 1} period ${periodIndex + 1} end`}
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={period.endSec}
+                        onChange={(e) => updatePendingSpeakingPeriod(index, periodIndex, "endSec", e.target.value)}
+                      />
+                      <label htmlFor={`pending-speaker-${index}-doa-${periodIndex}`}>DOA (deg)</label>
+                      <input
+                        id={`pending-speaker-${index}-doa-${periodIndex}`}
+                        aria-label={`Pending speaker ${index + 1} period ${periodIndex + 1} DOA`}
+                        type="number"
+                        value={period.directionDeg}
+                        onChange={(e) => updatePendingSpeakingPeriod(index, periodIndex, "directionDeg", e.target.value)}
+                      />
+                      <div className="actions">
+                        <button
+                          type="button"
+                          onClick={() => removePendingSpeakingPeriod(index, periodIndex)}
+                          disabled={speaker.speakingPeriods.length <= 1}
+                        >
+                          Remove Period
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
                 <div className="actions">
+                  <button type="button" onClick={() => addPendingSpeakingPeriod(index)}>
+                    Add Period
+                  </button>
                   <button type="button" onClick={() => removePendingSpeaker(index)} disabled={pendingRecordingSpeakers.length <= 1}>
                     Remove Speaker
                   </button>
@@ -641,17 +846,62 @@ export function DataCollectionPage() {
                         id={`${recording.recordingId}-speaker-name-${index}`}
                         aria-label={`Speaker ${index + 1} name for ${recording.recordingId}`}
                         value={speaker.speakerName}
-                        onChange={(e) => updateRecordingSpeaker(recording.recordingId, index, "speakerName", e.target.value)}
+                        onChange={(e) => updateRecordingSpeakerName(recording.recordingId, index, e.target.value)}
                       />
-                      <label htmlFor={`${recording.recordingId}-speaker-doa-${index}`}>DOA (deg)</label>
-                      <input
-                        id={`${recording.recordingId}-speaker-doa-${index}`}
-                        aria-label={`Speaker ${index + 1} DOA for ${recording.recordingId}`}
-                        type="number"
-                        value={speaker.directionDeg}
-                        onChange={(e) => updateRecordingSpeaker(recording.recordingId, index, "directionDeg", e.target.value)}
-                      />
+                      <div className="recording-list">
+                        {speaker.speakingPeriods.map((period, periodIndex) => (
+                          <article key={`${recording.recordingId}-speaker-${index}-period-${periodIndex}`} className="recording-card">
+                            <h3>Period {periodIndex + 1}</h3>
+                            <label htmlFor={`${recording.recordingId}-speaker-${index}-start-${periodIndex}`}>Start (s)</label>
+                            <input
+                              id={`${recording.recordingId}-speaker-${index}-start-${periodIndex}`}
+                              aria-label={`Speaker ${index + 1} period ${periodIndex + 1} start for ${recording.recordingId}`}
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              value={period.startSec}
+                              onChange={(e) =>
+                                updateRecordingSpeakingPeriod(recording.recordingId, index, periodIndex, "startSec", e.target.value)
+                              }
+                            />
+                            <label htmlFor={`${recording.recordingId}-speaker-${index}-end-${periodIndex}`}>End (s)</label>
+                            <input
+                              id={`${recording.recordingId}-speaker-${index}-end-${periodIndex}`}
+                              aria-label={`Speaker ${index + 1} period ${periodIndex + 1} end for ${recording.recordingId}`}
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              value={period.endSec}
+                              onChange={(e) =>
+                                updateRecordingSpeakingPeriod(recording.recordingId, index, periodIndex, "endSec", e.target.value)
+                              }
+                            />
+                            <label htmlFor={`${recording.recordingId}-speaker-${index}-doa-${periodIndex}`}>DOA (deg)</label>
+                            <input
+                              id={`${recording.recordingId}-speaker-${index}-doa-${periodIndex}`}
+                              aria-label={`Speaker ${index + 1} period ${periodIndex + 1} DOA for ${recording.recordingId}`}
+                              type="number"
+                              value={period.directionDeg}
+                              onChange={(e) =>
+                                updateRecordingSpeakingPeriod(recording.recordingId, index, periodIndex, "directionDeg", e.target.value)
+                              }
+                            />
+                            <div className="actions">
+                              <button
+                                type="button"
+                                onClick={() => removeRecordingSpeakingPeriod(recording.recordingId, index, periodIndex)}
+                                disabled={speaker.speakingPeriods.length <= 1}
+                              >
+                                Remove Period
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
                       <div className="actions">
+                        <button type="button" onClick={() => addRecordingSpeakingPeriod(recording.recordingId, index)}>
+                          Add Period
+                        </button>
                         <button
                           type="button"
                           onClick={() => removeRecordingSpeaker(recording.recordingId, index)}

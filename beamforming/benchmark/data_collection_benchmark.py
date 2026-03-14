@@ -247,6 +247,30 @@ def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float, mic_arr
     if manual_speakers:
         tracks: list[dict] = []
         for idx, item in enumerate(manual_speakers):
+            speaker_name = str(item.get("speakerName", f"speaker-{idx + 1}"))
+            speaking_periods = list(item.get("speakingPeriods", []))
+            if speaking_periods:
+                for period_idx, period in enumerate(speaking_periods):
+                    try:
+                        angle_deg = float(period.get("directionDeg", 0.0))
+                        start_sec = float(period.get("startSec", 0.0))
+                        end_sec = float(period.get("endSec", duration_s))
+                    except (TypeError, ValueError):
+                        continue
+                    start_sec = max(0.0, start_sec)
+                    end_sec = max(start_sec, end_sec)
+                    tracks.append(
+                        {
+                            "speaker_id": int(idx + 1),
+                            "speaker_name": speaker_name,
+                            "start_sec": float(start_sec),
+                            "end_sec": float(end_sec),
+                            "angle_deg": _normalize_angle_deg(angle_deg),
+                            "source": "manual_metadata",
+                            "period_index": int(period_idx),
+                        }
+                    )
+                continue
             try:
                 angle_deg = float(item.get("directionDeg", 0.0))
             except (TypeError, ValueError):
@@ -254,7 +278,7 @@ def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float, mic_arr
             tracks.append(
                 {
                     "speaker_id": int(idx + 1),
-                    "speaker_name": str(item.get("speakerName", f"speaker-{idx + 1}")),
+                    "speaker_name": speaker_name,
                     "start_sec": 0.0,
                     "end_sec": float(max(duration_s, 0.0)),
                     "angle_deg": _normalize_angle_deg(angle_deg),

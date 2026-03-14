@@ -13,9 +13,15 @@ export type RecordingArtifactManifest = {
   };
 };
 
+export type SpeakingPeriod = {
+  startSec: number;
+  endSec: number;
+  directionDeg: number;
+};
+
 export type AnnotatedSpeaker = {
   speakerName: string;
-  directionDeg: number;
+  speakingPeriods: SpeakingPeriod[];
 };
 
 export type RecordingStatus = "capturing" | "ready" | "incomplete" | "failed";
