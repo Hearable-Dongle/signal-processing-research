@@ -37,7 +37,7 @@ class SessionStartRequest(BaseModel):
     localization_vad_enabled: bool = True
     capon_spectrum_ema_alpha: float = 0.78
     capon_peak_min_sharpness: float = 0.12
-    capon_peak_min_margin: float = 0.08
+    capon_peak_min_margin: float = 0.04
     capon_hold_frames: int = 2
     speaker_history_size: int = 8
     speaker_activation_min_predictions: int = 3

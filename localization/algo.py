@@ -813,7 +813,7 @@ class CaponLocalization:
         self.vad_min_speech_ratio = float(kwargs.get("vad_min_speech_ratio", 0.2))
         self.spectrum_ema_alpha = float(kwargs.get("capon_spectrum_ema_alpha", 0.78))
         self.peak_min_sharpness = float(kwargs.get("capon_peak_min_sharpness", 0.12))
-        self.peak_min_margin = float(kwargs.get("capon_peak_min_margin", 0.08))
+        self.peak_min_margin = float(kwargs.get("capon_peak_min_margin", 0.04))
         self.hold_frames = int(kwargs.get("capon_hold_frames", 2))
         self._spectrum_accum: np.ndarray | None = None
         self._last_accepted_angle: float | None = None
