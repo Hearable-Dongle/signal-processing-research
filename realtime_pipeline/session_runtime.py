@@ -67,6 +67,10 @@ def build_pipeline_config_from_request(
         capon_peak_min_sharpness=float(req.capon_peak_min_sharpness),
         capon_peak_min_margin=float(req.capon_peak_min_margin),
         capon_hold_frames=int(req.capon_hold_frames),
+        speaker_match_window_deg=float(req.speaker_match_window_deg),
+        centroid_association_mode=str(req.centroid_association_mode),
+        centroid_association_sigma_deg=float(req.centroid_association_sigma_deg),
+        centroid_association_min_score=float(req.centroid_association_min_score),
     )
 
 

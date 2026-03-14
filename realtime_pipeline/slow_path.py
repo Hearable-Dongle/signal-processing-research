@@ -1,44 +1,38 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import queue
 import threading
-from time import perf_counter
 
 import numpy as np
-
-from direction_assignment import DirectionAssignmentConfig, DirectionAssignmentEngine, build_direction_assignment_input
-from direction_assignment.doa_estimation import estimate_stream_doa
-from direction_assignment.mask_backprojection import backproject_streams_to_multichannel
-from speaker_identity_grouping import IdentityChunkInput, IdentityConfig, SpeakerIdentityGrouper
 
 from .contracts import PipelineConfig, SpeakerGainDirection
 from .separation_backends import SeparationBackend
 from .shared_state import SharedPipelineState, Timer
+from .tracking_modes import SUPPORTED_TRACKING_MODE, validate_tracking_mode
 
 
-def _identity_maturity_label(*, backend: str, sample_count: int, provisional: bool) -> str:
-    if backend == "speaker_embed_session":
-        return "provisional" if provisional else "stable"
-    return "stable" if int(sample_count) >= 3 else "provisional"
+def _normalize_angle_deg(v: float) -> float:
+    return float(v % 360.0)
 
 
-def _stream_speech_likelihood(audio: np.ndarray, sample_rate_hz: int) -> float:
-    x = np.asarray(audio, dtype=np.float64).reshape(-1)
-    if x.size == 0:
-        return 0.0
-    x = x - float(np.mean(x))
-    rms = float(np.sqrt(np.mean(x**2) + 1e-12))
-    if rms <= 1e-6:
-        return 0.0
-    spec = np.abs(np.fft.rfft(x * np.hanning(x.size)))
-    freqs = np.fft.rfftfreq(x.size, d=1.0 / max(int(sample_rate_hz), 1))
-    total_energy = float(np.sum(spec**2) + 1e-12)
-    speech_band = (freqs >= 150.0) & (freqs <= 4200.0)
-    band_ratio = float(np.sum((spec[speech_band] ** 2)) / total_energy) if np.any(speech_band) else 0.0
-    spec_flatness = float(np.exp(np.mean(np.log(spec + 1e-12))) / (np.mean(spec) + 1e-12))
-    voicedness = float(np.clip(1.0 - spec_flatness, 0.0, 1.0))
-    rms_score = float(np.clip((rms - 0.004) / 0.03, 0.0, 1.0))
-    return float(np.clip((0.45 * band_ratio) + (0.35 * voicedness) + (0.20 * rms_score), 0.0, 1.0))
+def _angular_diff_deg(a: float, b: float) -> float:
+    return float((float(a) - float(b) + 180.0) % 360.0 - 180.0)
+
+
+def _angular_dist_deg(a: float, b: float) -> float:
+    return abs(_angular_diff_deg(a, b))
+
+
+@dataclass(slots=True)
+class _CentroidState:
+    speaker_id: int
+    direction_deg: float
+    confidence: float
+    last_seen_ms: float
+    last_observed_score: float
+    observation_count: int
+    velocity_deg_per_s: float = 0.0
 
 
 class SlowPathWorker(threading.Thread):
@@ -53,353 +47,159 @@ class SlowPathWorker(threading.Thread):
         stop_event: threading.Event,
     ):
         super().__init__(name="SlowPathWorker", daemon=True)
+        del separation_backend, mic_geometry_xy
         self._cfg = config
         self._state = shared_state
         self._slow_queue = slow_queue
-        self._sep = separation_backend
         self._stop = stop_event
         self._chunk_id = 0
-        self._chunk_samples = max(1, int(config.sample_rate_hz * config.slow_chunk_ms / 1000))
-        hop_ms = config.slow_chunk_ms if config.slow_chunk_hop_ms is None else int(config.slow_chunk_hop_ms)
-        self._chunk_hop_samples = max(1, int(config.sample_rate_hz * hop_ms / 1000))
-        self._frame_samples = max(1, int(config.sample_rate_hz * config.fast_frame_ms / 1000))
+        self._tracking_mode = validate_tracking_mode(str(config.tracking_mode))
+        self._centroids: dict[int, _CentroidState] = {}
+        self._next_speaker_id = 1
+        self._centroid_match_window_deg = float(max(1.0, config.speaker_match_window_deg))
+        self._centroid_association_mode = str(config.centroid_association_mode).strip().lower()
+        self._centroid_association_sigma_deg = float(max(1.0, config.centroid_association_sigma_deg))
+        self._centroid_association_min_score = float(np.clip(config.centroid_association_min_score, 0.0, 1.0))
+        self._centroid_ema_alpha = 0.25
+        self._centroid_active_hold_ms = 1500.0
+        self._centroid_expiry_ms = 30000.0
+        self._centroid_new_track_min_score = 0.35
 
-        self._identity = SpeakerIdentityGrouper(
-            IdentityConfig(
-                sample_rate_hz=config.sample_rate_hz,
-                chunk_duration_ms=config.slow_chunk_ms,
-                backend=config.identity_backend,
-                max_speakers=config.max_speakers_hint,
-                continuity_bonus=config.identity_continuity_bonus,
-                switch_penalty=config.identity_switch_penalty,
-                hold_similarity_threshold=config.identity_hold_similarity_threshold,
-                carry_forward_chunks=config.identity_carry_forward_chunks,
-                confidence_decay=config.identity_confidence_decay,
-                retire_after_chunks=config.identity_retire_after_chunks,
-                speech_likelihood_threshold=config.identity_speech_likelihood_threshold,
-                identity_match_weight=config.identity_match_weight,
-                direction_match_weight=config.identity_direction_match_weight,
-                combined_match_threshold=config.identity_combined_match_threshold,
-                new_speaker_max_existing_score=config.identity_new_speaker_max_existing_score,
-                direction_match_max_distance_deg=config.identity_direction_match_max_distance_deg,
-                direction_mismatch_block_deg=config.identity_direction_mismatch_block_deg,
-                direction_gate_confidence=config.identity_direction_gate_confidence,
-                speaker_embedding_model=config.identity_speaker_embedding_model,
-                speaker_embedding_device=config.identity_speaker_embedding_device,
-                speaker_embedding_min_speech_ms=config.identity_speaker_embedding_min_speech_ms,
-                speaker_embedding_buffer_ms=config.identity_speaker_embedding_buffer_ms,
-                speaker_embedding_update_interval_chunks=config.identity_speaker_embedding_update_interval_chunks,
-                speaker_embedding_match_threshold=config.identity_speaker_embedding_match_threshold,
-                speaker_embedding_merge_threshold=config.identity_speaker_embedding_merge_threshold,
-                speaker_embedding_margin=config.identity_speaker_embedding_margin,
-                provisional_speaker_timeout_chunks=config.identity_provisional_speaker_timeout_chunks,
+    def _score_for_peak(self, idx: int, scores: tuple[float, ...] | None) -> float:
+        if scores is None or idx >= len(scores):
+            return 1.0
+        return float(scores[idx])
+
+    def _update_centroid_angle(self, current_angle_deg: float, observed_angle_deg: float) -> float:
+        alpha = float(np.clip(self._centroid_ema_alpha, 0.0, 1.0))
+        prev_rad = np.deg2rad(float(current_angle_deg))
+        obs_rad = np.deg2rad(float(observed_angle_deg))
+        x = ((1.0 - alpha) * float(np.cos(prev_rad))) + (alpha * float(np.cos(obs_rad)))
+        y = ((1.0 - alpha) * float(np.sin(prev_rad))) + (alpha * float(np.sin(obs_rad)))
+        if abs(x) < 1e-9 and abs(y) < 1e-9:
+            return _normalize_angle_deg(observed_angle_deg)
+        return _normalize_angle_deg(float(np.rad2deg(np.arctan2(y, x))))
+
+    def _build_speaker_map(self, timestamp_ms: float) -> dict[int, SpeakerGainDirection]:
+        speaker_map: dict[int, SpeakerGainDirection] = {}
+        keep: dict[int, _CentroidState] = {}
+        for sid, centroid in self._centroids.items():
+            age_ms = float(timestamp_ms - centroid.last_seen_ms)
+            if age_ms > self._centroid_expiry_ms:
+                continue
+            keep[int(sid)] = centroid
+            active = bool(age_ms <= self._centroid_active_hold_ms)
+            activity_confidence = float(np.clip(centroid.last_observed_score, 0.0, 1.0)) if active else 0.0
+            confidence = float(np.clip(centroid.confidence, 0.0, 1.0))
+            speaker_map[int(sid)] = SpeakerGainDirection(
+                speaker_id=int(sid),
+                direction_degrees=float(centroid.direction_deg),
+                gain_weight=float(max(0.2, confidence)),
+                confidence=confidence,
+                active=active,
+                activity_confidence=activity_confidence,
+                updated_at_ms=float(centroid.last_seen_ms),
+                identity_confidence=0.0,
+                identity_maturity="centroid_tracker",
+                predicted_direction_deg=float(centroid.direction_deg),
+                angular_velocity_deg_per_chunk=float(centroid.velocity_deg_per_s),
+                last_separator_stream_index=None,
+                anchor_direction_deg=float(centroid.direction_deg),
+                anchor_confidence=confidence,
+                anchor_locked=False,
+                anchor_last_confirmed_ms=float(centroid.last_seen_ms),
             )
-        )
-        self._direction = DirectionAssignmentEngine(
-            mic_geometry=np.asarray(mic_geometry_xy, dtype=float),
-            config=DirectionAssignmentConfig(
-                control_mode=config.control_mode,
-                sample_rate=config.sample_rate_hz,
-                chunk_ms=config.slow_chunk_ms,
-                focus_gain_db=config.direction_focus_gain_db,
-                non_focus_attenuation_db=config.direction_non_focus_attenuation_db,
-                max_user_boost_db=config.max_user_boost_db,
-                transition_penalty_deg=config.direction_transition_penalty_deg,
-                min_confidence_for_switch=config.direction_min_confidence_for_switch,
-                hold_confidence_decay=config.direction_hold_confidence_decay,
-                stale_confidence_decay=config.direction_stale_confidence_decay,
-                min_persist_confidence=config.direction_min_persist_confidence,
-                speaker_tracking_small_change_deg=config.direction_small_change_deg,
-                speaker_tracking_medium_change_deg=config.direction_medium_change_deg,
-                speaker_tracking_large_change_persist_chunks=config.direction_large_change_persist_chunks,
-                speaker_tracking_identity_hold_margin=config.direction_identity_hold_margin,
-                speaker_tracking_stable_confidence_threshold=config.direction_stable_confidence_threshold,
-                history_window_chunks=config.direction_history_window_chunks,
-                long_memory_enabled=config.direction_long_memory_enabled,
-                long_memory_window_ms=config.direction_long_memory_window_ms,
-                long_memory_min_observations=config.direction_long_memory_min_observations,
-                long_memory_anchor_lock_confidence=config.direction_long_memory_anchor_lock_confidence,
-                long_memory_max_anchor_spread_deg=config.direction_long_memory_max_anchor_spread_deg,
-                long_memory_soft_prior_margin_deg=config.direction_long_memory_soft_prior_margin_deg,
-                long_memory_relock_persist_chunks=config.direction_long_memory_relock_persist_chunks,
-                long_memory_decay=config.direction_long_memory_decay,
-                long_memory_stale_timeout_ms=config.direction_long_memory_stale_timeout_ms,
-                speaker_stale_timeout_ms=config.direction_speaker_stale_timeout_ms,
-                speaker_forget_timeout_ms=config.direction_speaker_forget_timeout_ms,
-            ),
-        )
-        self._published_map: dict[int, SpeakerGainDirection] = {}
+        self._centroids = keep
+        return speaker_map
 
-    def _process_chunk(self, raw_chunk_mc: np.ndarray) -> None:
-        ts_ms = 1000.0 * (self._chunk_id * self._chunk_hop_samples) / self._cfg.sample_rate_hz
+    def _association_score(self, observed_angle_deg: float, centroid: _CentroidState) -> float:
+        dist = _angular_dist_deg(observed_angle_deg, centroid.direction_deg)
+        if dist > self._centroid_match_window_deg:
+            return 0.0
+        if self._centroid_association_mode == "gaussian":
+            sigma = self._centroid_association_sigma_deg
+            return float(np.exp(-0.5 * (dist / sigma) ** 2))
+        return 1.0 - float(dist / self._centroid_match_window_deg)
+
+    def _process_centroid_frame(self, frame_mc: np.ndarray) -> None:
+        del frame_mc
+        srp = self._state.get_srp_snapshot()
+        ts_ms = float(srp.timestamp_ms)
+        peaks = list(srp.peaks_deg)
+        scores = srp.peak_scores
+        observations = [
+            (float(peaks[idx]), self._score_for_peak(idx, scores))
+            for idx in range(min(len(peaks), max(1, int(self._cfg.max_speakers_hint))))
+        ]
+        observations.sort(key=lambda item: item[1], reverse=True)
 
         with Timer() as t:
-            separation_ms = 0.0
-            identity_ms = 0.0
-            direction_ms = 0.0
-            publish_ms = 0.0
+            assigned: set[int] = set()
+            for angle_deg, score in observations:
+                best_id: int | None = None
+                best_assoc_score = 0.0
+                for sid, centroid in self._centroids.items():
+                    if int(sid) in assigned:
+                        continue
+                    if float(ts_ms - centroid.last_seen_ms) > self._centroid_expiry_ms:
+                        continue
+                    assoc_score = self._association_score(angle_deg, centroid)
+                    if assoc_score < self._centroid_association_min_score:
+                        continue
+                    if assoc_score > best_assoc_score:
+                        best_assoc_score = assoc_score
+                        best_id = int(sid)
 
-            mono_mix = np.mean(raw_chunk_mc, axis=1).astype(np.float32, copy=False)
-            focus = self._state.get_focus_control_snapshot()
-            self._direction.set_focus_speakers(None if focus.focused_speaker_ids is None else list(focus.focused_speaker_ids))
-            self._direction.set_focus_direction(focus.focused_direction_deg)
-            self._direction.set_focus_boost_db(focus.user_boost_db)
-
-            srp = self._state.get_srp_snapshot()
-            expected_speakers = len(srp.peaks_deg) if srp.peaks_deg else None
-            if expected_speakers is not None:
-                expected_speakers = min(max(1, expected_speakers), self._cfg.max_speakers_hint)
-
-            t0 = perf_counter()
-            separated = self._sep.separate(mono_mix, expected_speakers=expected_speakers)
-            separation_ms += (perf_counter() - t0) * 1000.0
-
-            pre_direction_state = self._direction.get_state_snapshot()
-            stream_speech_likelihood: dict[int, float] = {}
-            stream_direction_deg: dict[int, float] = {}
-            stream_direction_confidence: dict[int, float] = {}
-            if separated:
-                streams_mc, _ = backproject_streams_to_multichannel(
-                    raw_mic_chunk=raw_chunk_mc,
-                    separated_streams=separated,
-                    cfg=self._direction.cfg,
-                )
-                for stream_idx, stream in enumerate(separated):
-                    audio = np.asarray(stream, dtype=np.float32).reshape(-1)
-                    speech_likelihood = _stream_speech_likelihood(audio, self._cfg.sample_rate_hz)
-                    stream_speech_likelihood[int(stream_idx)] = float(speech_likelihood)
-                    if stream_idx < len(streams_mc):
-                        doa_deg, doa_conf, _ = estimate_stream_doa(
-                            stream_multichannel=streams_mc[stream_idx],
-                            mic_geometry=self._direction.mic_geometry,
-                            mic_pairs=self._direction.mic_pairs,
-                            cfg=self._direction.cfg,
-                        )
-                        if doa_deg is not None:
-                            stream_direction_deg[int(stream_idx)] = float(doa_deg)
-                            stream_direction_confidence[int(stream_idx)] = float(doa_conf)
-
-            speaker_direction_priors = {
-                int(sid): float(
-                    st.anchor_direction_deg if st.anchor_direction_deg is not None else st.direction_deg
-                )
-                for sid, st in pre_direction_state.items()
-            }
-            speaker_direction_prior_confidence = {
-                int(sid): float(max(getattr(st, "anchor_confidence", 0.0), getattr(st, "confidence", 0.0)))
-                for sid, st in pre_direction_state.items()
-            }
-
-            t0 = perf_counter()
-            identity_out = self._identity.update(
-                IdentityChunkInput(
-                    chunk_id=self._chunk_id,
-                    timestamp_ms=ts_ms,
-                    sample_rate_hz=self._cfg.sample_rate_hz,
-                    streams=separated,
-                    per_stream_direction_deg=stream_direction_deg,
-                    per_stream_direction_confidence=stream_direction_confidence,
-                    per_stream_speech_likelihood=stream_speech_likelihood,
-                    speaker_direction_priors=speaker_direction_priors,
-                    speaker_direction_prior_confidence=speaker_direction_prior_confidence,
-                )
-            )
-            identity_ms += (perf_counter() - t0) * 1000.0
-
-            speaker_activity: dict[int, float] = {}
-            for stream_idx, speaker_id in identity_out.stream_to_speaker.items():
-                if speaker_id is None:
+                if best_id is None:
+                    if float(score) < self._centroid_new_track_min_score:
+                        continue
+                    sid = self._next_speaker_id
+                    self._next_speaker_id += 1
+                    self._centroids[int(sid)] = _CentroidState(
+                        speaker_id=int(sid),
+                        direction_deg=float(_normalize_angle_deg(angle_deg)),
+                        confidence=float(np.clip(score, 0.0, 1.0)),
+                        last_seen_ms=float(ts_ms),
+                        last_observed_score=float(score),
+                        observation_count=1,
+                    )
+                    assigned.add(int(sid))
                     continue
-                if stream_idx < 0 or stream_idx >= len(separated):
-                    continue
-                stream = np.asarray(separated[stream_idx], dtype=float).reshape(-1)
-                rms = float(np.sqrt(np.mean(stream**2) + 1e-12))
-                speaker_activity[int(speaker_id)] = max(speaker_activity.get(int(speaker_id), 0.0), rms)
 
-            speaker_activity_confidence = {
-                int(sid): float(np.clip((rms - 0.005) / 0.03, 0.0, 1.0))
-                for sid, rms in speaker_activity.items()
-            }
-            identity_state = self._identity.get_state()
-            speaker_identity_metadata = {
-                int(sid): {
-                    "identity_confidence": float(np.clip(state.last_confidence, 0.0, 1.0)),
-                    "identity_maturity": _identity_maturity_label(
-                        backend=self._cfg.identity_backend,
-                        sample_count=state.sample_count,
-                        provisional=state.provisional,
-                    ),
-                    "last_seen_timestamp_ms": float(state.last_seen_timestamp_ms),
-                    "last_separator_stream_index": None if state.last_stream_index is None else int(state.last_stream_index),
-                    "sample_count": int(state.sample_count),
-                    "speech_support_ms": float(state.speech_support_ms),
-                }
-                for sid, state in identity_state.items()
-            }
-
-            payload, _ = build_direction_assignment_input(
-                chunk_id=self._chunk_id,
-                timestamp_ms=ts_ms,
-                raw_mic_chunk=raw_chunk_mc,
-                separated_streams=separated,
-                stream_to_speaker=identity_out.stream_to_speaker,
-                active_speakers=identity_out.active_speakers,
-                srp_doa_peaks_deg=list(srp.peaks_deg),
-                srp_peak_scores=None if srp.peak_scores is None else list(srp.peak_scores),
-                control_mode=self._cfg.control_mode,
-                per_stream_identity_confidence=identity_out.per_stream_confidence,
-                speaker_identity_metadata=speaker_identity_metadata,
-                per_speaker_activity_confidence=speaker_activity_confidence,
-            )
-            t0 = perf_counter()
-            direction_out = self._direction.update(payload)
-            direction_ms += (perf_counter() - t0) * 1000.0
-            t0 = perf_counter()
-            direction_state = self._direction.get_state_snapshot()
-
-            gain_by_id = {sid: float(w) for sid, w in zip(direction_out.target_speaker_ids, direction_out.target_weights)}
-            speaker_map: dict[int, SpeakerGainDirection] = {}
-            for sid, doa in direction_out.speaker_directions_deg.items():
-                identity_meta = speaker_identity_metadata.get(int(sid), {})
-                track_state = direction_state.get(int(sid))
-                activity_conf = float(speaker_activity_confidence.get(int(sid), 0.0))
-                speaker_map[int(sid)] = SpeakerGainDirection(
-                    speaker_id=int(sid),
-                    direction_degrees=float(doa),
-                    gain_weight=float(gain_by_id.get(int(sid), 1.0)),
-                    confidence=float(direction_out.speaker_confidence.get(int(sid), 0.0)),
-                    active=bool(activity_conf >= 0.5),
-                    activity_confidence=activity_conf,
-                    updated_at_ms=ts_ms,
-                    identity_confidence=float(identity_meta.get("identity_confidence", getattr(track_state, "identity_confidence", 0.0))),
-                    identity_maturity=str(identity_meta.get("identity_maturity", getattr(track_state, "identity_maturity", "unknown"))),
-                    predicted_direction_deg=(
-                        None
-                        if track_state is None or track_state.predicted_direction_deg is None
-                        else float(track_state.predicted_direction_deg)
-                    ),
-                    angular_velocity_deg_per_chunk=0.0 if track_state is None else float(track_state.velocity_deg_per_chunk),
-                    last_separator_stream_index=(
-                        identity_meta.get("last_separator_stream_index")
-                        if identity_meta.get("last_separator_stream_index") is not None
-                        else (None if track_state is None else track_state.last_separator_stream_index)
-                    ),
-                    anchor_direction_deg=(
-                        None
-                        if track_state is None or track_state.anchor_direction_deg is None
-                        else float(track_state.anchor_direction_deg)
-                    ),
-                    anchor_confidence=0.0 if track_state is None else float(track_state.anchor_confidence),
-                    anchor_locked=False if track_state is None else bool(track_state.anchor_locked),
-                    anchor_last_confirmed_ms=0.0 if track_state is None else float(track_state.anchor_last_confirmed_ms),
+                prev = self._centroids[int(best_id)]
+                updated_angle = self._update_centroid_angle(prev.direction_deg, angle_deg)
+                dt_s = max((float(ts_ms) - float(prev.last_seen_ms)) / 1000.0, 1e-3)
+                velocity_deg_per_s = _angular_diff_deg(updated_angle, prev.direction_deg) / dt_s
+                self._centroids[int(best_id)] = _CentroidState(
+                    speaker_id=int(best_id),
+                    direction_deg=float(updated_angle),
+                    confidence=float(np.clip((0.7 * prev.confidence) + (0.3 * score), 0.0, 1.0)),
+                    last_seen_ms=float(ts_ms),
+                    last_observed_score=float(score),
+                    observation_count=int(prev.observation_count) + 1,
+                    velocity_deg_per_s=float(velocity_deg_per_s),
                 )
+                assigned.add(int(best_id))
 
-            speaker_map = self._merge_with_published_map(speaker_map, ts_ms)
+            speaker_map = self._build_speaker_map(ts_ms)
             self._state.publish_speaker_map(speaker_map)
-            publish_ms += (perf_counter() - t0) * 1000.0
 
         self._state.incr_slow_chunk(t.elapsed_ms)
         self._state.incr_slow_stage_times(
-            separation_ms=separation_ms,
-            identity_ms=identity_ms,
-            direction_ms=direction_ms,
-            publish_ms=publish_ms,
+            separation_ms=0.0,
+            identity_ms=0.0,
+            direction_ms=0.0,
+            publish_ms=float(t.elapsed_ms),
         )
         self._chunk_id += 1
 
     def run(self) -> None:
-        frames: list[np.ndarray] = []
-        acc_samples = 0
-
         while not self._stop.is_set():
             try:
                 item = self._slow_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
-
             if item is None:
                 break
-
-            frame = np.asarray(item, dtype=np.float32)
-            frames.append(frame)
-            acc_samples += frame.shape[0]
-
-            while acc_samples >= self._chunk_samples:
-                chunk = np.concatenate(frames, axis=0)
-                raw_chunk = chunk[: self._chunk_samples, :]
-                residual = chunk[self._chunk_hop_samples :, :]
-                frames = [residual] if residual.size else []
-                acc_samples = residual.shape[0] if residual.size else 0
-                self._process_chunk(raw_chunk)
-
-        if self._cfg.process_partial_chunk and frames:
-            chunk = np.concatenate(frames, axis=0)
-            if chunk.shape[0] < self._chunk_samples:
-                chunk = np.pad(chunk, ((0, self._chunk_samples - chunk.shape[0]), (0, 0)))
-            self._process_chunk(chunk[: self._chunk_samples, :])
-
-    def _merge_with_published_map(self, speaker_map: dict[int, SpeakerGainDirection], timestamp_ms: float) -> dict[int, SpeakerGainDirection]:
-        out: dict[int, SpeakerGainDirection] = {}
-        refresh_min = float(self._cfg.speaker_map_min_confidence_for_refresh)
-        hold_ms = float(self._cfg.speaker_map_hold_ms)
-        conf_decay = float(np.clip(self._cfg.speaker_map_confidence_decay, 0.0, 1.0))
-        activity_decay = float(np.clip(self._cfg.speaker_map_activity_decay, 0.0, 1.0))
-
-        for sid, item in speaker_map.items():
-            if float(item.confidence) >= refresh_min:
-                out[int(sid)] = item
-                continue
-            prev = self._published_map.get(int(sid))
-            if prev is None:
-                out[int(sid)] = item
-                continue
-            age_ms = float(timestamp_ms - prev.updated_at_ms)
-            if age_ms > hold_ms:
-                out[int(sid)] = item
-                continue
-            out[int(sid)] = SpeakerGainDirection(
-                speaker_id=prev.speaker_id,
-                direction_degrees=prev.direction_degrees,
-                gain_weight=item.gain_weight,
-                confidence=float(np.clip(prev.confidence * conf_decay, 0.0, 1.0)),
-                active=bool(prev.active),
-                activity_confidence=float(np.clip(prev.activity_confidence * activity_decay, 0.0, 1.0)),
-                updated_at_ms=prev.updated_at_ms,
-                identity_confidence=prev.identity_confidence,
-                identity_maturity=prev.identity_maturity,
-                predicted_direction_deg=prev.predicted_direction_deg,
-                angular_velocity_deg_per_chunk=prev.angular_velocity_deg_per_chunk,
-                last_separator_stream_index=prev.last_separator_stream_index,
-                anchor_direction_deg=prev.anchor_direction_deg,
-                anchor_confidence=prev.anchor_confidence,
-                anchor_locked=prev.anchor_locked,
-                anchor_last_confirmed_ms=prev.anchor_last_confirmed_ms,
-            )
-
-        for sid, prev in self._published_map.items():
-            if int(sid) in out:
-                continue
-            age_ms = float(timestamp_ms - prev.updated_at_ms)
-            if age_ms > hold_ms:
-                continue
-            out[int(sid)] = SpeakerGainDirection(
-                speaker_id=prev.speaker_id,
-                direction_degrees=prev.direction_degrees,
-                gain_weight=prev.gain_weight,
-                confidence=float(np.clip(prev.confidence * conf_decay, 0.0, 1.0)),
-                active=bool(prev.active),
-                activity_confidence=float(np.clip(prev.activity_confidence * activity_decay, 0.0, 1.0)),
-                updated_at_ms=prev.updated_at_ms,
-                identity_confidence=prev.identity_confidence,
-                identity_maturity=prev.identity_maturity,
-                predicted_direction_deg=prev.predicted_direction_deg,
-                angular_velocity_deg_per_chunk=prev.angular_velocity_deg_per_chunk,
-                last_separator_stream_index=prev.last_separator_stream_index,
-                anchor_direction_deg=prev.anchor_direction_deg,
-                anchor_confidence=prev.anchor_confidence,
-                anchor_locked=prev.anchor_locked,
-                anchor_last_confirmed_ms=prev.anchor_last_confirmed_ms,
-            )
-
-        self._published_map = dict(out)
-        return out
+            if self._tracking_mode == SUPPORTED_TRACKING_MODE:
+                self._process_centroid_frame(np.asarray(item, dtype=np.float32))

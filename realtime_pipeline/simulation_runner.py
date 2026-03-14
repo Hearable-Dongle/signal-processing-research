@@ -14,6 +14,7 @@ from simulation.target_policy import iter_target_source_indices
 from .contracts import PipelineConfig
 from .orchestrator import RealtimeSpeakerPipeline
 from .separation_backends import DominantSpeakerPassthroughBackend, MockSeparationBackend, build_default_backend
+from .tracking_modes import TRACKING_MODE_CHOICES, validate_tracking_mode
 
 
 def _frame_iter(mic_audio: np.ndarray, frame_samples: int):
@@ -42,7 +43,7 @@ def run_simulation_pipeline(
     robust_mode: bool = True,
     capture_trace: bool = False,
     localization_backend: str = "srp_phat_localization",
-    tracking_mode: str = "multi_peak_v2",
+    tracking_mode: str = "doa_centroid_v1",
     control_mode: str = "spatial_peak_mode",
     localization_window_ms: int = 160,
     localization_hop_ms: int = 50,
@@ -418,7 +419,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ],
         default="srp_phat_localization",
     )
-    p.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
+    p.add_argument("--tracking-mode", choices=TRACKING_MODE_CHOICES, default="doa_centroid_v1")
     p.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     p.add_argument("--disable-direction-long-memory", action="store_true")
     p.add_argument("--direction-long-memory-window-ms", type=float, default=60000.0)
@@ -437,6 +438,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_arg_parser().parse_args()
+    args.tracking_mode = validate_tracking_mode(str(args.tracking_mode))
     if args.validate_only:
         from .sanity_checks import run_sanity_checks
 

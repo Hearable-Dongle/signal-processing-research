@@ -1,4 +1,7 @@
-PR title example: Add Capon MVDR local refinement for DOA
+PR title example: Add centroid-based DOA tracking
 
 Concise description:
-Add a single-speaker Capon-seeded local MVDR/Capon refinement backend, wire it through the realtime and benchmark entrypoints, and relax the default refinement margin threshold to reduce over-abstention.
+Replace the slow-path speaker map logic with a simple centroid tracker driven directly by localization DOAs. Add configurable hard-window and Gaussian centroid association modes, expose the centroid match window in benchmarking, and make the new tracker the default public tracking path.
+
+Deprecated:
+`legacy`, `multi_peak_v2`, and `dominant_lock_v1` tracking modes now fail fast with a deprecated error; use `doa_centroid_v1` instead.

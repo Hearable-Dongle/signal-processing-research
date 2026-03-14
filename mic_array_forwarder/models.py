@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from realtime_pipeline.tracking_modes import SUPPORTED_TRACKING_MODE, validate_tracking_mode
 
 SCHEMA_VERSION = "v1"
 
@@ -41,7 +43,10 @@ class SessionStartRequest(BaseModel):
     capon_hold_frames: int = 2
     speaker_history_size: int = 8
     speaker_activation_min_predictions: int = 3
-    speaker_match_window_deg: float = 30.0
+    speaker_match_window_deg: float = 25.0
+    centroid_association_mode: Literal["hard_window", "gaussian"] = "hard_window"
+    centroid_association_sigma_deg: float = 10.0
+    centroid_association_min_score: float = 0.15
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4
@@ -55,8 +60,8 @@ class SessionStartRequest(BaseModel):
     identity_backend: Literal["mfcc_legacy", "speaker_embed_session"] = "mfcc_legacy"
     identity_speaker_embedding_model: Literal["ecapa_voxceleb", "wavlm_base_sv", "wavlm_base_plus_sv"] = "wavlm_base_plus_sv"
     beamforming_mode: Literal["mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
-    localization_backend: Literal["srp_phat_legacy", "srp_phat_localization", "srp_phat_mvdr_refine", "capon_1src", "capon_mvdr_refine_1src", "music_1src"] = "srp_phat_localization"
-    tracking_mode: Literal["legacy", "multi_peak_v2"] = "multi_peak_v2"
+    localization_backend: Literal["srp_phat_legacy", "srp_phat_localization", "srp_phat_mvdr_refine", "capon_1src", "capon_multisrc", "capon_mvdr_refine_1src", "music_1src"] = "srp_phat_localization"
+    tracking_mode: str = SUPPORTED_TRACKING_MODE
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
     processing_mode: Literal[
@@ -64,6 +69,11 @@ class SessionStartRequest(BaseModel):
         "localize_and_beamform",
         "beamform_from_ground_truth",
     ] = "specific_speaker_enhancement"
+
+    @field_validator("tracking_mode")
+    @classmethod
+    def _validate_tracking_mode(cls, value: str) -> str:
+        return validate_tracking_mode(value)
 
 
 class SessionStartResponse(BaseModel):

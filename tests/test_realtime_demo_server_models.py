@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from mic_array_forwarder.models import (
     AdjustSpeakerGainMessage,
     MetricsMessage,
@@ -23,7 +26,7 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.separation_mode == "auto"
     assert req.localization_backend == "srp_phat_localization"
     assert req.localization_vad_enabled is True
-    assert req.tracking_mode == "multi_peak_v2"
+    assert req.tracking_mode == "doa_centroid_v1"
     assert req.processing_mode == "specific_speaker_enhancement"
     assert req.monitor_source == "processed"
     assert req.sample_rate_hz == 48000
@@ -31,8 +34,10 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req2.localization_backend == "music_1src"
     req3 = SessionStartRequest(localization_backend="capon_1src")
     assert req3.localization_backend == "capon_1src"
-    req4 = SessionStartRequest(localization_backend="capon_mvdr_refine_1src")
-    assert req4.localization_backend == "capon_mvdr_refine_1src"
+    req4 = SessionStartRequest(localization_backend="capon_multisrc")
+    assert req4.localization_backend == "capon_multisrc"
+    req5 = SessionStartRequest(localization_backend="capon_mvdr_refine_1src")
+    assert req5.localization_backend == "capon_mvdr_refine_1src"
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,
@@ -85,3 +90,8 @@ def test_raw_channels_response_schema() -> None:
     )
     assert resp.channel_count == 2
     assert resp.channels[1].filename == "channel_001.wav"
+
+
+def test_tracking_mode_rejects_deprecated_values() -> None:
+    with pytest.raises(ValidationError, match="deprecated"):
+        SessionStartRequest(tracking_mode="multi_peak_v2")
