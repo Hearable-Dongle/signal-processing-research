@@ -36,6 +36,33 @@ def _ordinal(n: int) -> str:
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suffix}"
 
+
+def _parse_channel_indices(raw: str | None) -> list[int] | None:
+    if raw is None:
+        return None
+    parts = [part.strip() for part in str(raw).split(",")]
+    indices = [int(part) for part in parts if part]
+    return indices or None
+
+
+def _resolve_channel_indices(
+    max_input_channels: int,
+    requested_channel_count: int,
+    channel_indices: list[int] | None,
+) -> list[int]:
+    if channel_indices is not None:
+        if min(channel_indices) < 0 or max(channel_indices) >= max_input_channels:
+            raise ValueError(
+                f"Requested channel indices {channel_indices} are out of range for {max_input_channels} available channels."
+            )
+        return list(channel_indices)
+    if max_input_channels >= 6 and requested_channel_count in {0, 4}:
+        return [2, 3, 4, 5]
+    if requested_channel_count <= 0:
+        return list(range(max_input_channels))
+    capture_count = min(requested_channel_count, max_input_channels)
+    return list(range(capture_count))
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Record a guided mic tap sequence and save per-channel amplitude plots.")
     parser.add_argument("--audio-device-query", default="ReSpeaker", help="Substring to match input device")
@@ -44,6 +71,11 @@ def main() -> int:
         type=int,
         default=0,
         help="Number of channels to capture. Use 0 to capture all available input channels.",
+    )
+    parser.add_argument(
+        "--channel-indices",
+        default=None,
+        help="Comma-separated zero-indexed device channels to analyze. Defaults to 2,3,4,5 when 6+ input channels are available and channel-count is 0 or 4.",
     )
     parser.add_argument("--sample-rate-hz", type=int, default=48000)
     parser.add_argument("--mic-count", type=int, default=4, help="How many mic prompts to announce")
@@ -67,8 +99,13 @@ def main() -> int:
     device_info = sd.query_devices(device_idx)
     max_input_channels = int(device_info.get("max_input_channels", 0))
     requested_channels = int(args.channel_count)
-    capture_channels = max_input_channels if requested_channels <= 0 else min(requested_channels, max_input_channels)
-    if capture_channels <= 0:
+    selected_channels = _resolve_channel_indices(
+        max_input_channels=max_input_channels,
+        requested_channel_count=requested_channels,
+        channel_indices=_parse_channel_indices(args.channel_indices),
+    )
+    capture_channels = max(selected_channels) + 1
+    if capture_channels <= 0 or not selected_channels:
         print(f"Selected device has no input channels: {device_info}", file=sys.stderr)
         return 1
 
@@ -82,7 +119,8 @@ def main() -> int:
     print(f"Using device {device_idx}: {device_info.get('name', 'unknown')}")
     print(f"Port max input channels: {max_input_channels}")
     print(f"Requested capture channels: {requested_channels}")
-    print(f"Actual captured channels: {capture_channels}")
+    print(f"Analyzed device channels: {selected_channels}")
+    print(f"Actual captured channels in stream: {capture_channels}")
     print("Get ready. Recording starts in 2 seconds.")
     time.sleep(2.0)
 
@@ -119,6 +157,7 @@ def main() -> int:
     if data.ndim != 2:
         print(f"Unexpected recording shape: {data.shape}", file=sys.stderr)
         return 1
+    data = data[:, selected_channels]
 
     times = np.arange(data.shape[0], dtype=np.float64) / float(sr)
     out_path = Path(args.out_path).resolve()
@@ -130,9 +169,9 @@ def main() -> int:
     png_bytes = render_multichannel_plot_png_bytes(
         data=data,
         sample_rate_hz=sr,
-        channel_labels=default_channel_labels(capture_channels),
+        channel_labels=[f"dev ch{idx}" for idx in selected_channels],
         title="Mic Tap Capture by Channel",
-        subtitle=f"{device_info.get('name', 'unknown')} · {sr} Hz",
+        subtitle=f"{device_info.get('name', 'unknown')} · {sr} Hz · channels {selected_channels}",
         envelope_ms=float(args.envelope_ms),
         prompt_windows=prompt_windows,
     )
@@ -141,6 +180,7 @@ def main() -> int:
     print(f"Saved plot to {out_path}")
     print(f"Port max input channels: {max_input_channels}")
     print(f"Captured channels in stream: {capture_channels}")
+    print(f"Analyzed channels: {selected_channels}")
     return 0
 
 

@@ -33,6 +33,31 @@ from typing import Any
 import numpy as np
 
 
+def _parse_channel_indices(raw: str | None) -> list[int] | None:
+    if raw is None:
+        return None
+    parts = [part.strip() for part in str(raw).split(",")]
+    indices = [int(part) for part in parts if part]
+    return indices or None
+
+
+def _resolve_channel_indices(
+    max_input_channels: int,
+    requested_channel_count: int,
+    channel_indices: list[int] | None,
+) -> list[int]:
+    if channel_indices is not None:
+        if min(channel_indices) < 0 or max(channel_indices) >= max_input_channels:
+            raise ValueError(
+                f"Requested channel indices {channel_indices} are out of range for {max_input_channels} available channels."
+            )
+        return list(channel_indices)
+    if max_input_channels >= 6 and requested_channel_count == 4:
+        return [2, 3, 4, 5]
+    capture_count = min(max(requested_channel_count, 1), max_input_channels)
+    return list(range(capture_count))
+
+
 def _find_input_device(sd: Any, query: str | None, min_channels: int) -> int | None:
     devices = sd.query_devices()
     if query is None or not str(query).strip():
@@ -83,6 +108,11 @@ def main() -> int:
     parser.add_argument("--channel-count", type=int, default=4)
     parser.add_argument("--sample-rate-hz", type=int, default=48000)
     parser.add_argument("--tap-count", type=int, default=4)
+    parser.add_argument(
+        "--channel-indices",
+        default=None,
+        help="Comma-separated zero-indexed device channels to analyze. Defaults to 2,3,4,5 when 6+ input channels are available and channel-count=4.",
+    )
     parser.add_argument("--min-gap-ms", type=int, default=400, help="Minimum gap between taps")
     parser.add_argument("--record-seconds", type=float, default=6.0)
     parser.add_argument(
@@ -107,6 +137,15 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    device_info = sd.query_devices(device_idx)
+    max_input_channels = int(device_info.get("max_input_channels", 0))
+    selected_channels = _resolve_channel_indices(
+        max_input_channels=max_input_channels,
+        requested_channel_count=int(args.channel_count),
+        channel_indices=_parse_channel_indices(args.channel_indices),
+    )
+    capture_channels = max(selected_channels) + 1
 
     sr = int(args.sample_rate_hz)
     frames = int(sr * float(args.record_seconds))
@@ -151,11 +190,14 @@ def main() -> int:
 
     print("Get ready to tap. Starting in 2s...")
     time.sleep(2.0)
+    print(f"Using device {device_idx}: {device_info.get('name', 'unknown')}")
+    print(f"Port max input channels: {max_input_channels}")
+    print(f"Capturing device channels 0..{capture_channels - 1} and analyzing channels {selected_channels}")
     print("START: tap each mic in order, leave ~0.5s between taps.")
 
     with sd.InputStream(
         samplerate=sr,
-        channels=int(args.channel_count),
+        channels=capture_channels,
         dtype="float32",
         device=device_idx,
         callback=_callback,
@@ -168,9 +210,10 @@ def main() -> int:
         print("No audio captured.", file=sys.stderr)
         return 1
     data = np.concatenate(recorded_chunks, axis=0)[:frames]
-    if data.ndim != 2 or data.shape[1] != int(args.channel_count):
+    if data.ndim != 2 or data.shape[1] != capture_channels:
         print(f"Unexpected recording shape: {data.shape}", file=sys.stderr)
         return 1
+    data = data[:, selected_channels]
 
     energy = np.mean(np.abs(data), axis=1)
     tap_idxs = _pick_tap_times(energy, sr, int(args.tap_count), min_gap_s)
@@ -188,7 +231,7 @@ def main() -> int:
         window_data = data[start:end]
         per_ch = np.max(np.abs(window_data), axis=0)
         ch = int(np.argmax(per_ch))
-        print(f"Tap {i} -> channel {ch}")
+        print(f"Tap {i} -> channel {selected_channels[ch]} (logical slot {ch})")
 
     return 0
 

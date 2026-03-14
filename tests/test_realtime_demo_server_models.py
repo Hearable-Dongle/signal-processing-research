@@ -28,6 +28,8 @@ def test_models_roundtrip_and_schema_version() -> None:
     assert req.sample_rate_hz == 48000
     req2 = SessionStartRequest(localization_backend="music_1src")
     assert req2.localization_backend == "music_1src"
+    req3 = SessionStartRequest(localization_backend="capon_1src")
+    assert req3.localization_backend == "capon_1src"
 
     state = SpeakerStateMessage(
         timestamp_ms=1.0,

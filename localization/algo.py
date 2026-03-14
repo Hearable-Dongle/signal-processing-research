@@ -729,7 +729,9 @@ class SRPPHATLocalization:
                 diff = self.mic_pos[:, i] - self.mic_pos[:, j]
                 tau = (dirs @ diff) / self.c  # (A,)
                 phase = 2 * np.pi * relevant_freqs[:, np.newaxis] * tau[np.newaxis, :]
-                steered = np.real(phat[:, np.newaxis] * np.exp(-1j * phase))
+                # Zi * conj(Zj) has phase exp(-jw(tau_i - tau_j)), so SRP
+                # must steer with the conjugate sign to align the pair term.
+                steered = np.real(phat[:, np.newaxis] * np.exp(1j * phase))
                 frame_spec += np.sum(steered * msc[:, np.newaxis], axis=0)
             frame_specs.append(frame_spec)
             frame_times.append(float(t_vec[t_idx]) if t_idx < len(t_vec) else float(start / self.fs))
@@ -778,6 +780,82 @@ class SRPPHATLocalization:
                 history.append((frame_times[idx], search_angles[int(np.argmax(hist_spec))]))
 
         return final_doas, P_theta, history
+
+
+class CaponLocalization:
+    def __init__(
+        self,
+        mic_pos,
+        fs=16000,
+        nfft=512,
+        overlap=0.5,
+        freq_range=(200, 3000),
+        max_sources=1,
+        **kwargs,
+    ):
+        self.mic_pos = np.asarray(mic_pos, dtype=np.float64)
+        self.fs = int(fs)
+        self.nfft = int(nfft)
+        self.overlap = float(overlap)
+        self.freq_range = tuple(int(v) for v in freq_range)
+        self.max_sources = int(max_sources)
+        self.c = 343.0
+        self.grid_size = int(kwargs.get("grid_size", 360))
+        self.diagonal_loading = float(kwargs.get("diagonal_loading", 1e-3))
+
+    def process(self, audio):
+        m_mics, _n_samples = audio.shape
+        noverlap = min(int(round(self.nfft * self.overlap)), self.nfft - 1)
+        f_vec, _t_vec, Zxx = signal.stft(
+            audio,
+            fs=self.fs,
+            nperseg=self.nfft,
+            noverlap=noverlap,
+            boundary=None,
+            padded=False,
+        )
+
+        f_min, f_max = self.freq_range
+        f_mask = (f_vec >= f_min) & (f_vec <= f_max)
+        relevant_freqs = f_vec[f_mask].astype(float)
+        Zxx_roi = Zxx[:, f_mask, :]
+        if Zxx_roi.shape[1] == 0 or Zxx_roi.shape[2] == 0:
+            return [], np.zeros(self.grid_size), []
+
+        search_angles = np.linspace(0, 2 * np.pi, self.grid_size, endpoint=False)
+        dirs = np.stack([np.cos(search_angles), np.sin(search_angles), np.zeros_like(search_angles)], axis=1)
+        spectrum = np.zeros(self.grid_size, dtype=np.float64)
+        eye = np.eye(m_mics, dtype=np.complex128)
+
+        for f_idx, freq_hz in enumerate(relevant_freqs):
+            snapshots = np.asarray(Zxx_roi[:, f_idx, :], dtype=np.complex128)
+            if snapshots.ndim != 2 or snapshots.shape[1] == 0:
+                continue
+            cov = (snapshots @ snapshots.conj().T) / max(1, snapshots.shape[1])
+            trace_scale = float(np.real(np.trace(cov))) / max(1, m_mics)
+            load = max(self.diagonal_loading * max(trace_scale, 1e-8), 1e-8)
+            cov_loaded = cov + load * eye
+            try:
+                cov_inv = np.linalg.pinv(cov_loaded, hermitian=True)
+            except TypeError:
+                cov_inv = np.linalg.pinv(cov_loaded)
+
+            mic_projections = self.mic_pos.T @ dirs.T  # (M, A)
+            tau = mic_projections / float(self.c)
+            tau = tau - np.mean(tau, axis=0, keepdims=True)
+            steering = np.exp(-1j * 2.0 * np.pi * float(freq_hz) * tau)  # (M, A)
+            numerators = np.einsum("ma,mn,na->a", steering.conj(), cov_inv, steering, optimize=True)
+            denom = np.maximum(np.real(numerators), 1e-10)
+            spectrum += 1.0 / denom
+
+        spectrum = np.asarray(np.real(spectrum), dtype=np.float64)
+        spectrum[~np.isfinite(spectrum)] = 0.0
+        spectrum[spectrum < 0.0] = 0.0
+        vmax = float(np.max(spectrum))
+        if vmax > 0.0:
+            spectrum /= vmax
+        best_idx = int(np.argmax(spectrum)) if spectrum.size else 0
+        return [float(search_angles[best_idx])], spectrum, []
 
 
 class PyroomacousticsDOABase:

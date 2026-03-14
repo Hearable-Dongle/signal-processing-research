@@ -64,6 +64,50 @@ def test_supported_localization_backends_emit_bridge_results() -> None:
         assert result.score_spectrum is None or len(np.asarray(result.score_spectrum).reshape(-1)) > 0
 
 
+def test_capon_1src_smoke_localizes_single_source() -> None:
+    sr = 16000
+    mic_pos = mic_positions_xyz("respeaker_v3_0457").T
+    audio = _simulate_far_field_signal(35.0, sr=sr, duration_s=0.32, mic_pos_xyz=mic_pos)
+    backend = build_localization_backend(
+        "capon_1src",
+        mic_pos=mic_pos,
+        fs=sr,
+        nfft=256,
+        overlap=0.5,
+        freq_range=(300, 2500),
+        max_sources=1,
+        grid_size=72,
+        min_separation_deg=15.0,
+        small_aperture_bias=True,
+    )
+    result = backend.process(audio)
+    assert result.debug["backend"] == "capon_1src"
+    assert result.peaks_deg
+    assert _angular_error_deg(result.peaks_deg[0], 35.0) <= 30.0
+
+
+def test_srp_phat_localization_smoke_localizes_single_source_without_180_flip() -> None:
+    sr = 16000
+    mic_pos = mic_positions_xyz("respeaker_v3_0457").T
+    audio = _simulate_far_field_signal(35.0, sr=sr, duration_s=0.32, mic_pos_xyz=mic_pos)
+    backend = build_localization_backend(
+        "srp_phat_localization",
+        mic_pos=mic_pos,
+        fs=sr,
+        nfft=256,
+        overlap=0.5,
+        freq_range=(300, 2500),
+        max_sources=1,
+        grid_size=72,
+        min_separation_deg=15.0,
+        small_aperture_bias=True,
+    )
+    result = backend.process(audio)
+    assert result.debug["backend"] == "srp_phat_localization"
+    assert result.peaks_deg
+    assert _angular_error_deg(result.peaks_deg[0], 35.0) <= 30.0
+
+
 @pytest.mark.parametrize(
     "backend_name",
     [
