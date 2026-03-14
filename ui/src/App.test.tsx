@@ -265,8 +265,8 @@ test("data collection exports raw channels for a captured set", async () => {
   await user.type(screen.getByLabelText("Recording notes"), "speaker near whiteboard");
   await user.clear(screen.getByLabelText("Pending speaker 1 name"));
   await user.type(screen.getByLabelText("Pending speaker 1 name"), "amber-otter");
-  await user.clear(screen.getByLabelText("Pending speaker 1 DOA"));
-  await user.type(screen.getByLabelText("Pending speaker 1 DOA"), "45");
+  await user.clear(screen.getByLabelText("Pending speaker 1 period 1 DOA"));
+  await user.type(screen.getByLabelText("Pending speaker 1 period 1 DOA"), "45");
   await user.click(screen.getByRole("button", { name: "Record" }));
   await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
 
@@ -305,7 +305,8 @@ test("data collection exports raw channels for a captured set", async () => {
   expect(await screen.findByText(/Saved recording with 2 raw channels/i)).toBeInTheDocument();
   expect(screen.getByLabelText(/Recording notes recording-/i)).toHaveValue("speaker near whiteboard");
   expect(screen.getByLabelText(/Speaker 1 name for recording-/i)).toHaveValue("amber-otter");
-  expect(screen.getByLabelText(/Speaker 1 DOA for recording-/i)).toHaveValue(45);
+  expect(screen.getByLabelText(/Speaker 1 period 1 DOA for recording-/i)).toHaveValue(45);
+  expect(screen.getByLabelText(/Speaker 1 period 1 start for recording-/i)).toHaveValue(0);
   expect(screen.getByText("raw ch0 · mic 1")).toBeInTheDocument();
   expect(screen.getByText("raw ch1 · mic 2")).toBeInTheDocument();
   expect(document.querySelectorAll("audio").length).toBe(2);
