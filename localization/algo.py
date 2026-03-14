@@ -602,12 +602,12 @@ class SRPPHATLocalization:
         self.c = 343.0
         self.accumulation_sec = float(kwargs.get("accumulation_sec", 0.5))
         self.min_active_frames = int(kwargs.get("min_active_frames", 3))
-        self.rms_floor = float(kwargs.get("rms_floor", 5e-4))
-        self.speech_ratio_threshold = float(kwargs.get("speech_ratio_threshold", 0.62))
-        self.rms_ratio_threshold = float(kwargs.get("rms_ratio_threshold", 1.2))
-        self.flux_threshold = float(kwargs.get("flux_threshold", 0.12))
-        self.noise_floor_alpha = float(kwargs.get("noise_floor_alpha", 0.95))
         self.pair_selection_mode = str(kwargs.get("pair_selection_mode", "all"))
+        self.vad_enabled = bool(kwargs.get("vad_enabled", True))
+        self.vad_frame_ms = int(kwargs.get("vad_frame_ms", 20))
+        self.vad_aggressiveness = int(kwargs.get("vad_aggressiveness", 2))
+        self.vad_min_speech_ratio = float(kwargs.get("vad_min_speech_ratio", 0.2))
+        self.last_debug: dict[str, float | int | str | bool] = {}
 
     def _selected_pairs(self, m_mics: int) -> list[tuple[int, int]]:
         pairs = [(i, j) for i in range(m_mics) for j in range(i + 1, m_mics)]
@@ -621,33 +621,44 @@ class SRPPHATLocalization:
         tol = max(1e-6, min_distance * 0.05)
         return [pair for distance, pair in pair_distances if distance <= min_distance + tol]
 
-    def _speech_features(self, chunk: np.ndarray, prev_mag: np.ndarray | None, noise_floor: float):
-        mono = np.mean(chunk, axis=0)
-        rms = float(np.sqrt(np.mean(np.square(mono)) + 1e-12))
-        spec = np.abs(np.fft.rfft(mono * np.hanning(mono.size)))
-        freqs = np.fft.rfftfreq(mono.size, d=1.0 / self.fs)
-        speech_mask = (freqs >= 250.0) & (freqs <= 3500.0)
-        total_energy = float(np.sum(spec**2) + 1e-12)
-        speech_energy = float(np.sum(spec[speech_mask] ** 2))
-        speech_ratio = speech_energy / total_energy
-        if prev_mag is None:
-            flux = 0.0
-        else:
-            flux = float(np.mean(np.maximum(spec - prev_mag, 0.0)) / (np.mean(prev_mag) + 1e-12))
-        rms_ratio = rms / max(noise_floor, 1e-8)
-        speech_active = bool(
-            rms > self.rms_floor
-            and speech_ratio >= self.speech_ratio_threshold
-            and (rms_ratio >= self.rms_ratio_threshold or flux >= self.flux_threshold)
-        )
-        return speech_active, rms, spec
+    def _speech_active(self, chunk: np.ndarray) -> tuple[bool, dict[str, float]]:
+        if not self.vad_enabled:
+            return True, {"speech_ratio": 1.0, "voiced_frames": 1.0, "total_frames": 1.0}
+        mono = np.asarray(chunk, dtype=np.float32)[0]
+        try:
+            import webrtcvad
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("WebRTC VAD is enabled but the 'webrtcvad' package is not installed.") from exc
 
-    def _update_noise_floor(self, noise_floor: float, rms: float, speech_active: bool) -> float:
-        if not np.isfinite(noise_floor) or noise_floor <= 0.0:
-            return rms
-        if speech_active:
-            return float(noise_floor)
-        return float(self.noise_floor_alpha * noise_floor + (1.0 - self.noise_floor_alpha) * rms)
+        valid_rates = (8000, 16000, 32000, 48000)
+        target_fs = min(valid_rates, key=lambda rate: abs(rate - int(self.fs)))
+        frame_ms = 20 if self.vad_frame_ms not in {10, 20, 30} else int(self.vad_frame_ms)
+        mono_rs = mono
+        if int(self.fs) != target_fs:
+            gcd = np.gcd(int(self.fs), int(target_fs))
+            mono_rs = signal.resample_poly(mono, target_fs // gcd, int(self.fs) // gcd).astype(np.float32, copy=False)
+        frame_len = int(target_fs * frame_ms / 1000)
+        if frame_len <= 0 or mono_rs.size < frame_len:
+            return False, {"speech_ratio": 0.0, "voiced_frames": 0.0, "total_frames": 0.0}
+        vad = webrtcvad.Vad(int(np.clip(self.vad_aggressiveness, 0, 3)))
+        peak = float(np.max(np.abs(mono_rs)))
+        if peak > 1e-6:
+            mono_rs = mono_rs / peak
+        pcm = np.clip(mono_rs, -1.0, 1.0)
+        pcm16 = np.round(pcm * 32767.0).astype(np.int16)
+        total_frames = 0
+        voiced_frames = 0
+        for start in range(0, pcm16.size - frame_len + 1, frame_len):
+            frame_bytes = pcm16[start : start + frame_len].tobytes()
+            total_frames += 1
+            if vad.is_speech(frame_bytes, target_fs):
+                voiced_frames += 1
+        speech_ratio = 0.0 if total_frames == 0 else float(voiced_frames) / float(total_frames)
+        return speech_ratio >= self.vad_min_speech_ratio, {
+            "speech_ratio": float(speech_ratio),
+            "voiced_frames": float(voiced_frames),
+            "total_frames": float(total_frames),
+        }
         
     def process(self, audio):
         """
@@ -662,6 +673,14 @@ class SRPPHATLocalization:
             history: Dummy history.
         """
         M_mics, N_samples = audio.shape
+        window_speech_active, window_vad_debug = self._speech_active(audio)
+        self.last_debug = {
+            "vad_enabled": bool(self.vad_enabled),
+            "window_speech_active": bool(window_speech_active),
+            **window_vad_debug,
+        }
+        if self.vad_enabled and not window_speech_active:
+            return [], np.zeros(360), []
         
         # NOTE: This intentionally gives up parity with the previous scene-level
         # SRP-PHAT implementation in favor of matching the validated
@@ -698,9 +717,6 @@ class SRPPHATLocalization:
         dirs = np.stack([np.cos(search_angles), np.sin(search_angles), np.zeros_like(search_angles)], axis=1)
         frame_specs = []
         frame_times = []
-        frame_active = []
-        prev_mag = None
-        noise_floor = 0.0
         accum_frames = max(1, int(round(self.accumulation_sec / max((1.0 - self.overlap) * self.nfft / self.fs, 1e-6))))
 
         for t_idx in range(Zxx_roi.shape[2]):
@@ -708,9 +724,6 @@ class SRPPHATLocalization:
             stop = min(start + self.nfft, N_samples)
             if stop - start <= 8:
                 continue
-            chunk = audio[:, start:stop]
-            speech_active, rms, prev_mag = self._speech_features(chunk, prev_mag, noise_floor)
-            noise_floor = self._update_noise_floor(noise_floor, rms, speech_active)
             frame_spec = np.zeros(search_angles.shape[0], dtype=float)
             for i, j in pairs:
                 pair_mask = pair_freq_masks[(i, j)]
@@ -735,16 +748,10 @@ class SRPPHATLocalization:
                 frame_spec += np.sum(steered * msc[:, np.newaxis], axis=0)
             frame_specs.append(frame_spec)
             frame_times.append(float(t_vec[t_idx]) if t_idx < len(t_vec) else float(start / self.fs))
-            frame_active.append(bool(speech_active))
 
         if not frame_specs:
             return [], np.zeros(360), []
-
-        active_specs = [spec for spec, active in zip(frame_specs, frame_active) if active]
-        if len(active_specs) >= self.min_active_frames:
-            P_theta = np.mean(np.stack(active_specs, axis=0), axis=0)
-        else:
-            P_theta = np.mean(np.stack(frame_specs, axis=0), axis=0)
+        P_theta = np.mean(np.stack(frame_specs, axis=0), axis=0)
         
         # Normalize P_theta for "histogram" look
         # Clip negative values (sidelobes) to zero instead of lifting everything
@@ -772,9 +779,7 @@ class SRPPHATLocalization:
         history = []
         for idx in range(len(frame_specs)):
             start_idx = max(0, idx - accum_frames + 1)
-            window_specs = [spec for spec, active in zip(frame_specs[start_idx:idx + 1], frame_active[start_idx:idx + 1]) if active]
-            if len(window_specs) < self.min_active_frames:
-                continue
+            window_specs = frame_specs[start_idx:idx + 1]
             hist_spec = np.mean(np.stack(window_specs, axis=0), axis=0)
             if np.max(hist_spec) > 0.0:
                 history.append((frame_times[idx], search_angles[int(np.argmax(hist_spec))]))
@@ -802,8 +807,76 @@ class CaponLocalization:
         self.c = 343.0
         self.grid_size = int(kwargs.get("grid_size", 360))
         self.diagonal_loading = float(kwargs.get("diagonal_loading", 1e-3))
+        self.vad_enabled = bool(kwargs.get("vad_enabled", True))
+        self.vad_frame_ms = int(kwargs.get("vad_frame_ms", 20))
+        self.vad_aggressiveness = int(kwargs.get("vad_aggressiveness", 2))
+        self.vad_min_speech_ratio = float(kwargs.get("vad_min_speech_ratio", 0.2))
+        self.spectrum_ema_alpha = float(kwargs.get("capon_spectrum_ema_alpha", 0.78))
+        self.peak_min_sharpness = float(kwargs.get("capon_peak_min_sharpness", 0.12))
+        self.peak_min_margin = float(kwargs.get("capon_peak_min_margin", 0.08))
+        self.hold_frames = int(kwargs.get("capon_hold_frames", 2))
+        self._spectrum_accum: np.ndarray | None = None
+        self._last_accepted_angle: float | None = None
+        self._last_accepted_score: float = 0.0
+        self._hold_remaining = 0
+        self.last_debug: dict[str, float | int | str | bool] = {}
+        self.last_peak_scores: list[float] = []
+
+    def _speech_active(self, audio: np.ndarray) -> bool:
+        if not self.vad_enabled:
+            return True
+        mono = np.asarray(audio, dtype=np.float32)[0]
+        try:
+            import webrtcvad
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("WebRTC VAD is enabled but the 'webrtcvad' package is not installed.") from exc
+        valid_rates = (8000, 16000, 32000, 48000)
+        target_fs = min(valid_rates, key=lambda rate: abs(rate - int(self.fs)))
+        frame_ms = 20 if self.vad_frame_ms not in {10, 20, 30} else int(self.vad_frame_ms)
+        mono_rs = mono
+        if int(self.fs) != target_fs:
+            gcd = np.gcd(int(self.fs), int(target_fs))
+            mono_rs = signal.resample_poly(mono, target_fs // gcd, int(self.fs) // gcd).astype(np.float32, copy=False)
+        frame_len = int(target_fs * frame_ms / 1000)
+        if frame_len <= 0 or mono_rs.size < frame_len:
+            return False
+        vad = webrtcvad.Vad(int(np.clip(self.vad_aggressiveness, 0, 3)))
+        peak = float(np.max(np.abs(mono_rs)))
+        if peak > 1e-6:
+            mono_rs = mono_rs / peak
+        pcm16 = np.round(np.clip(mono_rs, -1.0, 1.0) * 32767.0).astype(np.int16)
+        total_frames = 0
+        voiced_frames = 0
+        for start in range(0, pcm16.size - frame_len + 1, frame_len):
+            total_frames += 1
+            if vad.is_speech(pcm16[start : start + frame_len].tobytes(), target_fs):
+                voiced_frames += 1
+        if total_frames == 0:
+            return False
+        return (float(voiced_frames) / float(total_frames)) >= self.vad_min_speech_ratio
 
     def process(self, audio):
+        speech_active = self._speech_active(audio)
+        self.last_debug = {
+            "vad_enabled": bool(self.vad_enabled),
+            "window_speech_active": bool(speech_active),
+        }
+        if not speech_active:
+            self._spectrum_accum = None
+            if self._last_accepted_angle is not None and self._hold_remaining > 0:
+                self._hold_remaining -= 1
+                self.last_peak_scores = [float(max(0.0, self._last_accepted_score * 0.9))]
+                self.last_debug.update(
+                    {
+                        "output_mode": "held",
+                        "capon_confidence": float(max(0.0, self._last_accepted_score * 0.9)),
+                        "capon_peak_sharpness": 0.0,
+                        "capon_peak_margin": 0.0,
+                    }
+                )
+                return [float(self._last_accepted_angle)], np.zeros(self.grid_size), []
+            self.last_peak_scores = []
+            return [], np.zeros(self.grid_size), []
         m_mics, _n_samples = audio.shape
         noverlap = min(int(round(self.nfft * self.overlap)), self.nfft - 1)
         f_vec, _t_vec, Zxx = signal.stft(
@@ -854,8 +927,66 @@ class CaponLocalization:
         vmax = float(np.max(spectrum))
         if vmax > 0.0:
             spectrum /= vmax
-        best_idx = int(np.argmax(spectrum)) if spectrum.size else 0
-        return [float(search_angles[best_idx])], spectrum, []
+        if self._spectrum_accum is None or self._spectrum_accum.shape != spectrum.shape:
+            self._spectrum_accum = np.asarray(spectrum, dtype=np.float64)
+        else:
+            alpha = float(np.clip(self.spectrum_ema_alpha, 0.0, 0.98))
+            self._spectrum_accum = alpha * self._spectrum_accum + (1.0 - alpha) * spectrum
+        smooth_spectrum = np.asarray(self._spectrum_accum, dtype=np.float64)
+        if np.max(smooth_spectrum) > 0.0:
+            smooth_spectrum = smooth_spectrum / np.max(smooth_spectrum)
+
+        if smooth_spectrum.size == 0:
+            self.last_peak_scores = []
+            return [], smooth_spectrum, []
+        best_idx = int(np.argmax(smooth_spectrum))
+        best_score = float(smooth_spectrum[best_idx])
+        left = float(smooth_spectrum[(best_idx - 1) % smooth_spectrum.size])
+        right = float(smooth_spectrum[(best_idx + 1) % smooth_spectrum.size])
+        local_baseline = max(left, right)
+        global_baseline = float(np.median(smooth_spectrum))
+        local_contrast = float(max(0.0, best_score - local_baseline))
+        peak_sharpness = float(max(0.0, best_score - global_baseline))
+        second_idx = None
+        second_score = 0.0
+        exclusion = max(2, int(round(12.0 / (360.0 / self.grid_size))))
+        for idx, score in sorted(enumerate(smooth_spectrum.tolist()), key=lambda item: item[1], reverse=True):
+            if abs(idx - best_idx) <= exclusion or (smooth_spectrum.size - abs(idx - best_idx)) <= exclusion:
+                continue
+            second_idx = int(idx)
+            second_score = float(score)
+            break
+        peak_margin = float(max(0.0, best_score - second_score))
+        confidence = float(np.clip(0.5 * best_score + 0.25 * peak_sharpness + 0.25 * peak_margin, 0.0, 1.0))
+        accepted = bool(peak_sharpness >= self.peak_min_sharpness and peak_margin >= self.peak_min_margin)
+        self.last_debug.update(
+            {
+                "capon_peak_index": int(best_idx),
+                "capon_peak_score": float(best_score),
+                "capon_second_peak_index": None if second_idx is None else int(second_idx),
+                "capon_peak_sharpness": float(peak_sharpness),
+                "capon_local_contrast": float(local_contrast),
+                "capon_peak_margin": float(peak_margin),
+                "capon_confidence": float(confidence),
+            }
+        )
+        if accepted:
+            self._last_accepted_angle = float(search_angles[best_idx])
+            self._last_accepted_score = float(confidence)
+            self._hold_remaining = int(max(0, self.hold_frames))
+            self.last_debug["output_mode"] = "accepted"
+            self.last_peak_scores = [float(confidence)]
+            return [float(search_angles[best_idx])], smooth_spectrum, []
+
+        if self._last_accepted_angle is not None and self._hold_remaining > 0:
+            self._hold_remaining -= 1
+            self.last_debug["output_mode"] = "held"
+            self.last_peak_scores = [float(max(0.0, self._last_accepted_score * 0.9))]
+            return [float(self._last_accepted_angle)], smooth_spectrum, []
+
+        self.last_debug["output_mode"] = "abstained"
+        self.last_peak_scores = []
+        return [], smooth_spectrum, []
 
 
 class PyroomacousticsDOABase:

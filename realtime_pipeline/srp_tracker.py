@@ -82,6 +82,11 @@ class SRPPeakTracker:
         sound_speed_m_s: float = 343.0,
         tracking_mode: str = "multi_peak_v2",
         pair_selection_mode: str = "all",
+        vad_enabled: bool = True,
+        capon_spectrum_ema_alpha: float = 0.78,
+        capon_peak_min_sharpness: float = 0.12,
+        capon_peak_min_margin: float = 0.08,
+        capon_hold_frames: int = 2,
         max_tracks: int | None = None,
         max_assoc_distance_deg: float = 20.0,
         track_hold_frames: int = 5,
@@ -153,6 +158,11 @@ class SRPPeakTracker:
             min_separation_deg=min_peak_separation_deg,
             small_aperture_bias=small_aperture_bias,
             pair_selection_mode=pair_selection_mode,
+            vad_enabled=vad_enabled,
+            capon_spectrum_ema_alpha=capon_spectrum_ema_alpha,
+            capon_peak_min_sharpness=capon_peak_min_sharpness,
+            capon_peak_min_margin=capon_peak_min_margin,
+            capon_hold_frames=capon_hold_frames,
         )
         self._max_sources = int(max_sources)
         self._single_source_backends = {
@@ -798,13 +808,6 @@ class SRPPeakTracker:
         if self._tracking_mode == "dominant_lock_v1":
             return self._update_dominant_lock(candidates, extra_debug)
         if self._backend_name in self._single_source_backends:
-            if not legacy_peaks and backend_result.score_spectrum is not None:
-                spec = np.asarray(backend_result.score_spectrum, dtype=np.float64)
-                idx = _dominant_peak_idx(spec)
-                if idx is not None:
-                    ang = float(_grid_angles_deg(spec.size)[idx])
-                    legacy_peaks = [ang]
-                    legacy_scores = [float(_normalize_spectrum(spec)[idx])]
             return self._single_source_predict_update(legacy_peaks[:1], legacy_scores[:1] if legacy_scores else None, extra_debug)
         if self._tracking_mode != "multi_peak_v2":
             return self._update_legacy_tracks(legacy_peaks, legacy_scores, extra_debug)
