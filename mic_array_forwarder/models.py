@@ -39,6 +39,7 @@ class SessionStartRequest(BaseModel):
     focus_ratio: float = 2.0
     slow_chunk_ms: int = 300
     max_speakers_hint: int = 4
+    assume_single_speaker: bool = False
     separation_mode: Literal["auto", "mock", "single_dominant_no_separator"] = "auto"
     convtasnet_model_name: str = "JorisCos/ConvTasNet_Libri2Mix_sepnoisy_16k"
     convtasnet_model_sample_rate_hz: int = 16000
@@ -48,7 +49,7 @@ class SessionStartRequest(BaseModel):
     identity_backend: Literal["mfcc_legacy", "speaker_embed_session"] = "mfcc_legacy"
     identity_speaker_embedding_model: Literal["ecapa_voxceleb", "wavlm_base_sv", "wavlm_base_plus_sv"] = "wavlm_base_plus_sv"
     beamforming_mode: Literal["mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
-    localization_backend: Literal["srp_phat_legacy", "srp_phat_localization", "music_1src"] = "srp_phat_localization"
+    localization_backend: Literal["srp_phat_legacy", "srp_phat_localization", "srp_phat_mvdr_refine", "music_1src"] = "srp_phat_localization"
     tracking_mode: Literal["legacy", "multi_peak_v2"] = "multi_peak_v2"
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False

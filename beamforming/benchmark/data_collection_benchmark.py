@@ -54,6 +54,19 @@ def _slug(v: str) -> str:
     return re.sub(r"[^a-z0-9._-]+", "_", str(v).strip().lower())
 
 
+def _normalize_angle_deg(v: float) -> float:
+    return float(v % 360.0)
+
+
+def _to_display_angle_deg(angle_deg: float, *, mic_array_profile: str) -> float:
+    angle = _normalize_angle_deg(float(angle_deg))
+    if str(mic_array_profile) == "respeaker_xvf3800_0650":
+        # Backend/localization math uses +x as 0 deg; the UI uses the cable edge
+        # between mics 1 and 2 as 0 deg, which is +y for the XVF3800 geometry.
+        return _normalize_angle_deg(90.0 - angle)
+    return angle
+
+
 def _write_csv(path: Path, rows: list[dict]) -> None:
     if not rows:
         return
@@ -212,7 +225,7 @@ def _plot_spectrogram_compare(raw: np.ndarray, proc: np.ndarray, fs: int, out_pa
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
     plt.close(fig)
-def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float) -> list[dict]:
+def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float, mic_array_profile: str) -> list[dict]:
     metadata_path = recording_dir / "metadata.json"
     if not metadata_path.exists():
         return []
@@ -234,7 +247,7 @@ def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float) -> list
                     "speaker_name": str(item.get("speakerName", f"speaker-{idx + 1}")),
                     "start_sec": 0.0,
                     "end_sec": float(max(duration_s, 0.0)),
-                    "angle_deg": angle_deg,
+                    "angle_deg": _normalize_angle_deg(angle_deg),
                     "source": "manual_metadata",
                 }
             )
@@ -267,7 +280,7 @@ def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float) -> list
                 "speaker_name": str(item.get("speaker_name", f"speaker-{len(tracks) + 1}")),
                 "start_sec": float(window[0]),
                 "end_sec": float(window[1]),
-                "angle_deg": float(item.get("angle_deg", 0.0)),
+                "angle_deg": _to_display_angle_deg(float(item.get("angle_deg", 0.0)), mic_array_profile=mic_array_profile),
                 "source": "simulation",
             }
         )
@@ -278,7 +291,7 @@ def _angular_error_deg(a_deg: float, b_deg: float) -> float:
     return abs((float(a_deg) - float(b_deg) + 180.0) % 360.0 - 180.0)
 
 
-def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict]) -> dict[str, float | str]:
+def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic_array_profile: str) -> dict[str, float | str]:
     if not ground_truth_tracks:
         return {
             "ground_truth_source": "",
@@ -294,7 +307,10 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict]) -> dic
     gt_angles = [float(item["angle_deg"]) for item in ground_truth_tracks]
     gt_source = str(ground_truth_tracks[0].get("source", ""))
     final_speakers = list(summary.get("speaker_map_final", []))
-    final_angles = [float(item.get("direction_degrees", 0.0)) for item in final_speakers]
+    final_angles = [
+        _to_display_angle_deg(float(item.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
+        for item in final_speakers
+    ]
     if final_angles:
         final_errors = [min(_angular_error_deg(gt_angle, pred_angle) for pred_angle in final_angles) for gt_angle in gt_angles]
     else:
@@ -303,7 +319,11 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict]) -> dic
     trace_rows = list(summary.get("speaker_map_trace", []))
     active_errors: list[float] = []
     for row in trace_rows:
-        active_angles = [float(item.get("direction_degrees", 0.0)) for item in row.get("speakers", []) if bool(item.get("active", False))]
+        active_angles = [
+            _to_display_angle_deg(float(item.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
+            for item in row.get("speakers", [])
+            if bool(item.get("active", False))
+        ]
         if not active_angles:
             continue
         for gt_angle in gt_angles:
@@ -326,7 +346,14 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict]) -> dic
     }
 
 
-def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_truth_tracks: list[dict] | None = None) -> None:
+def _plot_speaker_timeline(
+    summary: dict,
+    out_path: Path,
+    title: str,
+    ground_truth_tracks: list[dict] | None = None,
+    *,
+    mic_array_profile: str,
+) -> None:
     trace = list(summary.get("speaker_map_trace", []))
     ground_truth_tracks = ground_truth_tracks or []
     frame_step_s = float(summary.get("fast_frame_ms", 10.0)) / 1000.0
@@ -342,7 +369,7 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
         x = float(row.get("frame_index", 0)) * frame_step_s
         for angle_deg, score in zip(row.get("raw_peaks_deg", []), row.get("raw_peak_scores", [])):
             raw_xs.append(x)
-            raw_ys.append(float(angle_deg))
+            raw_ys.append(_to_display_angle_deg(float(angle_deg), mic_array_profile=mic_array_profile))
             raw_cs.append(float(max(0.0, score)))
         for speaker in row.get("speakers", []):
             if not bool(speaker.get("active", False)):
@@ -353,7 +380,9 @@ def _plot_speaker_timeline(summary: dict, out_path: Path, title: str, ground_tru
                 {"xs": [], "ys": [], "conf": []},
             )
             track["xs"].append(x)
-            track["ys"].append(float(speaker.get("direction_degrees", 0.0)))
+            track["ys"].append(
+                _to_display_angle_deg(float(speaker.get("direction_degrees", 0.0)), mic_array_profile=mic_array_profile)
+            )
             track["conf"].append(float(max(0.0, speaker.get("confidence", 0.0))))
     gt_handles = []
     gt_labels = []
@@ -527,6 +556,7 @@ def _run_recording_method_job(
     identity_backend: str,
     identity_speaker_embedding_model: str,
     max_speakers_hint: int,
+    assume_single_speaker: bool,
 ) -> dict:
     raw_dir = recording_dir / "raw" if (recording_dir / "raw").is_dir() else recording_dir
     mic_audio, sample_rate_hz, channel_filenames = _load_multichannel_wavs(raw_dir)
@@ -550,6 +580,7 @@ def _run_recording_method_job(
         speaker_activation_min_predictions=int(speaker_activation_min_predictions),
         speaker_match_window_deg=float(speaker_match_window_deg),
         focus_ratio=2.0,
+        assume_single_speaker=bool(assume_single_speaker),
         separation_mode=str(separation_mode),
         localization_backend=str(localization_backend),
         tracking_mode=str(tracking_mode),
@@ -572,8 +603,12 @@ def _run_recording_method_job(
     n = min(raw_mix.size, proc.size)
     trace_metrics = _trace_metrics(summary)
     duration_s = float(n / max(fs, 1))
-    ground_truth_tracks = _load_ground_truth_tracks(recording_dir, duration_s=duration_s)
-    gt_metrics = _ground_truth_metrics(summary, ground_truth_tracks)
+    ground_truth_tracks = _load_ground_truth_tracks(
+        recording_dir,
+        duration_s=duration_s,
+        mic_array_profile=str(mic_array_profile),
+    )
+    gt_metrics = _ground_truth_metrics(summary, ground_truth_tracks, mic_array_profile=str(mic_array_profile))
     row = {
         "recording": recording_id,
         "method": method,
@@ -606,7 +641,13 @@ def _run_recording_method_job(
     viz_dir = run_dir / "visualizations"
     _plot_waveform_compare(raw_mix[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
     _plot_spectrogram_compare(raw_mix[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
-    _plot_speaker_timeline(summary, viz_dir / "speaker_directions.png", label, ground_truth_tracks=ground_truth_tracks)
+    _plot_speaker_timeline(
+        summary,
+        viz_dir / "speaker_directions.png",
+        label,
+        ground_truth_tracks=ground_truth_tracks,
+        mic_array_profile=str(mic_array_profile),
+    )
     return row
 
 
@@ -658,6 +699,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slow-chunk-ms", type=int, default=2000)
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
+    parser.add_argument("--assume-single-speaker", action="store_true")
     parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "music_1src"], default="srp_phat_localization")
     parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
     parser.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
@@ -741,6 +783,7 @@ def main() -> None:
                 identity_backend=str(args.identity_backend),
                 identity_speaker_embedding_model=str(args.identity_speaker_embedding_model),
                 max_speakers_hint=int(args.max_speakers_hint),
+                assume_single_speaker=bool(args.assume_single_speaker),
             )
 
         if int(args.workers) <= 1:
@@ -788,6 +831,7 @@ def main() -> None:
             "methods": list(args.methods),
             "separation_mode": "realtime_pipeline",
             "algorithm_mode": str(args.algorithm_mode),
+            "assume_single_speaker": bool(args.assume_single_speaker),
             "fast_frame_ms": int(args.localization_hop_ms),
             "localization_window_ms": int(args.localization_window_ms),
             "localization_hop_ms": int(args.localization_hop_ms),
