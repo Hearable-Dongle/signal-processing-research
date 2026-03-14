@@ -8,6 +8,7 @@ import { SceneLauncher, type SessionLaunchConfig } from "./SceneLauncher";
 import { SpeakerControlPopover } from "./SpeakerControlPopover";
 import { SpeakerStage } from "./SpeakerStage";
 import { WaveformTimeline } from "./WaveformTimeline";
+import { backendArrivalToUiSourceBearingDeg } from "../utils/direction";
 import {
   SCHEMA_VERSION,
   type AlgorithmMode,
@@ -144,6 +145,7 @@ export function RealtimeDemoPage({
   const [monitorSource, setMonitorSource] = useState<MonitorSource>("processed");
   const [activePlaybackSource, setActivePlaybackSource] = useState<PlaybackSource | null>(null);
   const [activeInputSource, setActiveInputSource] = useState<SessionLaunchConfig["inputSource"]>("simulation");
+  const [activeMicArrayProfile, setActiveMicArrayProfile] = useState<SessionLaunchConfig["micArrayProfile"]>("respeaker_xvf3800_0650");
   const [audioSampleRateHz, setAudioSampleRateHz] = useState(DEFAULT_SAMPLE_RATE);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
@@ -210,7 +212,14 @@ export function RealtimeDemoPage({
       new DemoWsClient({
         onServerMessage: (msg: ServerMessage) => {
           if (msg.type === "speaker_state") {
-            setSpeakers(msg.speakers);
+            const displaySpeakers =
+              activeInputSource === "respeaker_live"
+                ? msg.speakers.map((speaker) => ({
+                    ...speaker,
+                    direction_degrees: backendArrivalToUiSourceBearingDeg(speaker.direction_degrees, activeMicArrayProfile),
+                  }))
+                : msg.speakers;
+            setSpeakers(displaySpeakers);
             setGroundTruth(msg.ground_truth ?? []);
           }
           if (msg.type === "metrics") {
@@ -241,7 +250,7 @@ export function RealtimeDemoPage({
         },
         onClose: () => setStatus((s) => (s === "running" ? "disconnected" : s)),
       }),
-    []
+    [activeInputSource, activeMicArrayProfile]
   );
 
   async function startSession(config: SessionLaunchConfig): Promise<void> {
@@ -269,6 +278,7 @@ export function RealtimeDemoPage({
     const playbackSampleRateHz = inputSource === "respeaker_live" ? sampleRateHz : DEFAULT_SAMPLE_RATE;
     setStatus("starting");
     setActiveInputSource(inputSource);
+    setActiveMicArrayProfile(micArrayProfile);
     setAlgorithmMode(nextAlgorithmMode);
     setMonitorSource(nextMonitorSource);
     setAudioSampleRateHz(playbackSampleRateHz);

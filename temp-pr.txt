@@ -1,1 +1,4 @@
-Add XVF3800 spatial-aliasing experiment controls for SRP localization: per-pair alias masking and an `adjacent_only` pair-selection mode, with benchmark support for single-speaker localization-only evaluation.
+PR title example: Align XVF3800 DOA displays with source-bearing annotations
+
+Concise description:
+Treat Data Collection annotations as the source of truth for XVF3800 and convert backend arrival-direction DOAs into source-bearing in the frontend live views and data-collection benchmark outputs.

@@ -35,7 +35,7 @@ export function DirectionalityViz({ speakers, trail }: Props) {
     <section className="panel directionality-panel">
       <div className="directionality-header">
         <h2>Directionality</h2>
-        <p className="directionality-copy">Frontend preview of where the live tracker is hearing the strongest incoming direction.</p>
+        <p className="directionality-copy">Frontend preview of the estimated speaker bearing around the array.</p>
       </div>
 
       <div className="directionality-wrap">

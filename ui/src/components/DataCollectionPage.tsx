@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DemoWsClient } from "../api/ws";
 import { DirectionalityViz } from "./DirectionalityViz";
 import { SpeakerStage } from "./SpeakerStage";
+import type { MicArrayProfile } from "../utils/direction";
 import type {
   AnnotatedSpeaker,
   DataCollectionSet,
@@ -12,12 +13,13 @@ import type {
   RecordingEntry,
 } from "../types/dataCollection";
 import type { ServerMessage, Speaker } from "../types/contracts";
+import { backendArrivalToUiSourceBearingDeg } from "../utils/direction";
 import { createZipBlob, textFile } from "../utils/zip";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 const DEFAULT_SAMPLE_RATE_HZ = 48000;
 const DEFAULT_DEVICE = "XVF3800";
-const DEFAULT_MIC_ARRAY_PROFILE = "respeaker_xvf3800_0650";
+const DEFAULT_MIC_ARRAY_PROFILE: MicArrayProfile = "respeaker_xvf3800_0650";
 const EMPTY_SPEAKERS: Speaker[] = [];
 const ADJECTIVES = ["amber", "brisk", "calm", "daring", "ember", "fuzzy", "golden", "harbor"];
 const ANIMALS = ["otter", "lynx", "falcon", "badger", "fox", "heron", "panda", "wren"];
@@ -174,7 +176,7 @@ export function DataCollectionPage() {
   const [collectionTitle, setCollectionTitle] = useState("Capstone data collection");
   const [collectionNotes, setCollectionNotes] = useState("");
   const [deviceName, setDeviceName] = useState(DEFAULT_DEVICE);
-  const [micArrayProfile, setMicArrayProfile] = useState(DEFAULT_MIC_ARRAY_PROFILE);
+  const [micArrayProfile, setMicArrayProfile] = useState<MicArrayProfile>(DEFAULT_MIC_ARRAY_PROFILE);
   const [createdAtIso] = useState(nowIso);
   const [sessionStatus, setSessionStatus] = useState("idle");
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -193,8 +195,12 @@ export function DataCollectionPage() {
           if (msg.type !== "speaker_state") {
             return;
           }
-          setSpeakers(msg.speakers);
-          const visibleSpeakers = msg.speakers.filter((speaker) => speaker.active);
+          const displaySpeakers = msg.speakers.map((speaker) => ({
+            ...speaker,
+            direction_degrees: backendArrivalToUiSourceBearingDeg(speaker.direction_degrees, micArrayProfile),
+          }));
+          setSpeakers(displaySpeakers);
+          const visibleSpeakers = displaySpeakers.filter((speaker) => speaker.active);
           if (!visibleSpeakers.length) {
             return;
           }
@@ -216,7 +222,7 @@ export function DataCollectionPage() {
           setSpeakers([]);
         },
       }),
-    []
+    [micArrayProfile]
   );
 
   useEffect(() => () => ws.close(), [ws]);
@@ -517,7 +523,7 @@ export function DataCollectionPage() {
             id="mic-array-profile"
             aria-label="Mic array profile"
             value={micArrayProfile}
-            onChange={(e) => setMicArrayProfile(e.target.value)}
+            onChange={(e) => setMicArrayProfile(e.target.value as MicArrayProfile)}
           >
             <option value="respeaker_xvf3800_0650">ReSpeaker XVF3800 (65.0 mm)</option>
             <option value="respeaker_v3_0457">ReSpeaker 4-Mic v3 (45.7 mm)</option>
