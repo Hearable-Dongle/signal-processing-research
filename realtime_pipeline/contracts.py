@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .tracking_modes import SUPPORTED_TRACKING_MODE
+
 
 @dataclass(frozen=True, slots=True)
 class SpeakerGainDirection:
@@ -48,8 +50,8 @@ class PipelineConfig:
     slow_chunk_hop_ms: int | None = None
     slow_path_enabled: bool = True
     fast_path_reference_mode: str = "speaker_map"  # one of: speaker_map, srp_peak
-    localization_backend: str = "srp_phat_localization"  # one of: srp_phat_legacy, srp_phat_localization, srp_phat_mvdr_refine, capon_1src, capon_mvdr_refine_1src, music_1src
-    tracking_mode: str = "multi_peak_v2"  # one of: legacy, multi_peak_v2, dominant_lock_v1
+    localization_backend: str = "srp_phat_localization"  # one of: srp_phat_legacy, srp_phat_localization, srp_phat_mvdr_refine, capon_1src, capon_multisrc, capon_mvdr_refine_1src, music_1src
+    tracking_mode: str = SUPPORTED_TRACKING_MODE
     control_mode: str = "spatial_peak_mode"  # one of: spatial_peak_mode, speaker_tracking_mode
     localization_window_ms: int = 160
     localization_hop_ms: int = 50
@@ -99,6 +101,10 @@ class PipelineConfig:
     capon_peak_min_sharpness: float = 0.12
     capon_peak_min_margin: float = 0.04
     capon_hold_frames: int = 2
+    speaker_match_window_deg: float = 25.0
+    centroid_association_mode: str = "hard_window"  # one of: hard_window, gaussian
+    centroid_association_sigma_deg: float = 10.0
+    centroid_association_min_score: float = 0.15
     srp_max_sources: int = 8
     srp_prior_enabled: bool = True
     srp_peak_min_score: float = 0.05

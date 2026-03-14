@@ -44,7 +44,7 @@ def run_recording_pipeline(
     srp_overlap: float = 0.5,
     srp_freq_min_hz: int = 200,
     srp_freq_max_hz: int = 3000,
-    tracking_mode: str = "multi_peak_v2",
+    tracking_mode: str = "doa_centroid_v1",
     control_mode: str = "spatial_peak_mode",
     direction_long_memory_enabled: bool = True,
     direction_long_memory_window_ms: float = 60000.0,

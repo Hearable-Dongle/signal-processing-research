@@ -15,6 +15,7 @@ import sounddevice as sd
 import websockets
 
 from mic_array_forwarder.ws_codec import decode_audio_chunk
+from realtime_pipeline.tracking_modes import TRACKING_MODE_CHOICES, validate_tracking_mode
 
 SAMPLE_RATE_HZ = 48000
 
@@ -183,12 +184,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--localization-backend",
-        choices=["srp_phat_legacy", "srp_phat_localization", "capon_1src", "capon_mvdr_refine_1src", "music_1src"],
+        choices=["srp_phat_legacy", "srp_phat_localization", "capon_1src", "capon_multisrc", "capon_mvdr_refine_1src", "music_1src"],
         default="srp_phat_localization",
     )
-    parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2"], default="multi_peak_v2")
+    parser.add_argument("--tracking-mode", choices=TRACKING_MODE_CHOICES, default="doa_centroid_v1")
     parser.add_argument("--channel-map", default="", help="Comma-separated channel map, e.g. 0,1,2,3")
     args = parser.parse_args()
+    tracking_mode = validate_tracking_mode(str(args.tracking_mode))
 
     payload = {
         "input_source": "respeaker_live",
@@ -198,7 +200,7 @@ def main() -> int:
         "monitor_source": args.monitor_source,
         "mic_array_profile": args.mic_array_profile,
         "localization_backend": args.localization_backend,
-        "tracking_mode": args.tracking_mode,
+        "tracking_mode": tracking_mode,
         "channel_map": [int(v) for v in args.channel_map.split(",") if v.strip()] if args.channel_map else None,
         "separation_mode": "mock",
     }

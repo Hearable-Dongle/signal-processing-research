@@ -44,6 +44,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
 
 from mic_array_forwarder.models import SessionStartRequest
 from realtime_pipeline.session_runtime import run_offline_session_pipeline
+from realtime_pipeline.tracking_modes import TRACKING_MODE_CHOICES, validate_tracking_mode
 from simulation.mic_array_profiles import mic_positions_xyz
 
 try:
@@ -640,6 +641,9 @@ def _run_recording_method_job(
     speaker_history_size: int,
     speaker_activation_min_predictions: int,
     speaker_match_window_deg: float,
+    centroid_association_mode: str,
+    centroid_association_sigma_deg: float,
+    centroid_association_min_score: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -679,6 +683,9 @@ def _run_recording_method_job(
         speaker_history_size=int(speaker_history_size),
         speaker_activation_min_predictions=int(speaker_activation_min_predictions),
         speaker_match_window_deg=float(speaker_match_window_deg),
+        centroid_association_mode=str(centroid_association_mode),
+        centroid_association_sigma_deg=float(centroid_association_sigma_deg),
+        centroid_association_min_score=float(centroid_association_min_score),
         focus_ratio=2.0,
         assume_single_speaker=bool(assume_single_speaker),
         separation_mode=str(separation_mode),
@@ -799,13 +806,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3,
     )
-    parser.add_argument("--speaker-match-window-deg", type=float, default=30.0)
+    parser.add_argument("--speaker-match-window-deg", type=float, default=25.0)
+    parser.add_argument("--centroid-association-mode", choices=["hard_window", "gaussian"], default="hard_window")
+    parser.add_argument("--centroid-association-sigma-deg", type=float, default=10.0)
+    parser.add_argument("--centroid-association-min-score", type=float, default=0.15)
     parser.add_argument("--slow-chunk-ms", type=int, default=2000)
     parser.add_argument("--slow-chunk-hop-ms", type=int, default=1000)
     parser.add_argument("--max-speakers-hint", type=int, default=4)
     parser.add_argument("--assume-single-speaker", action="store_true")
-    parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "capon_1src", "capon_mvdr_refine_1src", "music_1src"], default="srp_phat_localization")
-    parser.add_argument("--tracking-mode", choices=["legacy", "multi_peak_v2", "dominant_lock_v1"], default="multi_peak_v2")
+    parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "capon_1src", "capon_multisrc", "capon_mvdr_refine_1src", "music_1src"], default="srp_phat_localization")
+    parser.add_argument("--tracking-mode", choices=TRACKING_MODE_CHOICES, default="doa_centroid_v1")
     parser.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     parser.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")
     parser.add_argument("--disable-output-normalization", action="store_true")
@@ -819,6 +829,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_parser().parse_args()
+    args.tracking_mode = validate_tracking_mode(str(args.tracking_mode))
     input_path = Path(args.input_path).resolve()
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -879,6 +890,9 @@ def main() -> None:
                 speaker_history_size=int(args.speaker_history_size),
                 speaker_activation_min_predictions=int(args.speaker_activation_min_predictions),
                 speaker_match_window_deg=float(args.speaker_match_window_deg),
+                centroid_association_mode=str(args.centroid_association_mode),
+                centroid_association_sigma_deg=float(args.centroid_association_sigma_deg),
+                centroid_association_min_score=float(args.centroid_association_min_score),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
