@@ -88,7 +88,8 @@ def delay_and_sum_frame(
         mic_pos = np.hstack([mic_pos, np.zeros((mic_pos.shape[0], 1), dtype=float)])
 
     az = np.deg2rad(float(doa_deg))
-    direction = np.array([np.cos(az), np.sin(az), 0.0], dtype=float)
+    # Scene DOAs are source positions relative to the array center; propagation arrives from the opposite direction.
+    direction = np.array([-np.cos(az), -np.sin(az), 0.0], dtype=float)
     tau = (mic_pos @ direction) / float(sound_speed_m_s)
     tau = tau - float(np.mean(tau))
     delays = tau * float(fs)
@@ -114,7 +115,8 @@ def _steering_vector_f_domain(
         mic_pos = np.hstack([mic_pos, np.zeros((mic_pos.shape[0], 1), dtype=np.float64)])
 
     az = np.deg2rad(float(doa_deg))
-    direction = np.array([np.cos(az), np.sin(az), 0.0], dtype=np.float64)
+    # Scene DOAs are source positions relative to the array center; propagation arrives from the opposite direction.
+    direction = np.array([-np.cos(az), -np.sin(az), 0.0], dtype=np.float64)
     tau = (mic_pos @ direction) / float(sound_speed_m_s)
     tau = tau - float(np.mean(tau))
 
@@ -126,15 +128,21 @@ def _steering_vector_f_domain(
 class _FDBufferedBeamformer:
     def __init__(self, n_mics: int, frame_samples: int, cfg: PipelineConfig, mic_geometry_xyz: np.ndarray):
         self.n_mics = int(n_mics)
-        self.n = int(frame_samples)
+        self.hop = int(frame_samples)
+        analysis_samples = int(round(float(cfg.sample_rate_hz) * (float(cfg.fd_analysis_window_ms) / 1000.0)))
+        analysis_samples = max(self.hop, analysis_samples)
+        if analysis_samples % self.hop != 0:
+            analysis_samples = int(np.ceil(analysis_samples / self.hop) * self.hop)
+        self.n = int(self.hop)
+        self.analysis_n = int(analysis_samples)
         self.cfg = cfg
         self.mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=np.float64)
-        self.rnn_mvdr: np.ndarray | None = None
+        self.rnn_mvdr_noise: np.ndarray | None = None
         self.rnn_gsc: np.ndarray | None = None
-        self._win = np.sqrt(np.hanning(max(4, 2 * self.n))).astype(np.float64)
-        self._prev_mc = np.zeros((self.n, self.n_mics), dtype=np.float64)
-        self._ola_tail_mvdr = np.zeros(self.n, dtype=np.float64)
-        self._ola_tail_gsc = np.zeros(self.n, dtype=np.float64)
+        self._win = np.sqrt(np.hanning(max(4, self.analysis_n))).astype(np.float64)
+        self._prev_mc = np.zeros((max(0, self.analysis_n - self.hop), self.n_mics), dtype=np.float64)
+        self._ola_tail_mvdr = np.zeros(self.analysis_n, dtype=np.float64)
+        self._ola_tail_gsc = np.zeros(self.analysis_n, dtype=np.float64)
 
     def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
@@ -149,19 +157,38 @@ class _FDBufferedBeamformer:
         rnn += diag * np.eye(mics, dtype=np.complex128)[None, :, :]
         return rnn
 
+    def _update_noise_covariance(
+        self,
+        rnn_prev: np.ndarray | None,
+        x_fft: np.ndarray,
+        steering: np.ndarray,
+        cov_alpha: float,
+    ) -> np.ndarray:
+        # Estimate interference/noise covariance by projecting out the target-aligned component.
+        a_norm_sq = np.sum(np.abs(steering) ** 2, axis=1, keepdims=True) + 1e-10
+        target_ref = np.sum(np.conj(steering) * x_fft, axis=1, keepdims=True) / a_norm_sq
+        residual = x_fft - (steering * target_ref)
+        return self._update_covariance(rnn_prev, residual, cov_alpha)
+
     def _analysis_block(self, frame_mc: np.ndarray) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
-        block = np.concatenate([self._prev_mc, x], axis=0)  # (2N, M)
-        self._prev_mc = x.copy()
+        block = np.concatenate([self._prev_mc, x], axis=0)
+        if block.shape[0] != self.analysis_n:
+            raise ValueError(f"analysis block size mismatch: got {block.shape[0]}, expected {self.analysis_n}")
+        if self.analysis_n > self.hop:
+            self._prev_mc = block[-(self.analysis_n - self.hop) :].copy()
         xw = block * self._win[:, None]
         return np.fft.rfft(xw, axis=0)  # (F, M)
 
-    def _synthesis_block(self, y_fft: np.ndarray, tail: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        y_block = np.fft.irfft(y_fft, n=2 * self.n).real
+    def _synthesis_block(self, y_fft: np.ndarray, ola_buffer: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        y_block = np.fft.irfft(y_fft, n=self.analysis_n).real
         yw = y_block * self._win
-        out = tail + yw[: self.n]
-        next_tail = yw[self.n :].copy()
-        return out.astype(np.float32, copy=False), next_tail
+        buffer = np.asarray(ola_buffer, dtype=np.float64).copy()
+        buffer[: self.analysis_n] += yw
+        out = buffer[: self.hop].copy()
+        buffer[:-self.hop] = buffer[self.hop :]
+        buffer[-self.hop :] = 0.0
+        return out.astype(np.float32, copy=False), buffer
 
     def _cov_alpha_from_activity(self, speech_activity: float) -> float:
         base = float(np.clip(self.cfg.fd_cov_ema_alpha, 0.0, 1.0))
@@ -173,20 +200,25 @@ class _FDBufferedBeamformer:
     def mvdr(self, frame_mc: np.ndarray, doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)  # (F, M)
-        self.rnn_mvdr = self._update_covariance(self.rnn_mvdr, x_fft, self._cov_alpha_from_activity(speech_activity))
         a = _steering_vector_f_domain(
             doa_deg=doa_deg,
-            n_fft=2 * self.n,
+            n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )  # (F, M)
+        self.rnn_mvdr_noise = self._update_noise_covariance(
+            self.rnn_mvdr_noise,
+            x_fft,
+            a,
+            self._cov_alpha_from_activity(speech_activity),
+        )
 
         f_bins = x_fft.shape[0]
         y_fft = np.zeros(f_bins, dtype=np.complex128)
         eye = np.eye(self.n_mics, dtype=np.complex128)
         for f in range(f_bins):
-            r = self.rnn_mvdr[f] + (1e-8 * eye)
+            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
             af = a[f].reshape(-1, 1)
             rinv_a = np.linalg.pinv(r) @ af
             denom = (af.conj().T @ rinv_a)[0, 0]
@@ -199,20 +231,25 @@ class _FDBufferedBeamformer:
     def lcmv_null(self, frame_mc: np.ndarray, target_doa_deg: float, null_doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)
-        self.rnn_mvdr = self._update_covariance(self.rnn_mvdr, x_fft, self._cov_alpha_from_activity(speech_activity))
         a_target = _steering_vector_f_domain(
             doa_deg=target_doa_deg,
-            n_fft=2 * self.n,
+            n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )
         a_null = _steering_vector_f_domain(
             doa_deg=null_doa_deg,
-            n_fft=2 * self.n,
+            n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
+        )
+        self.rnn_mvdr_noise = self._update_noise_covariance(
+            self.rnn_mvdr_noise,
+            x_fft,
+            a_target,
+            self._cov_alpha_from_activity(speech_activity),
         )
 
         f_bins = x_fft.shape[0]
@@ -220,7 +257,7 @@ class _FDBufferedBeamformer:
         eye = np.eye(self.n_mics, dtype=np.complex128)
         response = np.asarray([[1.0 + 0.0j], [0.0 + 0.0j]], dtype=np.complex128)
         for f in range(f_bins):
-            r = self.rnn_mvdr[f] + (1e-8 * eye)
+            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
             constraint = np.stack([a_target[f], a_null[f]], axis=1)
             r_inv = np.linalg.pinv(r)
             gram = constraint.conj().T @ r_inv @ constraint
@@ -236,7 +273,7 @@ class _FDBufferedBeamformer:
         self.rnn_gsc = self._update_covariance(self.rnn_gsc, x_fft, self._cov_alpha_from_activity(speech_activity))
         a = _steering_vector_f_domain(
             doa_deg=doa_deg,
-            n_fft=2 * self.n,
+            n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
@@ -269,41 +306,80 @@ class _FDBufferedBeamformer:
 class _PostFilterState:
     def __init__(self, frame_samples: int, cfg: PipelineConfig):
         self.n = int(frame_samples)
+        self.fft_n = max(4, 2 * self.n)
         self.cfg = cfg
+        self._win = np.sqrt(np.hanning(self.fft_n)).astype(np.float64)
+        self._prev_in = np.zeros(self.n, dtype=np.float64)
+        self._ola_tail = np.zeros(self.n, dtype=np.float64)
         self.noise_psd: np.ndarray | None = None
         self.speech_psd: np.ndarray | None = None
         self.gain_prev: np.ndarray | None = None
+        self.post_snr_prev: np.ndarray | None = None
+
+    def _smooth_gain_frequency(self, gain: np.ndarray) -> np.ndarray:
+        radius = max(0, int(self.cfg.postfilter_freq_smoothing_bins))
+        if radius <= 0:
+            return gain
+        width = (2 * radius) + 1
+        positions = np.arange(width, dtype=np.float64) - float(radius)
+        kernel = np.exp(-0.5 * (positions / max(float(radius), 1.0)) ** 2)
+        kernel /= np.sum(kernel)
+        return np.convolve(gain, kernel, mode="same")
 
     def process(self, frame: np.ndarray, speech_activity: float) -> np.ndarray:
         x = np.asarray(frame, dtype=np.float64).reshape(-1)
-        x_fft = np.fft.rfft(x, n=self.n)
+        block = np.concatenate([self._prev_in, x], axis=0)
+        self._prev_in = x.copy()
+        xw = block * self._win
+        x_fft = np.fft.rfft(xw, n=self.fft_n)
         psd = np.abs(x_fft) ** 2
 
         if self.noise_psd is None:
             self.noise_psd = psd.copy()
         if self.speech_psd is None:
-            self.speech_psd = psd.copy()
+            self.speech_psd = np.maximum(psd * 0.25, 1e-12)
         if self.gain_prev is None:
             self.gain_prev = np.ones_like(psd, dtype=np.float64)
+        if self.post_snr_prev is None:
+            self.post_snr_prev = np.maximum(psd / np.maximum(self.noise_psd, 1e-12) - 1.0, 0.0)
 
         n_alpha = float(np.clip(self.cfg.postfilter_noise_ema_alpha, 0.0, 1.0))
         s_alpha = float(np.clip(self.cfg.postfilter_speech_ema_alpha, 0.0, 1.0))
         g_alpha = float(np.clip(self.cfg.postfilter_gain_ema_alpha, 0.0, 1.0))
+        dd_alpha = float(np.clip(self.cfg.postfilter_dd_alpha, 0.0, 0.999))
         floor = float(np.clip(self.cfg.postfilter_gain_floor, 0.05, 1.0))
+        speech_update_scale = float(np.clip(self.cfg.postfilter_noise_update_speech_scale, 0.0, 1.0))
+        gain_max_step_db = float(max(0.0, self.cfg.postfilter_gain_max_step_db))
 
-        if speech_activity < 0.5:
-            self.noise_psd = (1.0 - n_alpha) * self.noise_psd + n_alpha * psd
-        self.speech_psd = (1.0 - s_alpha) * self.speech_psd + s_alpha * psd
+        output_rms = float(np.sqrt(np.mean(x**2) + 1e-12))
+        output_activity = float(np.clip((output_rms - 0.003) / 0.02, 0.0, 1.0))
+        posterior_snr_hint = float(np.clip(np.mean(psd / np.maximum(self.noise_psd, 1e-12) - 1.0) / 6.0, 0.0, 1.0))
+        speech_presence = float(np.clip(max(float(speech_activity), output_activity, posterior_snr_hint), 0.0, 1.0))
+        noise_alpha_eff = n_alpha * ((1.0 - speech_presence) + (speech_presence * speech_update_scale))
+        noise_observation = np.minimum(psd, self.noise_psd * (1.0 + (2.5 * noise_alpha_eff)) + 1e-12)
+        self.noise_psd = (1.0 - noise_alpha_eff) * self.noise_psd + noise_alpha_eff * noise_observation
 
-        signal_est = np.maximum(self.speech_psd - self.noise_psd, 1e-12)
-        gain = signal_est / (signal_est + self.noise_psd + 1e-12)
+        post_snr = np.maximum(psd / np.maximum(self.noise_psd, 1e-12) - 1.0, 0.0)
+        dd_prior = dd_alpha * (self.gain_prev**2) * self.post_snr_prev + (1.0 - dd_alpha) * post_snr
+        speech_observation = np.maximum(psd - self.noise_psd, 0.0)
+        self.speech_psd = (1.0 - s_alpha) * self.speech_psd + s_alpha * speech_observation
+        prior_snr = np.maximum(dd_prior, self.speech_psd / np.maximum(self.noise_psd, 1e-12))
+        gain = prior_snr / (1.0 + prior_snr)
         gain = np.maximum(gain, floor)
+        gain = self._smooth_gain_frequency(gain)
+        if gain_max_step_db > 0.0:
+            max_ratio = float(10.0 ** (gain_max_step_db / 20.0))
+            gain = np.clip(gain, self.gain_prev / max_ratio, self.gain_prev * max_ratio)
         gain = (1.0 - g_alpha) * self.gain_prev + g_alpha * gain
         self.gain_prev = gain
+        self.post_snr_prev = post_snr
 
         y_fft = x_fft * gain
-        y = np.fft.irfft(y_fft, n=self.n).real
-        return y.astype(np.float32, copy=False)
+        y_block = np.fft.irfft(y_fft, n=self.fft_n).real
+        yw = y_block * self._win
+        out = self._ola_tail + yw[: self.n]
+        self._ola_tail = yw[self.n :].copy()
+        return out.astype(np.float32, copy=False)
 
 
 def _soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
@@ -513,6 +589,26 @@ class FastPathWorker(threading.Thread):
                 best_score = score
         return best_angle, float(max(best_score, 0.0))
 
+    def _pick_best_smoothed_speaker(self, speaker_map) -> tuple[float | None, float]:
+        smoothed_items = self._smooth_speaker_items(speaker_map)
+        if not smoothed_items:
+            return None, 0.0
+        best_sid = None
+        best_doa = None
+        best_score = -1.0
+        for sid_i, doa_sm, gain_sm in smoothed_items:
+            item = speaker_map.get(sid_i)
+            if item is None:
+                continue
+            score = float(max(getattr(item, "activity_confidence", 0.0), getattr(item, "confidence", 0.0), gain_sm))
+            if score > best_score:
+                best_sid = sid_i
+                best_doa = doa_sm
+                best_score = score
+        if best_sid is None or best_doa is None:
+            return None, 0.0
+        return float(best_doa), float(max(best_score, 0.0))
+
     def _suppression_debug(
         self,
         *,
@@ -680,7 +776,13 @@ class FastPathWorker(threading.Thread):
                         peaks = list(snapshot.peaks_deg)
                         scores = None if snapshot.peak_scores is None else list(snapshot.peak_scores)
                         matched_user_peak_deg, matched_user_score, matched_user_idx = self._match_user_peak(peaks, scores)
-                        suppression_active = self._update_own_voice_hysteresis(matched_user_peak_deg is not None)
+                        suppression_override = None
+                        if snapshot.debug is not None and "force_suppression_active" in snapshot.debug:
+                            suppression_override = bool(snapshot.debug.get("force_suppression_active"))
+                        if suppression_override is None:
+                            suppression_active = self._update_own_voice_hysteresis(matched_user_peak_deg is not None)
+                        else:
+                            suppression_active = bool(suppression_override)
                     suppression_info = dict((snapshot.debug or {}).get("own_voice_suppression", {}))
                     self._state.publish_srp_snapshot(snapshot)
                     if not bool(self._cfg.slow_path_enabled):
@@ -740,9 +842,7 @@ class FastPathWorker(threading.Thread):
                         )
                         target_doa, _target_score = self._pick_non_user_speaker(speaker_map)
                         if target_doa is None and not suppression_active:
-                            smoothed_items = self._smooth_speaker_items(speaker_map)
-                            if smoothed_items:
-                                target_doa = float(smoothed_items[0][1])
+                            target_doa, _target_score = self._pick_best_smoothed_speaker(speaker_map)
                         if target_doa is not None:
                             can_null = (
                                 suppression_mode == "lcmv_null_hysteresis"

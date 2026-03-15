@@ -1,7 +1,7 @@
-PR title example: Add centroid-based DOA tracking
+PR title example: Align oracle enhancement benchmark with shared beamforming path
 
 Concise description:
-Replace the slow-path speaker map logic with a simple centroid tracker driven directly by localization DOAs. Add configurable hard-window and Gaussian centroid association modes, expose the centroid match window in benchmarking, and make the new tracker the default public tracking path.
+Add an oracle-steered XVF3800 enhancement benchmark that reuses the shared realtime beamforming family (`delay_sum`, `mvdr_fd`, `lcmv_null`) instead of a benchmark-local beamformer path. Wire offline oracle SRP overrides into the shared runtime, add a configurable FD analysis window for beamforming, fix the shared fast-path beamforming logic by using target-rejected noise covariance and correcting the steering-direction convention, and add trivial sanity scenes for `target 0° / interferer 90°` and `target 0° / interferer 45°` so spatial interference suppression can be validated directly.
 
 Deprecated:
-`legacy`, `multi_peak_v2`, and `dominant_lock_v1` tracking modes now fail fast with a deprecated error; use `doa_centroid_v1` instead.
+None.
