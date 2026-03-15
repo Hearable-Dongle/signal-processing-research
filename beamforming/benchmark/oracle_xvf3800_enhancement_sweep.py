@@ -33,9 +33,17 @@ DEFAULT_SCENES_ROOT = Path("simulation/simulations/configs/testing_specific_angl
 DEFAULT_ASSETS_ROOT = Path("simulation/simulations/assets/testing_specific_angles")
 DEFAULT_OUT_ROOT = Path("beamforming/benchmark/oracle_xvf3800_enhancement")
 DEFAULT_PROFILE = "respeaker_xvf3800_0650"
-DEFAULT_METHODS = ["mvdr_fd", "delay_sum", "lcmv_null", "mvdr_fd_rnnoise", "mvdr_fd_coherence_wiener"]
+DEFAULT_METHODS = [
+    "mvdr_fd",
+    "delay_sum",
+    "lcmv_target_only",
+    "lcmv_null",
+    "mvdr_fd_rnnoise",
+    "mvdr_fd_coherence_wiener",
+]
 DEFAULT_NOISE_GAIN_SCALES = [0.2, 0.4, 0.6, 0.8, 1.0]
 FAST_FRAME_MS = 10
+FD_ANALYSIS_WINDOW_MS = 40.0
 NULL_USER_SPEAKER_ID = 0
 NULL_CONFLICT_DEG = 30.0
 
@@ -568,7 +576,7 @@ def _build_metric_bundle(
 
 
 def _shared_method_name(method: str) -> str:
-    if method in {"mvdr_fd", "delay_sum", "lcmv_null"}:
+    if method in {"mvdr_fd", "delay_sum", "lcmv_target_only", "lcmv_null"}:
         return method
     if method in {"mvdr_fd_rnnoise", "mvdr_fd_coherence_wiener"}:
         return "mvdr_fd"
@@ -615,7 +623,8 @@ def _build_session_request(
         separation_mode="mock",
         localization_backend="srp_phat_localization",
         tracking_mode="doa_centroid_v1",
-        beamforming_mode="mvdr_fd" if shared_method in {"mvdr_fd", "lcmv_null"} else "delay_sum",
+        beamforming_mode="mvdr_fd" if shared_method in {"mvdr_fd", "lcmv_target_only", "lcmv_null"} else "delay_sum",
+        fd_analysis_window_ms=float(FD_ANALYSIS_WINDOW_MS),
         output_normalization_enabled=True,
         output_allow_amplification=False,
         processing_mode="beamform_from_ground_truth",

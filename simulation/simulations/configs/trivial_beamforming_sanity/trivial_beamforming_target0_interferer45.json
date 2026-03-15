@@ -1,0 +1,30 @@
+{
+  "room": {
+    "dimensions": [8.0, 8.0, 3.0],
+    "absorption": 0.05
+  },
+  "microphone_array": {
+    "mic_center": [4.0, 4.0, 1.45],
+    "mic_radius": 0.065,
+    "mic_count": 4,
+    "mic_positions": null
+  },
+  "audio": {
+    "sources": [
+      {
+        "loc": [5.4142, 5.4142, 1.45],
+        "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/matthew_talking.wav",
+        "gain": 0.9,
+        "classification": "speech"
+      },
+      {
+        "loc": [6.0, 4.0, 1.45],
+        "audio": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/brit_talking.wav",
+        "gain": 1.0,
+        "classification": "speech"
+      }
+    ],
+    "duration": 8.0,
+    "fs": 16000
+  }
+}

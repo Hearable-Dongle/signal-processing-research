@@ -196,6 +196,7 @@ class PipelineConfig:
     gain_ema_alpha: float = 0.2
     doa_max_step_deg_per_frame: float = 10.0
     # Frequency-domain covariance smoothing
+    fd_analysis_window_ms: float = 20.0
     fd_cov_ema_alpha: float = 0.08
     fd_diag_load: float = 1e-3
     fd_speech_cov_update_scale: float = 0.25

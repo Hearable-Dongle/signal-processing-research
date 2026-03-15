@@ -128,15 +128,21 @@ def _steering_vector_f_domain(
 class _FDBufferedBeamformer:
     def __init__(self, n_mics: int, frame_samples: int, cfg: PipelineConfig, mic_geometry_xyz: np.ndarray):
         self.n_mics = int(n_mics)
-        self.n = int(frame_samples)
+        self.hop = int(frame_samples)
+        analysis_samples = int(round(float(cfg.sample_rate_hz) * (float(cfg.fd_analysis_window_ms) / 1000.0)))
+        analysis_samples = max(self.hop, analysis_samples)
+        if analysis_samples % self.hop != 0:
+            analysis_samples = int(np.ceil(analysis_samples / self.hop) * self.hop)
+        self.n = int(self.hop)
+        self.analysis_n = int(analysis_samples)
         self.cfg = cfg
         self.mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=np.float64)
         self.rnn_mvdr_noise: np.ndarray | None = None
         self.rnn_gsc: np.ndarray | None = None
-        self._win = np.sqrt(np.hanning(max(4, 2 * self.n))).astype(np.float64)
-        self._prev_mc = np.zeros((self.n, self.n_mics), dtype=np.float64)
-        self._ola_tail_mvdr = np.zeros(self.n, dtype=np.float64)
-        self._ola_tail_gsc = np.zeros(self.n, dtype=np.float64)
+        self._win = np.sqrt(np.hanning(max(4, self.analysis_n))).astype(np.float64)
+        self._prev_mc = np.zeros((max(0, self.analysis_n - self.hop), self.n_mics), dtype=np.float64)
+        self._ola_tail_mvdr = np.zeros(self.analysis_n, dtype=np.float64)
+        self._ola_tail_gsc = np.zeros(self.analysis_n, dtype=np.float64)
 
     def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
@@ -166,17 +172,23 @@ class _FDBufferedBeamformer:
 
     def _analysis_block(self, frame_mc: np.ndarray) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
-        block = np.concatenate([self._prev_mc, x], axis=0)  # (2N, M)
-        self._prev_mc = x.copy()
+        block = np.concatenate([self._prev_mc, x], axis=0)
+        if block.shape[0] != self.analysis_n:
+            raise ValueError(f"analysis block size mismatch: got {block.shape[0]}, expected {self.analysis_n}")
+        if self.analysis_n > self.hop:
+            self._prev_mc = block[-(self.analysis_n - self.hop) :].copy()
         xw = block * self._win[:, None]
         return np.fft.rfft(xw, axis=0)  # (F, M)
 
-    def _synthesis_block(self, y_fft: np.ndarray, tail: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        y_block = np.fft.irfft(y_fft, n=2 * self.n).real
+    def _synthesis_block(self, y_fft: np.ndarray, ola_buffer: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        y_block = np.fft.irfft(y_fft, n=self.analysis_n).real
         yw = y_block * self._win
-        out = tail + yw[: self.n]
-        next_tail = yw[self.n :].copy()
-        return out.astype(np.float32, copy=False), next_tail
+        buffer = np.asarray(ola_buffer, dtype=np.float64).copy()
+        buffer[: self.analysis_n] += yw
+        out = buffer[: self.hop].copy()
+        buffer[:-self.hop] = buffer[self.hop :]
+        buffer[-self.hop :] = 0.0
+        return out.astype(np.float32, copy=False), buffer
 
     def _cov_alpha_from_activity(self, speech_activity: float) -> float:
         base = float(np.clip(self.cfg.fd_cov_ema_alpha, 0.0, 1.0))
@@ -190,7 +202,7 @@ class _FDBufferedBeamformer:
         x_fft = self._analysis_block(x)  # (F, M)
         a = _steering_vector_f_domain(
             doa_deg=doa_deg,
-            n_fft=2 * self.n,
+            n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
@@ -221,14 +233,14 @@ class _FDBufferedBeamformer:
         x_fft = self._analysis_block(x)
         a_target = _steering_vector_f_domain(
             doa_deg=target_doa_deg,
-            n_fft=2 * self.n,
+            n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )
         a_null = _steering_vector_f_domain(
             doa_deg=null_doa_deg,
-            n_fft=2 * self.n,
+            n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
@@ -261,7 +273,7 @@ class _FDBufferedBeamformer:
         self.rnn_gsc = self._update_covariance(self.rnn_gsc, x_fft, self._cov_alpha_from_activity(speech_activity))
         a = _steering_vector_f_domain(
             doa_deg=doa_deg,
-            n_fft=2 * self.n,
+            n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,

@@ -1,0 +1,29 @@
+{
+  "main_angle_deg": 0.0,
+  "secondary_angle_deg": 45.0,
+  "noise_layout_type": "none",
+  "noise_angles_deg": [],
+  "assets": {
+    "speech": [
+      {
+        "speaker_id": 0,
+        "speaker_label": "interferer_45",
+        "source_path": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/matthew_talking.wav",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/matthew_talking.wav",
+        "active_window_sec": [0.0, 8.0],
+        "position_m": [5.4142, 5.4142, 1.45],
+        "angle_deg": 45.0
+      },
+      {
+        "speaker_id": 1,
+        "speaker_label": "target_0",
+        "source_path": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/brit_talking.wav",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/beamforming/input/brit_talking.wav",
+        "active_window_sec": [0.0, 8.0],
+        "position_m": [6.0, 4.0, 1.45],
+        "angle_deg": 0.0
+      }
+    ],
+    "noise": []
+  }
+}
