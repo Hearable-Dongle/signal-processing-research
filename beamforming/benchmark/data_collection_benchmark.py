@@ -346,6 +346,31 @@ def _active_ground_truth_tracks_at_time(ground_truth_tracks: list[dict], timesta
     return active
 
 
+def _ground_truth_transition_times(ground_truth_tracks: list[dict], *, duration_s: float) -> list[float]:
+    times: set[float] = set()
+    max_duration = max(0.0, float(duration_s))
+    for item in ground_truth_tracks:
+        start_sec = max(0.0, float(item.get("start_sec", 0.0)))
+        end_sec = min(max_duration, float(item.get("end_sec", max_duration)))
+        if 0.0 < start_sec < max_duration:
+            times.add(float(start_sec))
+        if 0.0 < end_sec < max_duration:
+            times.add(float(end_sec))
+    return sorted(times)
+
+
+def _is_transition_ignored(
+    *,
+    timestamp_s: float,
+    transition_times: list[float],
+    transition_ignore_sec: float,
+) -> bool:
+    ignore_sec = max(0.0, float(transition_ignore_sec))
+    if ignore_sec <= 0.0 or not transition_times:
+        return False
+    return any(abs(float(timestamp_s) - float(change_s)) <= ignore_sec for change_s in transition_times)
+
+
 def _filter_tracks_by_speaker_name(ground_truth_tracks: list[dict], speaker_name: str | None) -> list[dict]:
     if not speaker_name:
         return []
@@ -368,7 +393,13 @@ def _match_angle_sets(gt_angles: list[float], pred_angles: list[float]) -> tuple
     return errors, matched, max(0, len(gt_angles) - matched), max(0, len(pred_angles) - matched)
 
 
-def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic_array_profile: str) -> dict[str, float | str]:
+def _ground_truth_metrics(
+    summary: dict,
+    ground_truth_tracks: list[dict],
+    *,
+    mic_array_profile: str,
+    transition_ignore_sec: float = 0.0,
+) -> dict[str, float | str]:
     if not ground_truth_tracks:
         return {
             "ground_truth_source": "",
@@ -400,11 +431,18 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic
     final_errors, final_matches, final_missed_gt, _final_extra_pred = _match_angle_sets(final_gt_angles, final_active_angles)
 
     trace_rows = list(summary.get("speaker_map_trace", []))
+    transition_times = _ground_truth_transition_times(ground_truth_tracks, duration_s=duration_s)
     active_errors: list[float] = []
     total_active_gt = 0
     total_matched_gt = 0
     for row in trace_rows:
         timestamp_s = float(row.get("timestamp_ms", 0.0)) / 1000.0
+        if _is_transition_ignored(
+            timestamp_s=timestamp_s,
+            transition_times=transition_times,
+            transition_ignore_sec=transition_ignore_sec,
+        ):
+            continue
         active_gt_tracks = _active_ground_truth_tracks_at_time(ground_truth_tracks, timestamp_s)
         active_gt_angles = [float(item["angle_deg"]) for item in active_gt_tracks]
         if not active_gt_angles:
@@ -438,7 +476,7 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic
     }
 
 
-def _suppression_metrics(summary: dict, suppressed_user_tracks: list[dict]) -> dict[str, float | str]:
+def _suppression_metrics(summary: dict, suppressed_user_tracks: list[dict], *, transition_ignore_sec: float = 0.0) -> dict[str, float | str]:
     if not suppressed_user_tracks:
         return {
             "suppressed_user_name": "",
@@ -448,6 +486,8 @@ def _suppression_metrics(summary: dict, suppressed_user_tracks: list[dict]) -> d
             "suppression_activation_rate": float("nan"),
         }
     trace = list(summary.get("speaker_map_trace", []))
+    duration_s = float(summary.get("duration_s", 0.0))
+    transition_times = _ground_truth_transition_times(suppressed_user_tracks, duration_s=duration_s)
     if not trace:
         return {
             "suppressed_user_name": str(suppressed_user_tracks[0].get("speaker_name", "")),
@@ -463,6 +503,12 @@ def _suppression_metrics(summary: dict, suppressed_user_tracks: list[dict]) -> d
     total_suppressed_frames = 0
     for row in trace:
         timestamp_s = float(row.get("timestamp_ms", 0.0)) / 1000.0
+        if _is_transition_ignored(
+            timestamp_s=timestamp_s,
+            transition_times=transition_times,
+            transition_ignore_sec=transition_ignore_sec,
+        ):
+            continue
         user_active = bool(_active_ground_truth_tracks_at_time(suppressed_user_tracks, timestamp_s))
         suppression_active = bool(row.get("suppression", {}).get("suppression_active", False))
         if suppression_active:
@@ -732,6 +778,7 @@ def _run_recording_method_job(
     suppressed_user_gate_attenuation_db: float,
     suppressed_user_target_conflict_deg: float,
     suppressed_user_speaker_name: str | None,
+    ground_truth_transition_ignore_sec: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -813,8 +860,17 @@ def _run_recording_method_job(
         mic_array_profile=str(mic_array_profile),
     )
     suppressed_user_tracks = _filter_tracks_by_speaker_name(ground_truth_tracks, suppressed_user_speaker_name)
-    gt_metrics = _ground_truth_metrics(summary, ground_truth_tracks, mic_array_profile=str(mic_array_profile))
-    suppression_metrics = _suppression_metrics(summary, suppressed_user_tracks)
+    gt_metrics = _ground_truth_metrics(
+        summary,
+        ground_truth_tracks,
+        mic_array_profile=str(mic_array_profile),
+        transition_ignore_sec=float(ground_truth_transition_ignore_sec),
+    )
+    suppression_metrics = _suppression_metrics(
+        summary,
+        suppressed_user_tracks,
+        transition_ignore_sec=float(ground_truth_transition_ignore_sec),
+    )
     row = {
         "recording": recording_id,
         "method": method,
@@ -901,6 +957,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--suppressed-user-gate-attenuation-db", type=float, default=18.0)
     parser.add_argument("--suppressed-user-target-conflict-deg", type=float, default=30.0)
     parser.add_argument("--suppressed-user-speaker-name", type=str, default=None)
+    parser.add_argument("--ground-truth-transition-ignore-sec", type=float, default=0.0)
     parser.add_argument(
         "--speaker-centroid-history-size",
         "--speaker-history-size",
@@ -1012,6 +1069,7 @@ def main() -> None:
                 suppressed_user_gate_attenuation_db=float(args.suppressed_user_gate_attenuation_db),
                 suppressed_user_target_conflict_deg=float(args.suppressed_user_target_conflict_deg),
                 suppressed_user_speaker_name=None if args.suppressed_user_speaker_name is None else str(args.suppressed_user_speaker_name),
+                ground_truth_transition_ignore_sec=float(args.ground_truth_transition_ignore_sec),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -1105,6 +1163,7 @@ def main() -> None:
             "suppressed_user_gate_attenuation_db": float(args.suppressed_user_gate_attenuation_db),
             "suppressed_user_target_conflict_deg": float(args.suppressed_user_target_conflict_deg),
             "suppressed_user_speaker_name": None if args.suppressed_user_speaker_name is None else str(args.suppressed_user_speaker_name),
+            "ground_truth_transition_ignore_sec": float(args.ground_truth_transition_ignore_sec),
             "speaker_history_size": int(args.speaker_history_size),
             "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
             "speaker_match_window_deg": float(args.speaker_match_window_deg),
