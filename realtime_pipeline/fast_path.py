@@ -8,6 +8,7 @@ from typing import Callable
 import numpy as np
 
 from .contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
+from .output_enhancer import OutputEnhancerChain, PostFilterState as _PostFilterState
 from .shared_state import SharedPipelineState, Timer
 from .srp_tracker import SRPPeakTracker
 
@@ -303,85 +304,6 @@ class _FDBufferedBeamformer:
         return y
 
 
-class _PostFilterState:
-    def __init__(self, frame_samples: int, cfg: PipelineConfig):
-        self.n = int(frame_samples)
-        self.fft_n = max(4, 2 * self.n)
-        self.cfg = cfg
-        self._win = np.sqrt(np.hanning(self.fft_n)).astype(np.float64)
-        self._prev_in = np.zeros(self.n, dtype=np.float64)
-        self._ola_tail = np.zeros(self.n, dtype=np.float64)
-        self.noise_psd: np.ndarray | None = None
-        self.speech_psd: np.ndarray | None = None
-        self.gain_prev: np.ndarray | None = None
-        self.post_snr_prev: np.ndarray | None = None
-
-    def _smooth_gain_frequency(self, gain: np.ndarray) -> np.ndarray:
-        radius = max(0, int(self.cfg.postfilter_freq_smoothing_bins))
-        if radius <= 0:
-            return gain
-        width = (2 * radius) + 1
-        positions = np.arange(width, dtype=np.float64) - float(radius)
-        kernel = np.exp(-0.5 * (positions / max(float(radius), 1.0)) ** 2)
-        kernel /= np.sum(kernel)
-        return np.convolve(gain, kernel, mode="same")
-
-    def process(self, frame: np.ndarray, speech_activity: float) -> np.ndarray:
-        x = np.asarray(frame, dtype=np.float64).reshape(-1)
-        block = np.concatenate([self._prev_in, x], axis=0)
-        self._prev_in = x.copy()
-        xw = block * self._win
-        x_fft = np.fft.rfft(xw, n=self.fft_n)
-        psd = np.abs(x_fft) ** 2
-
-        if self.noise_psd is None:
-            self.noise_psd = psd.copy()
-        if self.speech_psd is None:
-            self.speech_psd = np.maximum(psd * 0.25, 1e-12)
-        if self.gain_prev is None:
-            self.gain_prev = np.ones_like(psd, dtype=np.float64)
-        if self.post_snr_prev is None:
-            self.post_snr_prev = np.maximum(psd / np.maximum(self.noise_psd, 1e-12) - 1.0, 0.0)
-
-        n_alpha = float(np.clip(self.cfg.postfilter_noise_ema_alpha, 0.0, 1.0))
-        s_alpha = float(np.clip(self.cfg.postfilter_speech_ema_alpha, 0.0, 1.0))
-        g_alpha = float(np.clip(self.cfg.postfilter_gain_ema_alpha, 0.0, 1.0))
-        dd_alpha = float(np.clip(self.cfg.postfilter_dd_alpha, 0.0, 0.999))
-        floor = float(np.clip(self.cfg.postfilter_gain_floor, 0.05, 1.0))
-        speech_update_scale = float(np.clip(self.cfg.postfilter_noise_update_speech_scale, 0.0, 1.0))
-        gain_max_step_db = float(max(0.0, self.cfg.postfilter_gain_max_step_db))
-
-        output_rms = float(np.sqrt(np.mean(x**2) + 1e-12))
-        output_activity = float(np.clip((output_rms - 0.003) / 0.02, 0.0, 1.0))
-        posterior_snr_hint = float(np.clip(np.mean(psd / np.maximum(self.noise_psd, 1e-12) - 1.0) / 6.0, 0.0, 1.0))
-        speech_presence = float(np.clip(max(float(speech_activity), output_activity, posterior_snr_hint), 0.0, 1.0))
-        noise_alpha_eff = n_alpha * ((1.0 - speech_presence) + (speech_presence * speech_update_scale))
-        noise_observation = np.minimum(psd, self.noise_psd * (1.0 + (2.5 * noise_alpha_eff)) + 1e-12)
-        self.noise_psd = (1.0 - noise_alpha_eff) * self.noise_psd + noise_alpha_eff * noise_observation
-
-        post_snr = np.maximum(psd / np.maximum(self.noise_psd, 1e-12) - 1.0, 0.0)
-        dd_prior = dd_alpha * (self.gain_prev**2) * self.post_snr_prev + (1.0 - dd_alpha) * post_snr
-        speech_observation = np.maximum(psd - self.noise_psd, 0.0)
-        self.speech_psd = (1.0 - s_alpha) * self.speech_psd + s_alpha * speech_observation
-        prior_snr = np.maximum(dd_prior, self.speech_psd / np.maximum(self.noise_psd, 1e-12))
-        gain = prior_snr / (1.0 + prior_snr)
-        gain = np.maximum(gain, floor)
-        gain = self._smooth_gain_frequency(gain)
-        if gain_max_step_db > 0.0:
-            max_ratio = float(10.0 ** (gain_max_step_db / 20.0))
-            gain = np.clip(gain, self.gain_prev / max_ratio, self.gain_prev * max_ratio)
-        gain = (1.0 - g_alpha) * self.gain_prev + g_alpha * gain
-        self.gain_prev = gain
-        self.post_snr_prev = post_snr
-
-        y_fft = x_fft * gain
-        y_block = np.fft.irfft(y_fft, n=self.fft_n).real
-        yw = y_block * self._win
-        out = self._ola_tail + yw[: self.n]
-        self._ola_tail = yw[self.n :].copy()
-        return out.astype(np.float32, copy=False)
-
-
 def _soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
     d = max(float(drive), 1e-6)
     y = np.tanh(d * np.asarray(x, dtype=np.float64))
@@ -512,7 +434,7 @@ class FastPathWorker(threading.Thread):
             cfg=config,
             mic_geometry_xyz=self._mic_geometry_xyz,
         )
-        self._postfilter = _PostFilterState(frame_samples=frame_samples, cfg=config)
+        self._enhancer = OutputEnhancerChain(frame_samples=frame_samples, cfg=config)
         self._srp_override_provider = srp_override_provider
         self._own_voice_active = False
         self._own_voice_on_count = 0
@@ -834,8 +756,7 @@ class FastPathWorker(threading.Thread):
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
                             if suppression_active:
                                 conflict_fallback = True
-                        if self._cfg.postfilter_enabled:
-                            out = self._postfilter.process(out, speech_activity=speech_activity)
+                        out = self._enhancer.process(out, speech_activity=speech_activity)
                     elif speaker_map:
                         speech_activity = float(
                             max((float(getattr(v, "activity_confidence", 0.0)) for v in speaker_map.values()), default=0.0)
@@ -870,8 +791,7 @@ class FastPathWorker(threading.Thread):
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
                             if suppression_active:
                                 conflict_fallback = True
-                        if self._cfg.postfilter_enabled:
-                            out = self._postfilter.process(out, speech_activity=speech_activity)
+                        out = self._enhancer.process(out, speech_activity=speech_activity)
                     else:
                         out = np.mean(x, axis=1).astype(np.float32, copy=False)
                     if suppression_active and suppression_mode in {"soft_output_gate", "lcmv_null_hysteresis"} and (
@@ -922,6 +842,7 @@ class FastPathWorker(threading.Thread):
                 )
                 self._frame_idx += 1
         finally:
+            self._enhancer.close()
             if bool(self._cfg.slow_path_enabled):
                 try:
                     self._slow_queue.put_nowait(None)

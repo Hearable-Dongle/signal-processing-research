@@ -210,6 +210,10 @@ class PipelineConfig:
     postfilter_noise_update_speech_scale: float = 0.2
     postfilter_freq_smoothing_bins: int = 2
     postfilter_gain_max_step_db: float = 2.5
+    output_enhancer_mode: str = "auto"  # one of: auto, off, shared_wiener, rnnoise, shared_wiener_rnnoise
+    output_enhancer_frame_ms: float = 0.0
+    rnnoise_input_gain_db: float = 0.0
+    rnnoise_wet_mix: float = 1.0
     # Fast-path safety
     output_soft_clip_enabled: bool = True
     output_soft_clip_drive: float = 1.2

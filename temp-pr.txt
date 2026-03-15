@@ -1,7 +1,7 @@
-PR title example: Align oracle enhancement benchmark with shared beamforming path
+PR title example: Add shared output enhancer tuning for oracle beamforming runs
 
 Concise description:
-Add an oracle-steered XVF3800 enhancement benchmark that reuses the shared realtime beamforming family (`delay_sum`, `mvdr_fd`, `lcmv_null`) instead of a benchmark-local beamformer path. Wire offline oracle SRP overrides into the shared runtime, add a configurable FD analysis window for beamforming, fix the shared fast-path beamforming logic by using target-rejected noise covariance and correcting the steering-direction convention, and add trivial sanity scenes for `target 0° / interferer 90°` and `target 0° / interferer 45°` so spatial interference suppression can be validated directly.
+Add a shared realtime output-enhancer path for beamformed mono audio, including the existing Wiener-style postfilter plus RNNoise and Wiener+RNNoise modes, and expose the enhancer controls through the runtime request/config layer. Add a CPU-focused Optuna tuner that caches oracle-steered synthetic `lcmv_null` outputs, searches denoiser settings under an RTF target, persists the Optuna study to SQLite, and writes best-parameter summaries. Also add support for running the enhancer at an internal frame size smaller than the beamformer hop so `50 ms` beamforming can still use `10 ms` denoising, and validate that path with targeted safety tests and subset reruns.
 
 Deprecated:
 None.
