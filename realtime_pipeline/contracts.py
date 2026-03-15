@@ -205,6 +205,10 @@ class PipelineConfig:
     postfilter_speech_ema_alpha: float = 0.12
     postfilter_gain_floor: float = 0.22
     postfilter_gain_ema_alpha: float = 0.2
+    postfilter_dd_alpha: float = 0.92
+    postfilter_noise_update_speech_scale: float = 0.2
+    postfilter_freq_smoothing_bins: int = 2
+    postfilter_gain_max_step_db: float = 2.5
     # Fast-path safety
     output_soft_clip_enabled: bool = True
     output_soft_clip_drive: float = 1.2

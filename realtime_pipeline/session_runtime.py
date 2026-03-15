@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 
 from mic_array_forwarder.mode_presets import METHOD_SPEAKER_TRACKING_SINGLE_ACTIVE, get_simulation_algorithm_preset
 from mic_array_forwarder.models import SessionStartRequest
-from realtime_pipeline.contracts import PipelineConfig, SpeakerGainDirection
+from realtime_pipeline.contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
 from realtime_pipeline.separation_backends import DominantSpeakerPassthroughBackend, MockSeparationBackend, build_default_backend
 
@@ -149,6 +150,7 @@ def run_offline_session_pipeline(
     out_dir: str | Path,
     input_recording_path: str | Path | None = None,
     capture_trace: bool = False,
+    srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
 ) -> dict[str, Any]:
     import soundfile as sf
 
@@ -214,6 +216,7 @@ def run_offline_session_pipeline(
         frame_iterator=frame_iter_from_audio(audio, frame_samples),
         frame_sink=_sink,
         separation_backend=build_separation_backend_for_request(req, cfg),
+        srp_override_provider=srp_override_provider,
     )
     pipe_holder["pipe"] = pipe
     pipe.run_blocking()
@@ -269,6 +272,15 @@ def run_offline_session_pipeline(
         "slow_chunk_hop_ms": int(cfg.slow_chunk_ms if cfg.slow_chunk_hop_ms is None else cfg.slow_chunk_hop_ms),
         "output_normalization_enabled": bool(cfg.output_normalization_enabled),
         "output_allow_amplification": bool(cfg.output_allow_amplification),
+        "postfilter_enabled": bool(cfg.postfilter_enabled),
+        "postfilter_noise_ema_alpha": float(cfg.postfilter_noise_ema_alpha),
+        "postfilter_speech_ema_alpha": float(cfg.postfilter_speech_ema_alpha),
+        "postfilter_gain_floor": float(cfg.postfilter_gain_floor),
+        "postfilter_gain_ema_alpha": float(cfg.postfilter_gain_ema_alpha),
+        "postfilter_dd_alpha": float(cfg.postfilter_dd_alpha),
+        "postfilter_noise_update_speech_scale": float(cfg.postfilter_noise_update_speech_scale),
+        "postfilter_freq_smoothing_bins": int(cfg.postfilter_freq_smoothing_bins),
+        "postfilter_gain_max_step_db": float(cfg.postfilter_gain_max_step_db),
         "speaker_map_final": final_rows,
         "localization_backend": str(cfg.localization_backend),
         "localization_window_ms": int(cfg.localization_window_ms),
