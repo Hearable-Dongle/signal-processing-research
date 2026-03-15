@@ -43,6 +43,10 @@ def _wrap_to_180(v: float) -> float:
     return float(a)
 
 
+def _angular_dist_deg(a: float, b: float) -> float:
+    return abs(_wrap_to_180(float(a) - float(b)))
+
+
 def _step_limited_angle(prev_deg: float, next_deg: float, max_step_deg: float) -> float:
     delta = _wrap_to_180(next_deg - prev_deg)
     step = float(np.clip(delta, -max_step_deg, max_step_deg))
@@ -188,6 +192,40 @@ class _FDBufferedBeamformer:
             denom = (af.conj().T @ rinv_a)[0, 0]
             wf = rinv_a / (denom + 1e-10)
             y_fft[f] = (wf.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
+
+        y, self._ola_tail_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr)
+        return y
+
+    def lcmv_null(self, frame_mc: np.ndarray, target_doa_deg: float, null_doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
+        x = np.asarray(frame_mc, dtype=np.float64)
+        x_fft = self._analysis_block(x)
+        self.rnn_mvdr = self._update_covariance(self.rnn_mvdr, x_fft, self._cov_alpha_from_activity(speech_activity))
+        a_target = _steering_vector_f_domain(
+            doa_deg=target_doa_deg,
+            n_fft=2 * self.n,
+            fs=self.cfg.sample_rate_hz,
+            mic_geometry_xyz=self.mic_geometry_xyz,
+            sound_speed_m_s=self.cfg.sound_speed_m_s,
+        )
+        a_null = _steering_vector_f_domain(
+            doa_deg=null_doa_deg,
+            n_fft=2 * self.n,
+            fs=self.cfg.sample_rate_hz,
+            mic_geometry_xyz=self.mic_geometry_xyz,
+            sound_speed_m_s=self.cfg.sound_speed_m_s,
+        )
+
+        f_bins = x_fft.shape[0]
+        y_fft = np.zeros(f_bins, dtype=np.complex128)
+        eye = np.eye(self.n_mics, dtype=np.complex128)
+        response = np.asarray([[1.0 + 0.0j], [0.0 + 0.0j]], dtype=np.complex128)
+        for f in range(f_bins):
+            r = self.rnn_mvdr[f] + (1e-8 * eye)
+            constraint = np.stack([a_target[f], a_null[f]], axis=1)
+            r_inv = np.linalg.pinv(r)
+            gram = constraint.conj().T @ r_inv @ constraint
+            weights = r_inv @ constraint @ np.linalg.pinv(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128)) @ response
+            y_fft[f] = (weights.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
 
         y, self._ola_tail_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr)
         return y
@@ -400,6 +438,106 @@ class FastPathWorker(threading.Thread):
         )
         self._postfilter = _PostFilterState(frame_samples=frame_samples, cfg=config)
         self._srp_override_provider = srp_override_provider
+        self._own_voice_active = False
+        self._own_voice_on_count = 0
+        self._own_voice_off_count = 0
+
+    def _suppression_mode(self) -> str:
+        return str(self._cfg.own_voice_suppression_mode).strip().lower()
+
+    def _suppressed_user_doa(self) -> float | None:
+        if self._cfg.suppressed_user_voice_doa_deg is None:
+            return None
+        return _norm_deg(float(self._cfg.suppressed_user_voice_doa_deg))
+
+    def _match_user_peak(
+        self,
+        peaks: list[float],
+        scores: list[float] | None,
+    ) -> tuple[float | None, float, int | None]:
+        user_doa = self._suppressed_user_doa()
+        if user_doa is None:
+            return None, 0.0, None
+        best_idx = None
+        best_dist = None
+        best_score = 0.0
+        for idx, peak in enumerate(peaks):
+            dist = _angular_dist_deg(float(peak), user_doa)
+            if dist > float(self._cfg.suppressed_user_match_window_deg):
+                continue
+            score = 1.0 if scores is None or idx >= len(scores) else float(scores[idx])
+            if best_idx is None or dist < float(best_dist):
+                best_idx = int(idx)
+                best_dist = float(dist)
+                best_score = float(score)
+        if best_idx is None:
+            return None, 0.0, None
+        return float(peaks[best_idx]), float(best_score), int(best_idx)
+
+    def _update_own_voice_hysteresis(self, user_present: bool) -> bool:
+        if user_present:
+            self._own_voice_on_count += 1
+            self._own_voice_off_count = 0
+            if not self._own_voice_active and self._own_voice_on_count >= max(1, int(self._cfg.suppressed_user_null_on_frames)):
+                self._own_voice_active = True
+        else:
+            self._own_voice_off_count += 1
+            self._own_voice_on_count = 0
+            if self._own_voice_active and self._own_voice_off_count >= max(1, int(self._cfg.suppressed_user_null_off_frames)):
+                self._own_voice_active = False
+        return bool(self._own_voice_active)
+
+    def _pick_non_user_peak(self, peaks: list[float], scores: list[float] | None, matched_user_idx: int | None) -> tuple[float | None, float]:
+        best_angle = None
+        best_score = -1.0
+        for idx, peak in enumerate(peaks):
+            if matched_user_idx is not None and int(idx) == int(matched_user_idx):
+                continue
+            score = 1.0 if scores is None or idx >= len(scores) else float(scores[idx])
+            if score > best_score:
+                best_angle = float(peak)
+                best_score = float(score)
+        return best_angle, float(max(best_score, 0.0))
+
+    def _pick_non_user_speaker(self, speaker_map) -> tuple[float | None, float]:
+        user_doa = self._suppressed_user_doa()
+        best_angle = None
+        best_score = -1.0
+        for item in speaker_map.values():
+            angle = float(item.direction_degrees)
+            if user_doa is not None and _angular_dist_deg(angle, user_doa) <= float(self._cfg.suppressed_user_match_window_deg):
+                continue
+            score = float(max(getattr(item, "activity_confidence", 0.0), getattr(item, "confidence", 0.0), getattr(item, "gain_weight", 0.0)))
+            if score > best_score:
+                best_angle = angle
+                best_score = score
+        return best_angle, float(max(best_score, 0.0))
+
+    def _suppression_debug(
+        self,
+        *,
+        matched_user_peak_deg: float | None,
+        matched_user_score: float,
+        suppression_active: bool,
+        target_doa_deg: float | None,
+        suppression_applied: bool,
+        suppression_strategy: str,
+        conflict_fallback: bool,
+    ) -> dict:
+        user_doa = self._suppressed_user_doa()
+        return {
+            "configured_user_doa_deg": user_doa,
+            "matched_user_peak_deg": matched_user_peak_deg,
+            "matched_user_score": float(matched_user_score),
+            "user_present": bool(matched_user_peak_deg is not None),
+            "suppression_active": bool(suppression_active),
+            "target_doa_deg": None if target_doa_deg is None else float(target_doa_deg),
+            "suppression_applied": bool(suppression_applied),
+            "suppression_strategy": str(suppression_strategy),
+            "conflict_fallback": bool(conflict_fallback),
+            "on_count": int(self._own_voice_on_count),
+            "off_count": int(self._own_voice_off_count),
+        }
 
     def _smooth_speaker_items(self, speaker_map) -> list:
         alpha_doa = float(np.clip(self._cfg.doa_ema_alpha, 0.0, 1.0))
@@ -483,6 +621,11 @@ class FastPathWorker(threading.Thread):
             return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
         return self._fd.mvdr(x, doa_deg=doa_deg, speech_activity=speech_activity)
 
+    def _apply_soft_gate(self, out: np.ndarray) -> np.ndarray:
+        attenuation_db = float(max(0.0, self._cfg.suppressed_user_gate_attenuation_db))
+        gain = float(10.0 ** (-attenuation_db / 20.0))
+        return (np.asarray(out, dtype=np.float32) * gain).astype(np.float32, copy=False)
+
     def run(self) -> None:
         frame_samples = max(1, int(self._cfg.sample_rate_hz * self._cfg.fast_frame_ms / 1000))
         try:
@@ -512,6 +655,18 @@ class FastPathWorker(threading.Thread):
                     override = None if self._srp_override_provider is None else self._srp_override_provider(self._frame_idx, now_ms)
                     if override is None:
                         peaks, scores, tracker_debug = self._tracker.update(x)
+                        matched_user_peak_deg, matched_user_score, matched_user_idx = self._match_user_peak(peaks, scores)
+                        suppression_active = self._update_own_voice_hysteresis(matched_user_peak_deg is not None)
+                        tracker_debug = dict(tracker_debug)
+                        tracker_debug["own_voice_suppression"] = self._suppression_debug(
+                            matched_user_peak_deg=matched_user_peak_deg,
+                            matched_user_score=matched_user_score,
+                            suppression_active=suppression_active,
+                            target_doa_deg=None,
+                            suppression_applied=False,
+                            suppression_strategy="none",
+                            conflict_fallback=False,
+                        )
                         snapshot = SRPPeakSnapshot(
                             timestamp_ms=now_ms,
                             peaks_deg=tuple(float(v) for v in peaks),
@@ -524,6 +679,9 @@ class FastPathWorker(threading.Thread):
                         snapshot = override
                         peaks = list(snapshot.peaks_deg)
                         scores = None if snapshot.peak_scores is None else list(snapshot.peak_scores)
+                        matched_user_peak_deg, matched_user_score, matched_user_idx = self._match_user_peak(peaks, scores)
+                        suppression_active = self._update_own_voice_hysteresis(matched_user_peak_deg is not None)
+                    suppression_info = dict((snapshot.debug or {}).get("own_voice_suppression", {}))
                     self._state.publish_srp_snapshot(snapshot)
                     if not bool(self._cfg.slow_path_enabled):
                         self._publish_localization_only_speaker_map(
@@ -536,25 +694,111 @@ class FastPathWorker(threading.Thread):
                     speaker_map = self._state.get_speaker_map_snapshot()
                     t0 = perf_counter()
                     ref_mode = str(self._cfg.fast_path_reference_mode).strip().lower()
+                    suppression_mode = self._suppression_mode()
+                    user_doa = self._suppressed_user_doa()
+                    target_doa = None
+                    suppression_applied = False
+                    suppression_strategy = "none"
+                    conflict_fallback = False
                     if ref_mode == "srp_peak" and peaks:
                         speech_activity = _frame_speech_activity(x)
-                        doa_deg = float(peaks[0])
-                        out = self._beamform_single_direction(x, doa_deg=doa_deg, speech_activity=speech_activity)
+                        target_doa, _target_score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
+                        if target_doa is None and not suppression_active:
+                            target_doa = float(peaks[0])
+                        if target_doa is not None:
+                            can_null = (
+                                suppression_mode == "lcmv_null_hysteresis"
+                                and suppression_active
+                                and user_doa is not None
+                                and _angular_dist_deg(target_doa, user_doa) >= float(self._cfg.suppressed_user_target_conflict_deg)
+                                and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd"
+                            )
+                            if can_null:
+                                out = self._fd.lcmv_null(
+                                    x,
+                                    target_doa_deg=float(target_doa),
+                                    null_doa_deg=float(user_doa),
+                                    speech_activity=speech_activity,
+                                )
+                                suppression_applied = True
+                                suppression_strategy = "lcmv_null"
+                            else:
+                                if suppression_active and suppression_mode == "lcmv_null_hysteresis" and user_doa is not None:
+                                    conflict_fallback = bool(
+                                        _angular_dist_deg(float(target_doa), float(user_doa)) < float(self._cfg.suppressed_user_target_conflict_deg)
+                                    )
+                                out = self._beamform_single_direction(x, doa_deg=float(target_doa), speech_activity=speech_activity)
+                        else:
+                            out = np.mean(x, axis=1).astype(np.float32, copy=False)
+                            if suppression_active:
+                                conflict_fallback = True
                         if self._cfg.postfilter_enabled:
                             out = self._postfilter.process(out, speech_activity=speech_activity)
                     elif speaker_map:
-                        out = np.zeros(x.shape[0], dtype=np.float32)
-                        smoothed_items = self._smooth_speaker_items(speaker_map)
                         speech_activity = float(
                             max((float(getattr(v, "activity_confidence", 0.0)) for v in speaker_map.values()), default=0.0)
                         )
-                        for _sid, doa_deg, gain_weight in smoothed_items:
-                            bf = self._beamform_single_direction(x, doa_deg=doa_deg, speech_activity=speech_activity)
-                            out += float(gain_weight) * bf
+                        target_doa, _target_score = self._pick_non_user_speaker(speaker_map)
+                        if target_doa is None and not suppression_active:
+                            smoothed_items = self._smooth_speaker_items(speaker_map)
+                            if smoothed_items:
+                                target_doa = float(smoothed_items[0][1])
+                        if target_doa is not None:
+                            can_null = (
+                                suppression_mode == "lcmv_null_hysteresis"
+                                and suppression_active
+                                and user_doa is not None
+                                and _angular_dist_deg(target_doa, user_doa) >= float(self._cfg.suppressed_user_target_conflict_deg)
+                                and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd"
+                            )
+                            if can_null:
+                                out = self._fd.lcmv_null(
+                                    x,
+                                    target_doa_deg=float(target_doa),
+                                    null_doa_deg=float(user_doa),
+                                    speech_activity=speech_activity,
+                                )
+                                suppression_applied = True
+                                suppression_strategy = "lcmv_null"
+                            else:
+                                if suppression_active and suppression_mode == "lcmv_null_hysteresis" and user_doa is not None:
+                                    conflict_fallback = bool(
+                                        _angular_dist_deg(float(target_doa), float(user_doa)) < float(self._cfg.suppressed_user_target_conflict_deg)
+                                    )
+                                out = self._beamform_single_direction(x, doa_deg=float(target_doa), speech_activity=speech_activity)
+                        else:
+                            out = np.mean(x, axis=1).astype(np.float32, copy=False)
+                            if suppression_active:
+                                conflict_fallback = True
                         if self._cfg.postfilter_enabled:
                             out = self._postfilter.process(out, speech_activity=speech_activity)
                     else:
                         out = np.mean(x, axis=1).astype(np.float32, copy=False)
+                    if suppression_active and suppression_mode in {"soft_output_gate", "lcmv_null_hysteresis"} and (
+                        suppression_mode == "soft_output_gate" or conflict_fallback or target_doa is None
+                    ):
+                        out = self._apply_soft_gate(out)
+                        suppression_applied = True
+                        suppression_strategy = "soft_gate"
+                    if suppression_info or suppression_mode != "off":
+                        suppression_info = self._suppression_debug(
+                            matched_user_peak_deg=matched_user_peak_deg,
+                            matched_user_score=matched_user_score,
+                            suppression_active=suppression_active,
+                            target_doa_deg=target_doa,
+                            suppression_applied=suppression_applied,
+                            suppression_strategy=suppression_strategy,
+                            conflict_fallback=conflict_fallback,
+                        )
+                        snapshot = SRPPeakSnapshot(
+                            timestamp_ms=float(snapshot.timestamp_ms),
+                            peaks_deg=tuple(snapshot.peaks_deg),
+                            peak_scores=snapshot.peak_scores,
+                            raw_peaks_deg=tuple(snapshot.raw_peaks_deg),
+                            raw_peak_scores=snapshot.raw_peak_scores,
+                            debug={**(dict(snapshot.debug or {})), "own_voice_suppression": suppression_info},
+                        )
+                        self._state.publish_srp_snapshot(snapshot)
                     beamform_ms += (perf_counter() - t0) * 1000.0
 
                     t0 = perf_counter()

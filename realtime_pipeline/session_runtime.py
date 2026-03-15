@@ -67,6 +67,15 @@ def build_pipeline_config_from_request(
         capon_peak_min_sharpness=float(req.capon_peak_min_sharpness),
         capon_peak_min_margin=float(req.capon_peak_min_margin),
         capon_hold_frames=int(req.capon_hold_frames),
+        own_voice_suppression_mode=str(req.own_voice_suppression_mode),
+        suppressed_user_voice_doa_deg=(
+            None if req.suppressed_user_voice_doa_deg is None else float(req.suppressed_user_voice_doa_deg)
+        ),
+        suppressed_user_match_window_deg=float(req.suppressed_user_match_window_deg),
+        suppressed_user_null_on_frames=int(req.suppressed_user_null_on_frames),
+        suppressed_user_null_off_frames=int(req.suppressed_user_null_off_frames),
+        suppressed_user_gate_attenuation_db=float(req.suppressed_user_gate_attenuation_db),
+        suppressed_user_target_conflict_deg=float(req.suppressed_user_target_conflict_deg),
         speaker_match_window_deg=float(req.speaker_match_window_deg),
         centroid_association_mode=str(req.centroid_association_mode),
         centroid_association_sigma_deg=float(req.centroid_association_sigma_deg),
@@ -193,6 +202,7 @@ def run_offline_session_pipeline(
                 "timestamp_ms": float(srp.timestamp_ms),
                 "raw_peaks_deg": [float(v) for v in srp.raw_peaks_deg],
                 "raw_peak_scores": [] if srp.raw_peak_scores is None else [float(v) for v in srp.raw_peak_scores],
+                "suppression": dict((srp.debug or {}).get("own_voice_suppression", {})),
                 "speakers": rows,
             }
         )
@@ -266,6 +276,15 @@ def run_offline_session_pipeline(
         "srp_overlap": float(cfg.srp_overlap),
         "srp_freq_min_hz": int(cfg.srp_freq_min_hz),
         "srp_freq_max_hz": int(cfg.srp_freq_max_hz),
+        "own_voice_suppression_mode": str(cfg.own_voice_suppression_mode),
+        "suppressed_user_voice_doa_deg": (
+            None if cfg.suppressed_user_voice_doa_deg is None else float(cfg.suppressed_user_voice_doa_deg)
+        ),
+        "suppressed_user_match_window_deg": float(cfg.suppressed_user_match_window_deg),
+        "suppressed_user_null_on_frames": int(cfg.suppressed_user_null_on_frames),
+        "suppressed_user_null_off_frames": int(cfg.suppressed_user_null_off_frames),
+        "suppressed_user_gate_attenuation_db": float(cfg.suppressed_user_gate_attenuation_db),
+        "suppressed_user_target_conflict_deg": float(cfg.suppressed_user_target_conflict_deg),
         "tracking_mode": str(cfg.tracking_mode),
         "control_mode": str(cfg.control_mode),
         "assume_single_speaker": bool(cfg.assume_single_speaker),

@@ -346,6 +346,15 @@ def _active_ground_truth_tracks_at_time(ground_truth_tracks: list[dict], timesta
     return active
 
 
+def _filter_tracks_by_speaker_name(ground_truth_tracks: list[dict], speaker_name: str | None) -> list[dict]:
+    if not speaker_name:
+        return []
+    expected = str(speaker_name).strip().lower()
+    if not expected:
+        return []
+    return [item for item in ground_truth_tracks if str(item.get("speaker_name", "")).strip().lower() == expected]
+
+
 def _match_angle_sets(gt_angles: list[float], pred_angles: list[float]) -> tuple[list[float], int, int, int]:
     if not gt_angles or not pred_angles:
         return [], 0, len(gt_angles), len(pred_angles)
@@ -429,16 +438,64 @@ def _ground_truth_metrics(summary: dict, ground_truth_tracks: list[dict], *, mic
     }
 
 
+def _suppression_metrics(summary: dict, suppressed_user_tracks: list[dict]) -> dict[str, float | str]:
+    if not suppressed_user_tracks:
+        return {
+            "suppressed_user_name": "",
+            "suppression_user_recall": float("nan"),
+            "suppression_false_positive_rate": float("nan"),
+            "suppression_precision": float("nan"),
+            "suppression_activation_rate": float("nan"),
+        }
+    trace = list(summary.get("speaker_map_trace", []))
+    if not trace:
+        return {
+            "suppressed_user_name": str(suppressed_user_tracks[0].get("speaker_name", "")),
+            "suppression_user_recall": float("nan"),
+            "suppression_false_positive_rate": float("nan"),
+            "suppression_precision": float("nan"),
+            "suppression_activation_rate": float("nan"),
+        }
+    total_user_frames = 0
+    total_non_user_frames = 0
+    suppressed_on_user = 0
+    suppressed_on_non_user = 0
+    total_suppressed_frames = 0
+    for row in trace:
+        timestamp_s = float(row.get("timestamp_ms", 0.0)) / 1000.0
+        user_active = bool(_active_ground_truth_tracks_at_time(suppressed_user_tracks, timestamp_s))
+        suppression_active = bool(row.get("suppression", {}).get("suppression_active", False))
+        if suppression_active:
+            total_suppressed_frames += 1
+        if user_active:
+            total_user_frames += 1
+            if suppression_active:
+                suppressed_on_user += 1
+        else:
+            total_non_user_frames += 1
+            if suppression_active:
+                suppressed_on_non_user += 1
+    return {
+        "suppressed_user_name": str(suppressed_user_tracks[0].get("speaker_name", "")),
+        "suppression_user_recall": (float(suppressed_on_user) / float(total_user_frames)) if total_user_frames else float("nan"),
+        "suppression_false_positive_rate": (float(suppressed_on_non_user) / float(total_non_user_frames)) if total_non_user_frames else float("nan"),
+        "suppression_precision": (float(suppressed_on_user) / float(total_suppressed_frames)) if total_suppressed_frames else float("nan"),
+        "suppression_activation_rate": (float(total_suppressed_frames) / float(len(trace))) if trace else float("nan"),
+    }
+
+
 def _plot_speaker_timeline(
     summary: dict,
     out_path: Path,
     title: str,
     ground_truth_tracks: list[dict] | None = None,
+    suppressed_user_tracks: list[dict] | None = None,
     *,
     mic_array_profile: str,
 ) -> None:
     trace = list(summary.get("speaker_map_trace", []))
     ground_truth_tracks = ground_truth_tracks or []
+    suppressed_user_tracks = suppressed_user_tracks or []
     frame_step_s = float(summary.get("fast_frame_ms", 10.0)) / 1000.0
     duration_s = float(summary.get("duration_s", 0.0))
     if duration_s <= 0.0 and trace:
@@ -448,8 +505,11 @@ def _plot_speaker_timeline(
     raw_ys: list[float] = []
     raw_cs: list[float] = []
     centroid_tracks: dict[int, dict[str, list[float]]] = {}
+    suppression_xs: list[float] = []
     for row in trace:
         x = float(row.get("frame_index", 0)) * frame_step_s
+        if bool(row.get("suppression", {}).get("suppression_active", False)):
+            suppression_xs.append(x)
         for angle_deg, score in zip(row.get("raw_peaks_deg", []), row.get("raw_peak_scores", [])):
             raw_xs.append(x)
             raw_ys.append(_backend_prediction_to_display_angle_deg(float(angle_deg), mic_array_profile=mic_array_profile))
@@ -484,6 +544,20 @@ def _plot_speaker_timeline(
         gt_handles.append(line)
         gt_name = str(item.get("speaker_name", f"speaker {int(item['speaker_id'])}"))
         gt_labels.append(f"GT {gt_name}: {float(item['angle_deg']):.1f} deg")
+    user_handles = []
+    user_labels = []
+    for item in suppressed_user_tracks:
+        user_line = ax.hlines(
+            y=float(item["angle_deg"]),
+            xmin=float(item["start_sec"]),
+            xmax=float(item["end_sec"]),
+            colors="#d00000",
+            linewidth=2.2,
+            linestyles="--",
+            zorder=5,
+        )
+        user_handles.append(user_line)
+        user_labels.append(f"Suppressed user GT: {str(item.get('speaker_name', 'user'))}")
 
     raw_scatter = None
     if raw_xs:
@@ -532,8 +606,14 @@ def _plot_speaker_timeline(
         )
     if raw_scatter is not None:
         fig.colorbar(raw_scatter, ax=ax, label="raw detection confidence")
+    if suppression_xs:
+        ymin, ymax = ax.get_ylim()
+        ax.vlines(suppression_xs, ymin=ymin, ymax=ymax, colors="#d00000", linewidth=0.8, alpha=0.12, zorder=0)
     legend_handles = list(gt_handles)
     legend_labels = list(gt_labels)
+    if user_handles:
+        legend_handles.extend(user_handles[:1])
+        legend_labels.extend(user_labels[:1])
     if raw_scatter is not None:
         legend_handles.append(ax.scatter([], [], s=18, c="#6c757d", alpha=0.25))
         legend_labels.append("Raw detections")
@@ -644,6 +724,14 @@ def _run_recording_method_job(
     centroid_association_mode: str,
     centroid_association_sigma_deg: float,
     centroid_association_min_score: float,
+    own_voice_suppression_mode: str,
+    suppressed_user_voice_doa_deg: float | None,
+    suppressed_user_match_window_deg: float,
+    suppressed_user_null_on_frames: int,
+    suppressed_user_null_off_frames: int,
+    suppressed_user_gate_attenuation_db: float,
+    suppressed_user_target_conflict_deg: float,
+    suppressed_user_speaker_name: str | None,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -680,6 +768,15 @@ def _run_recording_method_job(
         localization_vad_enabled=bool(localization_vad_enabled),
         capon_peak_min_sharpness=float(capon_peak_min_sharpness),
         capon_peak_min_margin=float(capon_peak_min_margin),
+        own_voice_suppression_mode=str(own_voice_suppression_mode),
+        suppressed_user_voice_doa_deg=(
+            None if suppressed_user_voice_doa_deg is None else float(suppressed_user_voice_doa_deg)
+        ),
+        suppressed_user_match_window_deg=float(suppressed_user_match_window_deg),
+        suppressed_user_null_on_frames=int(suppressed_user_null_on_frames),
+        suppressed_user_null_off_frames=int(suppressed_user_null_off_frames),
+        suppressed_user_gate_attenuation_db=float(suppressed_user_gate_attenuation_db),
+        suppressed_user_target_conflict_deg=float(suppressed_user_target_conflict_deg),
         speaker_history_size=int(speaker_history_size),
         speaker_activation_min_predictions=int(speaker_activation_min_predictions),
         speaker_match_window_deg=float(speaker_match_window_deg),
@@ -715,7 +812,9 @@ def _run_recording_method_job(
         duration_s=duration_s,
         mic_array_profile=str(mic_array_profile),
     )
+    suppressed_user_tracks = _filter_tracks_by_speaker_name(ground_truth_tracks, suppressed_user_speaker_name)
     gt_metrics = _ground_truth_metrics(summary, ground_truth_tracks, mic_array_profile=str(mic_array_profile))
+    suppression_metrics = _suppression_metrics(summary, suppressed_user_tracks)
     row = {
         "recording": recording_id,
         "method": method,
@@ -742,6 +841,7 @@ def _run_recording_method_job(
         "mean_gain_weight_final": float(np.mean([float(speaker.get("gain_weight", 0.0)) for speaker in summary.get("speaker_map_final", [])])) if summary.get("speaker_map_final") else 0.0,
         **trace_metrics,
         **gt_metrics,
+        **suppression_metrics,
     }
 
     label = f"{recording_id} | {method} | realtime_pipeline"
@@ -753,6 +853,7 @@ def _run_recording_method_job(
         viz_dir / "speaker_directions.png",
         label,
         ground_truth_tracks=ground_truth_tracks,
+        suppressed_user_tracks=suppressed_user_tracks,
         mic_array_profile=str(mic_array_profile),
     )
     return row
@@ -792,6 +893,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--localization-vad-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--capon-peak-min-sharpness", type=float, default=0.12)
     parser.add_argument("--capon-peak-min-margin", type=float, default=0.04)
+    parser.add_argument("--own-voice-suppression-mode", choices=["off", "lcmv_null_hysteresis", "soft_output_gate"], default="lcmv_null_hysteresis")
+    parser.add_argument("--suppressed-user-voice-doa-deg", type=float, default=None)
+    parser.add_argument("--suppressed-user-match-window-deg", type=float, default=33.0)
+    parser.add_argument("--suppressed-user-null-on-frames", type=int, default=3)
+    parser.add_argument("--suppressed-user-null-off-frames", type=int, default=10)
+    parser.add_argument("--suppressed-user-gate-attenuation-db", type=float, default=18.0)
+    parser.add_argument("--suppressed-user-target-conflict-deg", type=float, default=30.0)
+    parser.add_argument("--suppressed-user-speaker-name", type=str, default=None)
     parser.add_argument(
         "--speaker-centroid-history-size",
         "--speaker-history-size",
@@ -893,6 +1002,16 @@ def main() -> None:
                 centroid_association_mode=str(args.centroid_association_mode),
                 centroid_association_sigma_deg=float(args.centroid_association_sigma_deg),
                 centroid_association_min_score=float(args.centroid_association_min_score),
+                own_voice_suppression_mode=str(args.own_voice_suppression_mode),
+                suppressed_user_voice_doa_deg=(
+                    None if args.suppressed_user_voice_doa_deg is None else float(args.suppressed_user_voice_doa_deg)
+                ),
+                suppressed_user_match_window_deg=float(args.suppressed_user_match_window_deg),
+                suppressed_user_null_on_frames=int(args.suppressed_user_null_on_frames),
+                suppressed_user_null_off_frames=int(args.suppressed_user_null_off_frames),
+                suppressed_user_gate_attenuation_db=float(args.suppressed_user_gate_attenuation_db),
+                suppressed_user_target_conflict_deg=float(args.suppressed_user_target_conflict_deg),
+                suppressed_user_speaker_name=None if args.suppressed_user_speaker_name is None else str(args.suppressed_user_speaker_name),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -940,6 +1059,10 @@ def main() -> None:
                     "active_speaker_count_final_mean": _mean_numeric(rows, "active_speaker_count_final"),
                     "dominant_confidence_avg_mean": _mean_numeric(rows, "dominant_confidence_avg"),
                     "dominant_direction_step_p95_deg_mean": _mean_numeric(rows, "dominant_direction_step_p95_deg"),
+                    "suppression_user_recall_mean": _mean_numeric(rows, "suppression_user_recall"),
+                    "suppression_false_positive_rate_mean": _mean_numeric(rows, "suppression_false_positive_rate"),
+                    "suppression_precision_mean": _mean_numeric(rows, "suppression_precision"),
+                    "suppression_activation_rate_mean": _mean_numeric(rows, "suppression_activation_rate"),
                     "gt_final_mae_mean": _mean_numeric(rows, "gt_final_mae_deg"),
                     "gt_final_acc_10_mean": _mean_numeric(rows, "gt_final_acc_10"),
                     "gt_final_acc_20_mean": _mean_numeric(rows, "gt_final_acc_20"),
@@ -972,6 +1095,16 @@ def main() -> None:
             "localization_vad_enabled": bool(args.localization_vad_enabled),
             "capon_peak_min_sharpness": float(args.capon_peak_min_sharpness),
             "capon_peak_min_margin": float(args.capon_peak_min_margin),
+            "own_voice_suppression_mode": str(args.own_voice_suppression_mode),
+            "suppressed_user_voice_doa_deg": (
+                None if args.suppressed_user_voice_doa_deg is None else float(args.suppressed_user_voice_doa_deg)
+            ),
+            "suppressed_user_match_window_deg": float(args.suppressed_user_match_window_deg),
+            "suppressed_user_null_on_frames": int(args.suppressed_user_null_on_frames),
+            "suppressed_user_null_off_frames": int(args.suppressed_user_null_off_frames),
+            "suppressed_user_gate_attenuation_db": float(args.suppressed_user_gate_attenuation_db),
+            "suppressed_user_target_conflict_deg": float(args.suppressed_user_target_conflict_deg),
+            "suppressed_user_speaker_name": None if args.suppressed_user_speaker_name is None else str(args.suppressed_user_speaker_name),
             "speaker_history_size": int(args.speaker_history_size),
             "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
             "speaker_match_window_deg": float(args.speaker_match_window_deg),
