@@ -7,7 +7,6 @@ from collections.abc import Callable
 
 import numpy as np
 
-from mic_array_forwarder.mode_presets import METHOD_SPEAKER_TRACKING_SINGLE_ACTIVE, get_simulation_algorithm_preset
 from mic_array_forwarder.models import SessionStartRequest
 from realtime_pipeline.contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
@@ -30,13 +29,13 @@ def build_pipeline_config_from_request(
     sample_rate_hz: int,
     max_speakers_hint: int,
 ) -> PipelineConfig:
-    algorithm = get_simulation_algorithm_preset(req.algorithm_mode)
     assume_single_speaker = bool(req.assume_single_speaker)
+    slow_path_enabled = bool(req.slow_path_enabled)
     return PipelineConfig(
         sample_rate_hz=int(sample_rate_hz),
         fast_frame_ms=max(10, int(req.localization_hop_ms)),
         slow_chunk_ms=int(req.slow_chunk_ms),
-        slow_path_enabled=str(algorithm.algorithm_mode) != "localization_only",
+        slow_path_enabled=slow_path_enabled,
         max_speakers_hint=1 if assume_single_speaker else max(1, int(max_speakers_hint)),
         assume_single_speaker=assume_single_speaker,
         convtasnet_model_name=str(req.convtasnet_model_name),
@@ -52,12 +51,12 @@ def build_pipeline_config_from_request(
         fd_analysis_window_ms=float(req.fd_analysis_window_ms),
         localization_backend=str(req.localization_backend),
         tracking_mode=str(req.tracking_mode),
-        control_mode=str(algorithm.control_mode),
-        fast_path_reference_mode=str(algorithm.fast_path_reference_mode),
+        control_mode="speaker_tracking_mode" if slow_path_enabled else "spatial_peak_mode",
+        fast_path_reference_mode="speaker_map" if slow_path_enabled else "srp_peak",
         localization_window_ms=max(int(req.localization_window_ms), max(10, int(req.localization_hop_ms))),
         localization_hop_ms=max(10, int(req.localization_hop_ms)),
-        direction_long_memory_enabled=bool(algorithm.direction_long_memory_enabled),
-        direction_long_memory_window_ms=float(algorithm.direction_long_memory_window_ms),
+        direction_long_memory_enabled=bool(req.direction_long_memory_enabled),
+        direction_long_memory_window_ms=float(req.direction_long_memory_window_ms),
         output_normalization_enabled=bool(req.output_normalization_enabled),
         output_allow_amplification=bool(req.output_allow_amplification),
         srp_overlap=float(req.overlap),
@@ -86,9 +85,8 @@ def build_pipeline_config_from_request(
 
 
 def build_separation_backend_for_request(req: SessionStartRequest, cfg: PipelineConfig):
-    algorithm = get_simulation_algorithm_preset(req.algorithm_mode)
     separation_mode = str(req.separation_mode)
-    if algorithm.use_single_dominant_no_separator or separation_mode == "single_dominant_no_separator":
+    if separation_mode == "single_dominant_no_separator":
         return DominantSpeakerPassthroughBackend()
     if separation_mode == "mock":
         return MockSeparationBackend(n_streams=cfg.max_speakers_hint)
@@ -119,11 +117,11 @@ def _row_from_speaker(item: SpeakerGainDirection) -> dict[str, Any]:
 def public_speaker_rows(
     snapshot: dict[int, SpeakerGainDirection],
     *,
-    algorithm_mode: str,
+    single_active: bool,
 ) -> list[dict[str, Any]]:
     rows = [_row_from_speaker(item) for item in snapshot.values()]
     rows.sort(key=lambda item: (-float(item["active"]), -float(item["confidence"]), int(item["speaker_id"])))
-    if str(algorithm_mode) != METHOD_SPEAKER_TRACKING_SINGLE_ACTIVE or not rows:
+    if not bool(single_active) or not rows:
         return rows
     active_rows = [row for row in rows if bool(row["active"])]
     if not active_rows:
@@ -197,7 +195,7 @@ def run_offline_session_pipeline(
         )
         rows = public_speaker_rows(
             pipe.shared_state.get_speaker_map_snapshot(),
-            algorithm_mode=str(req.algorithm_mode),
+            single_active=bool(req.single_active),
         )
         speaker_map_trace.append(
             {
@@ -233,7 +231,7 @@ def run_offline_session_pipeline(
 
     final_rows = public_speaker_rows(
         pipe.shared_state.get_speaker_map_snapshot(),
-        algorithm_mode=str(req.algorithm_mode),
+        single_active=bool(req.single_active),
     )
     with (out_root / "speaker_map_final.json").open("w", encoding="utf-8") as handle:
         json.dump({"speakers": final_rows}, handle, indent=2)

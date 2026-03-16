@@ -72,7 +72,7 @@ test("speaker interaction emits select and adjust messages", async () => {
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
-  expect(screen.getByLabelText("Algorithm mode")).toHaveValue("localization_only");
+  expect(screen.getByLabelText("Localization backend")).toHaveValue("capon_1src");
   await user.click(screen.getByRole("button", { name: "Start" }));
   await waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
 
@@ -81,16 +81,15 @@ test("speaker interaction emits select and adjust messages", async () => {
   );
   expect(startCall).toBeTruthy();
   const startBody = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
-  expect(startBody.algorithm_mode).toBe("localization_only");
   expect(startBody.processing_mode).toBe("specific_speaker_enhancement");
-  expect(startBody.localization_hop_ms).toBe(95);
-  expect(startBody.localization_window_ms).toBe(300);
-  expect(startBody.overlap).toBe(0.2);
-  expect(startBody.freq_low_hz).toBe(1200);
-  expect(startBody.freq_high_hz).toBe(5400);
-  expect(startBody.speaker_history_size).toBe(8);
-  expect(startBody.speaker_activation_min_predictions).toBe(3);
-  expect(startBody.speaker_match_window_deg).toBe(30);
+  expect(startBody.fast_path.localization_hop_ms).toBe(95);
+  expect(startBody.fast_path.localization_window_ms).toBe(300);
+  expect(startBody.fast_path.overlap).toBe(0.2);
+  expect(startBody.fast_path.freq_low_hz).toBe(1200);
+  expect(startBody.fast_path.freq_high_hz).toBe(5400);
+  expect(startBody.slow_path.speaker_history_size).toBe(8);
+  expect(startBody.slow_path.speaker_activation_min_predictions).toBe(3);
+  expect(startBody.slow_path.speaker_match_window_deg).toBe(30);
 
   const ws = MockWebSocket.instances[0];
   ws.onmessage?.({
@@ -135,6 +134,7 @@ test("live mode start sends the ReSpeaker session config", async () => {
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "ReSpeaker Live Direct capture from the local USB microphone array." }));
+  await user.click(screen.getByRole("switch", { name: "Enable slow path" }));
   await user.click(screen.getByRole("switch", { name: "Single active speaker" }));
   await user.selectOptions(screen.getByLabelText("Mic array profile"), "respeaker_xvf3800_0650");
   await user.clear(screen.getByLabelText("Audio device query"));
@@ -152,15 +152,16 @@ test("live mode start sends the ReSpeaker session config", async () => {
   expect(body.audio_device_query).toBe("USB Mic");
   expect(body.sample_rate_hz).toBe(48000);
   expect(body.channel_map).toBeUndefined();
-  expect(body.algorithm_mode).toBe("speaker_tracking_single_active");
-  expect(body.localization_hop_ms).toBe(95);
-  expect(body.localization_window_ms).toBe(300);
-  expect(body.overlap).toBe(0.2);
-  expect(body.freq_low_hz).toBe(1200);
-  expect(body.freq_high_hz).toBe(5400);
-  expect(body.speaker_history_size).toBe(8);
-  expect(body.speaker_activation_min_predictions).toBe(3);
-  expect(body.speaker_match_window_deg).toBe(30);
+  expect(body.fast_path.localization_hop_ms).toBe(95);
+  expect(body.fast_path.localization_window_ms).toBe(300);
+  expect(body.fast_path.overlap).toBe(0.2);
+  expect(body.fast_path.freq_low_hz).toBe(1200);
+  expect(body.fast_path.freq_high_hz).toBe(5400);
+  expect(body.slow_path.enabled).toBe(true);
+  expect(body.slow_path.single_active).toBe(false);
+  expect(body.slow_path.speaker_history_size).toBe(8);
+  expect(body.slow_path.speaker_activation_min_predictions).toBe(3);
+  expect(body.slow_path.speaker_match_window_deg).toBe(30);
 });
 
 test("simulation start sends algorithm mode plus ground-truth toggles", async () => {
@@ -175,9 +176,10 @@ test("simulation start sends algorithm mode plus ground-truth toggles", async ()
   render(<App />);
 
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
-  await user.selectOptions(screen.getByLabelText("Algorithm mode"), "speaker_tracking_long_memory");
   fireEvent.change(screen.getByLabelText("Localization hop (ms)"), { target: { value: "50" } });
   fireEvent.change(screen.getByLabelText("Localization window (ms)"), { target: { value: "200" } });
+  await user.click(screen.getByRole("switch", { name: "Enable slow path" }));
+  await user.click(screen.getByRole("switch", { name: "Long memory" }));
   await user.click(screen.getByLabelText("Use ground truth location"));
   await user.click(screen.getByLabelText("Use ground truth speaker sources"));
   await user.click(screen.getByRole("button", { name: "Start" }));
@@ -187,9 +189,10 @@ test("simulation start sends algorithm mode plus ground-truth toggles", async ()
     String(c[0]).includes("/api/session/start")
   );
   const body = JSON.parse(String((startCall?.[1] as RequestInit | undefined)?.body ?? "{}"));
-  expect(body.algorithm_mode).toBe("speaker_tracking_long_memory");
-  expect(body.localization_hop_ms).toBe(50);
-  expect(body.localization_window_ms).toBe(200);
+  expect(body.fast_path.localization_hop_ms).toBe(50);
+  expect(body.fast_path.localization_window_ms).toBe(200);
+  expect(body.slow_path.enabled).toBe(true);
+  expect(body.slow_path.long_memory_enabled).toBe(true);
   expect(body.use_ground_truth_location).toBe(true);
   expect(body.use_ground_truth_speaker_sources).toBe(true);
   expect(body.processing_mode).toBe("specific_speaker_enhancement");

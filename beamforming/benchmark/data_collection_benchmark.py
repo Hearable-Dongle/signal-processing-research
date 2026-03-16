@@ -779,6 +779,9 @@ def _run_recording_method_job(
     suppressed_user_target_conflict_deg: float,
     suppressed_user_speaker_name: str | None,
     ground_truth_transition_ignore_sec: float,
+    enhancement_tier: str,
+    output_enhancer_mode: str,
+    postfilter_enabled: bool,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -800,44 +803,56 @@ def _run_recording_method_job(
     method_slug = _slug(method)
     run_dir = out_dir / "runs" / _slug(recording_id) / method_slug
     req = SessionStartRequest(
-        algorithm_mode=str(algorithm_mode),
         input_source="respeaker_live",
         channel_count=int(mic_audio.shape[1]),
         sample_rate_hz=int(sample_rate_hz),
         monitor_source="processed",
         mic_array_profile=str(mic_array_profile),
-        localization_hop_ms=int(localization_hop_ms),
-        localization_window_ms=int(localization_window_ms),
-        overlap=float(localization_overlap),
-        freq_low_hz=int(localization_freq_low_hz),
-        freq_high_hz=int(localization_freq_high_hz),
-        localization_pair_selection_mode=str(localization_pair_selection_mode),
-        localization_vad_enabled=bool(localization_vad_enabled),
-        capon_peak_min_sharpness=float(capon_peak_min_sharpness),
-        capon_peak_min_margin=float(capon_peak_min_margin),
-        own_voice_suppression_mode=str(own_voice_suppression_mode),
-        suppressed_user_voice_doa_deg=(
-            None if suppressed_user_voice_doa_deg is None else float(suppressed_user_voice_doa_deg)
-        ),
-        suppressed_user_match_window_deg=float(suppressed_user_match_window_deg),
-        suppressed_user_null_on_frames=int(suppressed_user_null_on_frames),
-        suppressed_user_null_off_frames=int(suppressed_user_null_off_frames),
-        suppressed_user_gate_attenuation_db=float(suppressed_user_gate_attenuation_db),
-        suppressed_user_target_conflict_deg=float(suppressed_user_target_conflict_deg),
-        speaker_history_size=int(speaker_history_size),
-        speaker_activation_min_predictions=int(speaker_activation_min_predictions),
-        speaker_match_window_deg=float(speaker_match_window_deg),
-        centroid_association_mode=str(centroid_association_mode),
-        centroid_association_sigma_deg=float(centroid_association_sigma_deg),
-        centroid_association_min_score=float(centroid_association_min_score),
+        fast_path={
+            "localization_hop_ms": int(localization_hop_ms),
+            "localization_window_ms": int(localization_window_ms),
+            "overlap": float(localization_overlap),
+            "freq_low_hz": int(localization_freq_low_hz),
+            "freq_high_hz": int(localization_freq_high_hz),
+            "localization_pair_selection_mode": str(localization_pair_selection_mode),
+            "localization_vad_enabled": bool(localization_vad_enabled),
+            "capon_peak_min_sharpness": float(capon_peak_min_sharpness),
+            "capon_peak_min_margin": float(capon_peak_min_margin),
+            "enhancement_tier": str(enhancement_tier),
+            "output_enhancer_mode": str(output_enhancer_mode),
+            "postfilter_enabled": bool(postfilter_enabled),
+            "own_voice_suppression_mode": str(own_voice_suppression_mode),
+            "suppressed_user_voice_doa_deg": (
+                None if suppressed_user_voice_doa_deg is None else float(suppressed_user_voice_doa_deg)
+            ),
+            "suppressed_user_match_window_deg": float(suppressed_user_match_window_deg),
+            "suppressed_user_null_on_frames": int(suppressed_user_null_on_frames),
+            "suppressed_user_null_off_frames": int(suppressed_user_null_off_frames),
+            "suppressed_user_gate_attenuation_db": float(suppressed_user_gate_attenuation_db),
+            "suppressed_user_target_conflict_deg": float(suppressed_user_target_conflict_deg),
+            "assume_single_speaker": bool(assume_single_speaker),
+            "localization_backend": str(localization_backend),
+            "beamforming_mode": str(method),
+            "fd_analysis_window_ms": float(20.0),
+            "output_normalization_enabled": bool(output_normalization_enabled),
+            "output_allow_amplification": bool(output_allow_amplification),
+        },
+        slow_path={
+            "enabled": str(algorithm_mode) != "localization_only",
+            "tracking_mode": str(tracking_mode),
+            "single_active": str(algorithm_mode) == "speaker_tracking_single_active",
+            "speaker_history_size": int(speaker_history_size),
+            "speaker_activation_min_predictions": int(speaker_activation_min_predictions),
+            "speaker_match_window_deg": float(speaker_match_window_deg),
+            "centroid_association_mode": str(centroid_association_mode),
+            "centroid_association_sigma_deg": float(centroid_association_sigma_deg),
+            "centroid_association_min_score": float(centroid_association_min_score),
+            "slow_chunk_ms": int(slow_chunk_ms),
+            "long_memory_enabled": bool(direction_long_memory_enabled),
+            "long_memory_window_ms": 60000.0 if bool(direction_long_memory_enabled) else 2000.0,
+        },
         focus_ratio=2.0,
-        assume_single_speaker=bool(assume_single_speaker),
         separation_mode=str(separation_mode),
-        localization_backend=str(localization_backend),
-        tracking_mode=str(tracking_mode),
-        beamforming_mode=str(method),
-        output_normalization_enabled=bool(output_normalization_enabled),
-        output_allow_amplification=bool(output_allow_amplification),
         processing_mode="specific_speaker_enhancement",
     )
     summary = run_offline_session_pipeline(
@@ -873,12 +888,15 @@ def _run_recording_method_job(
     )
     row = {
         "recording": recording_id,
-        "method": method,
+        "requested_method": method,
+        "method": str(summary.get("beamforming_mode", method)),
         "sample_rate_hz": fs,
         "duration_s": duration_s,
         "channel_count": int(mic_audio.shape[1]),
         "raw_channel_filenames": ",".join(channel_filenames),
         "separation_mode": str(summary.get("separation_mode", "realtime_pipeline")),
+        "enhancement_tier": str(summary.get("enhancement_tier", enhancement_tier)),
+        "output_enhancer_mode": str(summary.get("output_enhancer_mode", output_enhancer_mode)),
         "fast_rtf": float(summary["fast_rtf"]),
         "slow_rtf": float(summary["slow_rtf"]),
         "fast_avg_ms": float(summary["fast_avg_ms"]),
@@ -919,7 +937,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run realtime beamforming over Data Collection raw-channel recordings.")
     parser.add_argument("--input-path", required=True, help="Data Collection export root/zip, recording dir, or raw WAV dir")
     parser.add_argument("--out-dir", required=True, help="Directory for benchmark outputs")
-    parser.add_argument("--methods", nargs="+", choices=["mvdr_fd", "gsc_fd", "delay_sum"], default=["mvdr_fd"])
+    parser.add_argument("--methods", nargs="+", choices=["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum"], default=["mvdr_fd"])
     parser.add_argument(
         "--separation-mode",
         choices=["single_dominant_no_separator", "mock", "auto"],
@@ -958,6 +976,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--suppressed-user-target-conflict-deg", type=float, default=30.0)
     parser.add_argument("--suppressed-user-speaker-name", type=str, default=None)
     parser.add_argument("--ground-truth-transition-ignore-sec", type=float, default=0.0)
+    parser.add_argument("--enhancement-tier", choices=["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"], default="custom")
+    parser.add_argument("--output-enhancer-mode", choices=["off", "wiener"], default="off")
+    parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--speaker-centroid-history-size",
         "--speaker-history-size",
@@ -1070,6 +1091,9 @@ def main() -> None:
                 suppressed_user_target_conflict_deg=float(args.suppressed_user_target_conflict_deg),
                 suppressed_user_speaker_name=None if args.suppressed_user_speaker_name is None else str(args.suppressed_user_speaker_name),
                 ground_truth_transition_ignore_sec=float(args.ground_truth_transition_ignore_sec),
+                enhancement_tier=str(args.enhancement_tier),
+                output_enhancer_mode=str(args.output_enhancer_mode),
+                postfilter_enabled=bool(args.postfilter_enabled),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -1117,6 +1141,8 @@ def main() -> None:
                     "active_speaker_count_final_mean": _mean_numeric(rows, "active_speaker_count_final"),
                     "dominant_confidence_avg_mean": _mean_numeric(rows, "dominant_confidence_avg"),
                     "dominant_direction_step_p95_deg_mean": _mean_numeric(rows, "dominant_direction_step_p95_deg"),
+                    "enhancement_tier": str(rows[0].get("enhancement_tier", "")) if rows else "",
+                    "output_enhancer_mode": str(rows[0].get("output_enhancer_mode", "")) if rows else "",
                     "suppression_user_recall_mean": _mean_numeric(rows, "suppression_user_recall"),
                     "suppression_false_positive_rate_mean": _mean_numeric(rows, "suppression_false_positive_rate"),
                     "suppression_precision_mean": _mean_numeric(rows, "suppression_precision"),
@@ -1164,6 +1190,9 @@ def main() -> None:
             "suppressed_user_target_conflict_deg": float(args.suppressed_user_target_conflict_deg),
             "suppressed_user_speaker_name": None if args.suppressed_user_speaker_name is None else str(args.suppressed_user_speaker_name),
             "ground_truth_transition_ignore_sec": float(args.ground_truth_transition_ignore_sec),
+            "enhancement_tier": str(args.enhancement_tier),
+            "output_enhancer_mode": str(args.output_enhancer_mode),
+            "postfilter_enabled": bool(args.postfilter_enabled),
             "speaker_history_size": int(args.speaker_history_size),
             "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
             "speaker_match_window_deg": float(args.speaker_match_window_deg),

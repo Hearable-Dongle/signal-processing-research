@@ -92,7 +92,16 @@ def get_raw_mix_wav(session_id: str) -> Response:
     session = manager.get_session(session_id)
     wav_bytes = session.get_raw_mix_wav_bytes()
     if not wav_bytes:
-        raise HTTPException(status_code=404, detail="raw mixed audio not available yet")
+        return Response(status_code=204)
+    return Response(content=wav_bytes, media_type="audio/wav")
+
+
+@app.get("/api/session/{session_id}/processed-wav")
+def get_processed_wav(session_id: str) -> Response:
+    session = manager.get_session(session_id)
+    wav_bytes = session.get_processed_wav_bytes()
+    if not wav_bytes:
+        return Response(status_code=204)
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
