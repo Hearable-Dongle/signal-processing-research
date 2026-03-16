@@ -197,6 +197,8 @@ class PipelineConfig:
     doa_max_step_deg_per_frame: float = 10.0
     # Frequency-domain covariance smoothing
     fd_analysis_window_ms: float = 20.0
+    fd_cov_ema_alpha: float = 0.08
+    fd_diag_load: float = 1e-3
     target_activity_rnn_update_mode: str | None = None  # one of: oracle_target_activity, estimated_target_activity
     target_activity_low_threshold: float = 0.25
     target_activity_high_threshold: float = 0.45
@@ -204,8 +206,13 @@ class PipelineConfig:
     target_activity_exit_frames: int = 4
     fd_cov_update_scale_target_active: float = 0.0
     fd_cov_update_scale_target_inactive: float = 1.0
-    fd_cov_ema_alpha: float = 0.08
-    fd_diag_load: float = 1e-3
+    target_activity_vad_mode: int = 2
+    target_activity_vad_hangover_frames: int = 2
+    target_activity_noise_floor_rise_alpha: float = 0.01
+    target_activity_noise_floor_fall_alpha: float = 0.10
+    target_activity_noise_floor_margin_scale: float = 1.25
+    target_activity_rms_scale: float = 4.0
+    target_activity_score_exponent: float = 0.5
     fd_speech_cov_update_scale: float = 0.25
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True

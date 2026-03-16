@@ -610,8 +610,9 @@ class FastPathWorker(threading.Thread):
         self._last_target_doa_deg: float | None = None
         self._target_activity_vad = WebRTCVADGate(
             sample_rate_hz=int(config.sample_rate_hz),
+            mode=max(0, min(3, int(config.target_activity_vad_mode))),
             frame_ms=max(10, int(config.fast_frame_ms)),
-            hangover_frames=2,
+            hangover_frames=max(0, int(config.target_activity_vad_hangover_frames)),
         )
 
         mode = self._target_activity_mode()
@@ -642,10 +643,15 @@ class FastPathWorker(threading.Thread):
         rms = float(np.sqrt(np.mean(np.asarray(ref, dtype=np.float64) ** 2) + 1e-12))
         vad = self._target_activity_vad.process(np.asarray(ref, dtype=np.float32))
         noise_obs = rms if not bool(vad.raw_active) else min(rms, self._target_activity_noise_floor)
-        noise_alpha = 0.01 if noise_obs > (1.25 * self._target_activity_noise_floor) else 0.10
+        rise_alpha = float(np.clip(self._cfg.target_activity_noise_floor_rise_alpha, 0.0, 1.0))
+        fall_alpha = float(np.clip(self._cfg.target_activity_noise_floor_fall_alpha, 0.0, 1.0))
+        floor_margin = float(max(self._cfg.target_activity_noise_floor_margin_scale, 1.0))
+        noise_alpha = rise_alpha if noise_obs > (floor_margin * self._target_activity_noise_floor) else fall_alpha
         self._target_activity_noise_floor = ((1.0 - noise_alpha) * self._target_activity_noise_floor) + (noise_alpha * noise_obs)
-        rms_hint = np.clip((rms - self._target_activity_noise_floor) / max(4.0 * self._target_activity_noise_floor, 1e-5), 0.0, 1.0)
-        score = np.sqrt(np.clip(float(vad.speech_score), 0.0, 1.0) * np.clip(float(rms_hint), 0.0, 1.0))
+        rms_scale = float(max(self._cfg.target_activity_rms_scale, 1e-5))
+        rms_hint = np.clip((rms - self._target_activity_noise_floor) / max(rms_scale * self._target_activity_noise_floor, 1e-5), 0.0, 1.0)
+        score_power = float(np.clip(self._cfg.target_activity_score_exponent, 0.0, 1.0))
+        score = np.power(np.clip(float(vad.speech_score), 0.0, 1.0), score_power) * np.power(np.clip(float(rms_hint), 0.0, 1.0), 1.0 - score_power)
         return float(np.clip(score, 0.0, 1.0))
 
     def _update_target_activity_hysteresis(self, score: float) -> bool:

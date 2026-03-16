@@ -1,0 +1,82 @@
+{
+  "scenes": [
+    {
+      "scene_name": "testing_specific_angles_babble_bootstrap_k2_scene00",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene00.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene00",
+      "main_angle_deg": 0,
+      "secondary_angle_deg": 45,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "background_babble_count": 8,
+      "background_wham_gain": 0.16
+    },
+    {
+      "scene_name": "testing_specific_angles_babble_bootstrap_k2_scene01",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene01.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene01",
+      "main_angle_deg": 45,
+      "secondary_angle_deg": 90,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "background_babble_count": 8,
+      "background_wham_gain": 0.16
+    },
+    {
+      "scene_name": "testing_specific_angles_babble_bootstrap_k2_scene02",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene02.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene02",
+      "main_angle_deg": 90,
+      "secondary_angle_deg": 135,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "background_babble_count": 8,
+      "background_wham_gain": 0.16
+    },
+    {
+      "scene_name": "testing_specific_angles_babble_bootstrap_k2_scene03",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03",
+      "main_angle_deg": 135,
+      "secondary_angle_deg": 180,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "background_babble_count": 8,
+      "background_wham_gain": 0.16
+    },
+    {
+      "scene_name": "testing_specific_angles_babble_bootstrap_k2_scene04",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene04.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene04",
+      "main_angle_deg": 180,
+      "secondary_angle_deg": 225,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "background_babble_count": 8,
+      "background_wham_gain": 0.16
+    },
+    {
+      "scene_name": "testing_specific_angles_babble_bootstrap_k2_scene05",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene05.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene05",
+      "main_angle_deg": 270,
+      "secondary_angle_deg": 315,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "background_babble_count": 8,
+      "background_wham_gain": 0.16
+    }
+  ]
+}

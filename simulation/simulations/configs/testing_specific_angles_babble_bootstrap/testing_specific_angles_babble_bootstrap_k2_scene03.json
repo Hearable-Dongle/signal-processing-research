@@ -1,0 +1,136 @@
+{
+    "room": {
+        "dimensions": [
+            8.0,
+            6.4,
+            3.1
+        ],
+        "absorption": 0.5
+    },
+    "microphone_array": {
+        "mic_center": [
+            4.0,
+            3.2,
+            1.45
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4,
+        "mic_positions": null
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    2.7329,
+                    4.4671,
+                    1.45
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/target_0_seg000.wav",
+                "gain": 1.0,
+                "classification": "speech"
+            },
+            {
+                "loc": [
+                    2.208,
+                    3.2,
+                    1.45
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/target_1_seg000.wav",
+                "gain": 1.0,
+                "classification": "speech"
+            },
+            {
+                "loc": [
+                    5.5839,
+                    4.7839,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_chatter_00.wav",
+                "gain": 0.06231831630526267,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    4.0,
+                    5.44,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_chatter_01.wav",
+                "gain": 0.09463034561447281,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    2.4161,
+                    4.7839,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_chatter_02.wav",
+                "gain": 0.08880566565559485,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    1.76,
+                    3.2,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_chatter_03.wav",
+                "gain": 0.09707907601235667,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    2.4161,
+                    1.6161,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_chatter_04.wav",
+                "gain": 0.08085792903181971,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    4.0,
+                    0.96,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_chatter_05.wav",
+                "gain": 0.08146068310676483,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    5.5839,
+                    1.6161,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_chatter_06.wav",
+                "gain": 0.07140170496844193,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    6.24,
+                    3.2,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_chatter_07.wav",
+                "gain": 0.09478524778518366,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    5.7106,
+                    1.4894,
+                    1.2
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_babble_bootstrap/testing_specific_angles_babble_bootstrap_k2_scene03/render_assets/background_wham_0.wav",
+                "gain": 0.16,
+                "classification": "noise"
+            }
+        ],
+        "duration": 12.0,
+        "fs": 16000
+    }
+}

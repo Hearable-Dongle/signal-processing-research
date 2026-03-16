@@ -28,6 +28,8 @@ class FastPathConfig(BaseModel):
     ] = "srp_phat_localization"
     beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
     fd_analysis_window_ms: float = 20.0
+    fd_cov_ema_alpha: float = 0.08
+    fd_diag_load: float = 1e-3
     target_activity_rnn_update_mode: Literal["oracle_target_activity", "estimated_target_activity"] | None = None
     target_activity_low_threshold: float = 0.25
     target_activity_high_threshold: float = 0.45
@@ -35,6 +37,13 @@ class FastPathConfig(BaseModel):
     target_activity_exit_frames: int = 4
     fd_cov_update_scale_target_active: float = 0.0
     fd_cov_update_scale_target_inactive: float = 1.0
+    target_activity_vad_mode: int = 2
+    target_activity_vad_hangover_frames: int = 2
+    target_activity_noise_floor_rise_alpha: float = 0.01
+    target_activity_noise_floor_fall_alpha: float = 0.10
+    target_activity_noise_floor_margin_scale: float = 1.25
+    target_activity_rms_scale: float = 4.0
+    target_activity_score_exponent: float = 0.5
     assume_single_speaker: bool = False
     capon_spectrum_ema_alpha: float = 0.78
     capon_peak_min_sharpness: float = 0.12
@@ -146,6 +155,14 @@ class SessionStartRequest(BaseModel):
         return float(self.fast_path.fd_analysis_window_ms)
 
     @property
+    def fd_cov_ema_alpha(self) -> float:
+        return float(self.fast_path.fd_cov_ema_alpha)
+
+    @property
+    def fd_diag_load(self) -> float:
+        return float(self.fast_path.fd_diag_load)
+
+    @property
     def target_activity_rnn_update_mode(self) -> str | None:
         value = self.fast_path.target_activity_rnn_update_mode
         return None if value is None else str(value)
@@ -173,6 +190,34 @@ class SessionStartRequest(BaseModel):
     @property
     def fd_cov_update_scale_target_inactive(self) -> float:
         return float(self.fast_path.fd_cov_update_scale_target_inactive)
+
+    @property
+    def target_activity_vad_mode(self) -> int:
+        return int(self.fast_path.target_activity_vad_mode)
+
+    @property
+    def target_activity_vad_hangover_frames(self) -> int:
+        return int(self.fast_path.target_activity_vad_hangover_frames)
+
+    @property
+    def target_activity_noise_floor_rise_alpha(self) -> float:
+        return float(self.fast_path.target_activity_noise_floor_rise_alpha)
+
+    @property
+    def target_activity_noise_floor_fall_alpha(self) -> float:
+        return float(self.fast_path.target_activity_noise_floor_fall_alpha)
+
+    @property
+    def target_activity_noise_floor_margin_scale(self) -> float:
+        return float(self.fast_path.target_activity_noise_floor_margin_scale)
+
+    @property
+    def target_activity_rms_scale(self) -> float:
+        return float(self.fast_path.target_activity_rms_scale)
+
+    @property
+    def target_activity_score_exponent(self) -> float:
+        return float(self.fast_path.target_activity_score_exponent)
 
     @property
     def assume_single_speaker(self) -> bool:
