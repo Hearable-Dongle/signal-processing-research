@@ -16,6 +16,7 @@ import numpy as np
 from realtime_pipeline.catchup_metrics import compute_catchup_metrics
 from realtime_pipeline.contracts import PipelineConfig, SRPPeakSnapshot
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
+from realtime_pipeline.session_runtime import build_pipeline_config_from_request, public_speaker_rows
 from realtime_pipeline.separation_backends import (
     DominantSpeakerPassthroughBackend,
     MockSeparationBackend,
@@ -26,10 +27,6 @@ from simulation.simulation_config import SimulationConfig, SimulationSource
 from simulation.simulator import run_simulation
 from simulation.target_policy import iter_target_source_indices
 
-from .mode_presets import (
-    METHOD_LOCALIZATION_ONLY,
-    get_simulation_algorithm_preset,
-)
 from .models import (
     MetricsMessage,
     SCHEMA_VERSION,
@@ -517,7 +514,6 @@ class DemoSession:
                 gain=self.req.background_noise_gain,
             )
             mic_audio, mic_pos, source_signals = run_simulation(sim_cfg)
-            algorithm = get_simulation_algorithm_preset(self.req.algorithm_mode)
             speech_source_ids = _speech_source_indices(sim_cfg)
             doa_by_source_idx = {int(item["source_id"]): float(item["direction_degrees"]) for item in _ground_truth_from_scene(sim_cfg)}
             with self._lock:
@@ -537,30 +533,10 @@ class DemoSession:
                         break
                 self._ground_truth_focus_direction_deg = focus_direction
 
-            cfg = PipelineConfig(
+            cfg = build_pipeline_config_from_request(
+                self.req,
                 sample_rate_hz=int(sim_cfg.audio.fs),
-                fast_frame_ms=max(10, int(self.req.localization_hop_ms)),
-                slow_chunk_ms=int(self.req.slow_chunk_ms),
                 max_speakers_hint=max(int(self.req.max_speakers_hint), len(list(iter_target_source_indices(sim_cfg))), 1),
-                convtasnet_model_name=str(self.req.convtasnet_model_name),
-                convtasnet_model_sample_rate_hz=int(self.req.convtasnet_model_sample_rate_hz),
-                convtasnet_input_sample_rate_hz=int(self.req.convtasnet_input_sample_rate_hz),
-                convtasnet_resample_mode=str(self.req.convtasnet_resample_mode),
-                convtasnet_expected_num_sources=(
-                    None if self.req.convtasnet_expected_num_sources is None else int(self.req.convtasnet_expected_num_sources)
-                ),
-                identity_backend=str(self.req.identity_backend),
-                identity_speaker_embedding_model=str(self.req.identity_speaker_embedding_model),
-                beamforming_mode=str(self.req.beamforming_mode),
-                localization_backend=str(self.req.localization_backend),
-                tracking_mode=str(self.req.tracking_mode),
-                control_mode=str(algorithm.control_mode),
-                fast_path_reference_mode=str(algorithm.fast_path_reference_mode),
-                localization_window_ms=max(int(self.req.localization_window_ms), max(10, int(self.req.localization_hop_ms))),
-                direction_long_memory_enabled=bool(algorithm.direction_long_memory_enabled),
-                direction_long_memory_window_ms=float(algorithm.direction_long_memory_window_ms),
-                output_normalization_enabled=bool(self.req.output_normalization_enabled),
-                output_allow_amplification=bool(self.req.output_allow_amplification),
             )
             frame_samples = max(1, int(cfg.sample_rate_hz * cfg.fast_frame_ms / 1000))
             hop_ms = cfg.slow_chunk_ms if cfg.slow_chunk_hop_ms is None else int(cfg.slow_chunk_hop_ms)
@@ -587,7 +563,7 @@ class DemoSession:
                     if sleep_s > 0:
                         time.sleep(sleep_s)
 
-            use_gt_speaker_sources = bool(self.req.input_source == "simulation" and self.req.use_ground_truth_speaker_sources and algorithm.supports_ground_truth_speaker_sources)
+            use_gt_speaker_sources = bool(self.req.input_source == "simulation" and self.req.use_ground_truth_speaker_sources)
             use_gt_location = bool(self.req.input_source == "simulation" and self.req.use_ground_truth_location)
             separation_mode = str(self.req.separation_mode)
             if use_gt_speaker_sources:
@@ -596,7 +572,7 @@ class DemoSession:
                     chunk_samples=chunk_samples,
                     hop_samples=hop_samples,
                 )
-            elif algorithm.use_single_dominant_no_separator:
+            elif separation_mode == "single_dominant_no_separator":
                 sep = DominantSpeakerPassthroughBackend()
             elif separation_mode == "mock":
                 sep = MockSeparationBackend(n_streams=cfg.max_speakers_hint)

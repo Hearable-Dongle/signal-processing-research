@@ -330,7 +330,10 @@ class LiveDemoSession:
         pipe = self._pipeline
         if pipe is None:
             return
-        rows = public_speaker_rows(pipe.shared_state.get_speaker_map_snapshot(), algorithm_mode=str(self.req.algorithm_mode))
+        rows = public_speaker_rows(
+            pipe.shared_state.get_speaker_map_snapshot(),
+            single_active=bool(self.req.single_active),
+        )
         speakers = [
             SpeakerStateItem(
                 speaker_id=int(row["speaker_id"]),

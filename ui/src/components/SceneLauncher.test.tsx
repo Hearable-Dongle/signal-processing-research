@@ -3,11 +3,10 @@ import userEvent from "@testing-library/user-event";
 
 import { SceneLauncher } from "./SceneLauncher";
 
-test("mode picker gates launcher settings and latency controls invoke callback", async () => {
+test("mode picker reveals explicit fast and slow path controls", async () => {
   const user = userEvent.setup();
   const onLatency = vi.fn();
   const onKill = vi.fn();
-  const onStart = vi.fn();
 
   render(
     <SceneLauncher
@@ -15,8 +14,7 @@ test("mode picker gates launcher settings and latency controls invoke callback",
       defaultScenePath="x.json"
       defaultBackgroundNoisePath="noise.wav"
       defaultBackgroundNoiseGain={0.15}
-      defaultAlgorithmMode="localization_only"
-      onStart={onStart}
+      onStart={() => undefined}
       onStop={() => undefined}
       onKillRun={onKill}
       canKillRun={true}
@@ -30,43 +28,30 @@ test("mode picker gates launcher settings and latency controls invoke callback",
     />
   );
 
-  expect(screen.queryByLabelText("Scene config path")).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("Audio device query")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Kill Current Run" })).toBeInTheDocument();
-
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
 
-  const slider = screen.getByLabelText("Playback latency (ms)");
-  expect(screen.getByLabelText("Algorithm mode")).toHaveValue("localization_only");
-  expect(screen.getByRole("switch", { name: "Single active speaker" })).toHaveAttribute("aria-checked", "false");
+  expect(screen.getByLabelText("Localization backend")).toHaveValue("capon_1src");
+  expect(screen.getByLabelText("Beamforming mode")).toHaveValue("mvdr_fd");
+  expect(screen.getByLabelText("Enhancement tier")).toHaveValue("custom");
+  expect(screen.getByLabelText("Output enhancer mode")).toHaveValue("off");
+  expect(screen.getByRole("switch", { name: "Postfilter enabled" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("switch", { name: "Single-speaker assumption" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("switch", { name: "Localization VAD" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("switch", { name: "Enable slow path" })).toHaveAttribute("aria-checked", "false");
+  expect(screen.getByRole("switch", { name: "Single active speaker" })).toHaveAttribute("aria-checked", "true");
   expect(screen.getByLabelText("Localization hop (ms)")).toHaveValue(95);
   expect(screen.getByLabelText("Localization window (ms)")).toHaveValue(300);
-  expect(screen.getByLabelText("Localization overlap")).toHaveValue(0.2);
-  expect(screen.getByLabelText("Localization freq low (Hz)")).toHaveValue(1200);
-  expect(screen.getByLabelText("Localization freq high (Hz)")).toHaveValue(5400);
-  expect(screen.getByLabelText("Speaker centroid history (M)")).toHaveValue(8);
-  expect(screen.getByLabelText("Speaker activation observations (N)")).toHaveValue(3);
   expect(screen.getByLabelText("Speaker match window (deg)")).toHaveValue(30);
-  await user.clear(screen.getByLabelText("Playback latency number"));
-  await user.type(screen.getByLabelText("Playback latency number"), "240");
-  await user.click(slider);
+  expect(screen.getByLabelText("Session overrides JSON")).toHaveValue("{}");
 
+  fireEvent.change(screen.getByLabelText("Playback latency target (ms)"), { target: { value: "240" } });
   expect(onLatency).toHaveBeenCalled();
 
   await user.click(screen.getByRole("button", { name: "Kill Current Run" }));
   expect(onKill).toHaveBeenCalledTimes(1);
-
-  await user.click(screen.getByRole("switch", { name: "Single active speaker" }));
-  expect(screen.getByLabelText("Algorithm mode")).toHaveValue("speaker_tracking");
-  fireEvent.change(screen.getByLabelText("Localization hop (ms)"), { target: { value: "50" } });
-  fireEvent.change(screen.getByLabelText("Localization window (ms)"), { target: { value: "200" } });
-  expect(screen.getByLabelText("Algorithm mode")).toHaveValue("speaker_tracking");
-  expect(screen.getByRole("switch", { name: "Single active speaker" })).toHaveAttribute("aria-checked", "true");
-  expect(screen.getByLabelText("Localization hop (ms)")).toHaveValue(50);
-  expect(screen.getByLabelText("Localization window (ms)")).toHaveValue(200);
 });
 
-test("simulation shows ground-truth toggles and disables oracle speaker sources when irrelevant", async () => {
+test("simulation start emits nested fast_path and slow_path config", async () => {
   const user = userEvent.setup();
   const onStart = vi.fn();
 
@@ -76,7 +61,6 @@ test("simulation shows ground-truth toggles and disables oracle speaker sources 
       defaultScenePath="x.json"
       defaultBackgroundNoisePath="noise.wav"
       defaultBackgroundNoiseGain={0.15}
-      defaultAlgorithmMode="localization_only"
       onStart={onStart}
       onStop={() => undefined}
       onKillRun={() => undefined}
@@ -92,39 +76,46 @@ test("simulation shows ground-truth toggles and disables oracle speaker sources 
   );
 
   await user.click(screen.getByRole("button", { name: "Simulation Scene file plus optional background noise." }));
-  expect(screen.getByLabelText("Use ground truth location")).toBeInTheDocument();
-  expect(screen.getByLabelText("Use ground truth speaker sources")).toBeInTheDocument();
-  expect(screen.getByLabelText("Use ground truth speaker sources")).toBeDisabled();
-  expect(screen.getByText(/does not use separate speaker-source streams/i)).toBeInTheDocument();
-  expect(screen.getByText(/turning this on switches the algorithm to speaker tracking/i)).toBeInTheDocument();
-
-  await user.selectOptions(screen.getByLabelText("Algorithm mode"), "speaker_tracking");
+  await user.selectOptions(screen.getByLabelText("Localization backend"), "capon_mvdr_refine_1src");
+  await user.selectOptions(screen.getByLabelText("Beamforming mode"), "delay_sum");
+  await user.selectOptions(screen.getByLabelText("Enhancement tier"), "baseline_pi");
+  await user.selectOptions(screen.getByLabelText("Output enhancer mode"), "wiener");
+  await user.click(screen.getByRole("switch", { name: "Postfilter enabled" }));
+  await user.click(screen.getByRole("switch", { name: "Enable slow path" }));
+  await user.click(screen.getByRole("switch", { name: "Long memory" }));
   fireEvent.change(screen.getByLabelText("Localization hop (ms)"), { target: { value: "50" } });
   fireEvent.change(screen.getByLabelText("Localization window (ms)"), { target: { value: "200" } });
-  expect(screen.getByLabelText("Use ground truth speaker sources")).not.toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Session overrides JSON"), { target: { value: "{\"max_speakers_hint\":2}" } });
   await user.click(screen.getByLabelText("Use ground truth location"));
   await user.click(screen.getByLabelText("Use ground truth speaker sources"));
 
   await user.click(screen.getByRole("button", { name: "Start" }));
   expect(onStart).toHaveBeenCalledWith(
     expect.objectContaining({
-      algorithmMode: "speaker_tracking",
-      localizationHopMs: 50,
-      localizationWindowMs: 200,
-      localizationOverlap: 0.2,
-      localizationFreqLowHz: 1200,
-      localizationFreqHighHz: 5400,
-      speakerHistorySize: 8,
-      speakerActivationMinPredictions: 3,
-      speakerMatchWindowDeg: 30,
       useGroundTruthLocation: true,
       useGroundTruthSpeakerSources: true,
+      sessionOverrides: { max_speakers_hint: 2 },
+      fastPath: expect.objectContaining({
+        localizationBackend: "capon_mvdr_refine_1src",
+        beamformingMode: "delay_sum",
+        enhancementTier: "baseline_pi",
+        outputEnhancerMode: "wiener",
+        postfilterEnabled: false,
+        localizationHopMs: 50,
+        localizationWindowMs: 200,
+      }),
+      slowPath: expect.objectContaining({
+        enabled: true,
+        longMemoryEnabled: true,
+        trackingMode: "doa_centroid_v1",
+      }),
     })
   );
 });
 
-test("live mode reveals only ReSpeaker-specific settings", async () => {
+test("live mode reveals ReSpeaker-specific settings and accepts backend JSON overrides", async () => {
   const user = userEvent.setup();
+  const onStart = vi.fn();
 
   render(
     <SceneLauncher
@@ -132,8 +123,7 @@ test("live mode reveals only ReSpeaker-specific settings", async () => {
       defaultScenePath="x.json"
       defaultBackgroundNoisePath="noise.wav"
       defaultBackgroundNoiseGain={0.15}
-      defaultAlgorithmMode="localization_only"
-      onStart={() => undefined}
+      onStart={onStart}
       onStop={() => undefined}
       onKillRun={() => undefined}
       canKillRun={true}
@@ -151,13 +141,16 @@ test("live mode reveals only ReSpeaker-specific settings", async () => {
 
   expect(screen.getByLabelText("Audio device query")).toBeInTheDocument();
   expect(screen.getByLabelText("Mic array profile")).toBeInTheDocument();
-  expect(screen.queryByLabelText("Channel map (optional)")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Sample rate (Hz)")).toBeInTheDocument();
-  expect(screen.getByLabelText("Algorithm mode")).toBeInTheDocument();
-  expect(screen.getByLabelText("Algorithm mode")).toHaveValue("localization_only");
-  expect(screen.getByRole("switch", { name: "Single active speaker" })).toHaveAttribute("aria-checked", "false");
-  expect(screen.queryByLabelText("Scene config path")).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("Background noise audio path")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Use ground truth location")).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("Use ground truth speaker sources")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Fast path overrides JSON"), {
+    target: { value: "{\"suppressed_user_voice_doa_deg\":225}" },
+  });
+
+  await user.click(screen.getByRole("button", { name: "Start" }));
+  expect(onStart).toHaveBeenCalledWith(
+    expect.objectContaining({
+      fastPathOverrides: { suppressed_user_voice_doa_deg: 225 },
+    })
+  );
 });

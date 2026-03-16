@@ -15,28 +15,28 @@ from mic_array_forwarder.models import (
 
 def test_models_roundtrip_and_schema_version() -> None:
     req = SessionStartRequest(scene_config_path="x.json")
-    assert req.algorithm_mode == "single_dominant_no_separator"
     assert req.background_noise_audio_path is None
     assert req.background_noise_gain == 0.15
     assert req.use_ground_truth_location is False
     assert req.use_ground_truth_speaker_sources is False
-    assert req.localization_hop_ms == 10
-    assert req.localization_window_ms == 160
+    assert req.fast_path.localization_hop_ms == 10
+    assert req.fast_path.localization_window_ms == 160
     assert req.focus_ratio == 2.0
     assert req.separation_mode == "auto"
-    assert req.localization_backend == "srp_phat_localization"
-    assert req.localization_vad_enabled is True
-    assert req.tracking_mode == "doa_centroid_v1"
+    assert req.fast_path.localization_backend == "srp_phat_localization"
+    assert req.fast_path.localization_vad_enabled is True
+    assert req.slow_path.tracking_mode == "doa_centroid_v1"
+    assert req.slow_path.enabled is False
     assert req.processing_mode == "specific_speaker_enhancement"
     assert req.monitor_source == "processed"
     assert req.sample_rate_hz == 48000
-    req2 = SessionStartRequest(localization_backend="music_1src")
+    req2 = SessionStartRequest(fast_path={"localization_backend": "music_1src"})
     assert req2.localization_backend == "music_1src"
-    req3 = SessionStartRequest(localization_backend="capon_1src")
+    req3 = SessionStartRequest(fast_path={"localization_backend": "capon_1src"})
     assert req3.localization_backend == "capon_1src"
-    req4 = SessionStartRequest(localization_backend="capon_multisrc")
+    req4 = SessionStartRequest(fast_path={"localization_backend": "capon_multisrc"})
     assert req4.localization_backend == "capon_multisrc"
-    req5 = SessionStartRequest(localization_backend="capon_mvdr_refine_1src")
+    req5 = SessionStartRequest(fast_path={"localization_backend": "capon_mvdr_refine_1src"})
     assert req5.localization_backend == "capon_mvdr_refine_1src"
 
     state = SpeakerStateMessage(
@@ -94,4 +94,4 @@ def test_raw_channels_response_schema() -> None:
 
 def test_tracking_mode_rejects_deprecated_values() -> None:
     with pytest.raises(ValidationError, match="deprecated"):
-        SessionStartRequest(tracking_mode="multi_peak_v2")
+        SessionStartRequest(slow_path={"tracking_mode": "multi_peak_v2"})

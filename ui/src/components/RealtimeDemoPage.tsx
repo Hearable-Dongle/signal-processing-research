@@ -11,7 +11,6 @@ import { WaveformTimeline } from "./WaveformTimeline";
 import { backendArrivalToUiSourceBearingDeg } from "../utils/direction";
 import {
   SCHEMA_VERSION,
-  type AlgorithmMode,
   type GroundTruthSpeaker,
   type MetricsMessage,
   type MonitorSource,
@@ -105,7 +104,6 @@ type Props = {
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
   defaultBackgroundNoiseGain: number;
-  defaultAlgorithmMode: AlgorithmMode;
 };
 
 const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
@@ -124,7 +122,6 @@ export function RealtimeDemoPage({
   defaultScenePath,
   defaultBackgroundNoisePath,
   defaultBackgroundNoiseGain,
-  defaultAlgorithmMode,
 }: Props) {
   const [status, setStatus] = useState("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -141,7 +138,6 @@ export function RealtimeDemoPage({
   const [metricsExpanded, setMetricsExpanded] = useState(true);
   const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
   const [isOutputPlaybackPaused, setIsOutputPlaybackPaused] = useState(false);
-  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>(defaultAlgorithmMode);
   const [monitorSource, setMonitorSource] = useState<MonitorSource>("processed");
   const [activePlaybackSource, setActivePlaybackSource] = useState<PlaybackSource | null>(null);
   const [activeInputSource, setActiveInputSource] = useState<SessionLaunchConfig["inputSource"]>("simulation");
@@ -256,15 +252,6 @@ export function RealtimeDemoPage({
   async function startSession(config: SessionLaunchConfig): Promise<void> {
     const {
       inputSource,
-      algorithmMode: nextAlgorithmMode,
-      localizationHopMs,
-      localizationWindowMs,
-      localizationOverlap,
-      localizationFreqLowHz,
-      localizationFreqHighHz,
-      speakerHistorySize,
-      speakerActivationMinPredictions,
-      speakerMatchWindowDeg,
       scenePath,
       backgroundNoisePath,
       backgroundNoiseGain,
@@ -274,12 +261,16 @@ export function RealtimeDemoPage({
       monitorSource: nextMonitorSource,
       sampleRateHz,
       micArrayProfile,
+      fastPath,
+      slowPath,
+      sessionOverrides,
+      fastPathOverrides,
+      slowPathOverrides,
     } = config;
     const playbackSampleRateHz = inputSource === "respeaker_live" ? sampleRateHz : DEFAULT_SAMPLE_RATE;
     setStatus("starting");
     setActiveInputSource(inputSource);
     setActiveMicArrayProfile(micArrayProfile);
-    setAlgorithmMode(nextAlgorithmMode);
     setMonitorSource(nextMonitorSource);
     setAudioSampleRateHz(playbackSampleRateHz);
     capturedAudioRef.current = [];
@@ -289,32 +280,55 @@ export function RealtimeDemoPage({
     setRawWaveformBins([]);
     setPlayheadMs(0);
     let resp: Response;
+    const requestBody = {
+      input_source: inputSource,
+      scene_config_path: scenePath,
+      processing_mode: "specific_speaker_enhancement",
+      monitor_source: nextMonitorSource,
+      sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
+      mic_array_profile: inputSource === "respeaker_live" ? micArrayProfile : undefined,
+      background_noise_audio_path: backgroundNoisePath,
+      background_noise_gain: backgroundNoiseGain,
+      use_ground_truth_location: inputSource === "simulation" ? useGroundTruthLocation : undefined,
+      use_ground_truth_speaker_sources: inputSource === "simulation" ? useGroundTruthSpeakerSources : undefined,
+      audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
+      fast_path: {
+        localization_backend: fastPath.localizationBackend,
+        localization_hop_ms: fastPath.localizationHopMs,
+        localization_window_ms: fastPath.localizationWindowMs,
+        overlap: fastPath.localizationOverlap,
+        freq_low_hz: fastPath.localizationFreqLowHz,
+        freq_high_hz: fastPath.localizationFreqHighHz,
+        localization_vad_enabled: fastPath.localizationVadEnabled,
+        assume_single_speaker: fastPath.assumeSingleSpeaker,
+        beamforming_mode: fastPath.beamformingMode,
+        own_voice_suppression_mode: fastPath.ownVoiceSuppressionMode,
+        enhancement_tier: fastPath.enhancementTier,
+        output_enhancer_mode: fastPath.outputEnhancerMode,
+        postfilter_enabled: fastPath.postfilterEnabled,
+        ...fastPathOverrides,
+      },
+      slow_path: {
+        enabled: slowPath.enabled,
+        tracking_mode: slowPath.trackingMode,
+        single_active: slowPath.singleActive,
+        speaker_history_size: slowPath.speakerHistorySize,
+        speaker_activation_min_predictions: slowPath.speakerActivationMinPredictions,
+        speaker_match_window_deg: slowPath.speakerMatchWindowDeg,
+        centroid_association_mode: slowPath.centroidAssociationMode,
+        centroid_association_sigma_deg: slowPath.centroidAssociationSigmaDeg,
+        centroid_association_min_score: slowPath.centroidAssociationMinScore,
+        long_memory_enabled: slowPath.longMemoryEnabled,
+        long_memory_window_ms: slowPath.longMemoryWindowMs,
+        ...slowPathOverrides,
+      },
+      ...sessionOverrides,
+    };
     try {
       resp = await fetch(apiUrl("/api/session/start"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          algorithm_mode: nextAlgorithmMode,
-          localization_hop_ms: localizationHopMs,
-          localization_window_ms: localizationWindowMs,
-          overlap: localizationOverlap,
-          freq_low_hz: localizationFreqLowHz,
-          freq_high_hz: localizationFreqHighHz,
-          speaker_history_size: speakerHistorySize,
-          speaker_activation_min_predictions: speakerActivationMinPredictions,
-          speaker_match_window_deg: speakerMatchWindowDeg,
-          input_source: inputSource,
-          scene_config_path: scenePath,
-          processing_mode: "specific_speaker_enhancement",
-          monitor_source: nextMonitorSource,
-          sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
-          mic_array_profile: inputSource === "respeaker_live" ? micArrayProfile : undefined,
-          background_noise_audio_path: backgroundNoisePath,
-          background_noise_gain: backgroundNoiseGain,
-          use_ground_truth_location: inputSource === "simulation" ? useGroundTruthLocation : undefined,
-          use_ground_truth_speaker_sources: inputSource === "simulation" ? useGroundTruthSpeakerSources : undefined,
-          audio_device_query: inputSource === "respeaker_live" ? audioDeviceQuery : undefined,
-        }),
+        body: JSON.stringify(requestBody),
       });
     } catch {
       setStatus("error (network)");
@@ -505,7 +519,6 @@ export function RealtimeDemoPage({
           defaultScenePath={defaultScenePath}
           defaultBackgroundNoisePath={defaultBackgroundNoisePath}
           defaultBackgroundNoiseGain={defaultBackgroundNoiseGain}
-          defaultAlgorithmMode={defaultAlgorithmMode}
           onStart={startSession}
           onStop={stopSession}
           onKillRun={killCurrentRun}

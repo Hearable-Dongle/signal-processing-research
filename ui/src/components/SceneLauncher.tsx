@@ -1,21 +1,26 @@
 import { useState } from "react";
 
-import type { AlgorithmMode, MonitorSource } from "../types/contracts";
+import type { MonitorSource } from "../types/contracts";
 
 export type InputSource = "simulation" | "respeaker_live";
 export type MicArrayProfile = "respeaker_v3_0457" | "respeaker_xvf3800_0650";
+export type LocalizationBackend =
+  | "srp_phat_legacy"
+  | "srp_phat_localization"
+  | "srp_phat_mvdr_refine"
+  | "capon_1src"
+  | "capon_multisrc"
+  | "capon_mvdr_refine_1src"
+  | "music_1src";
+export type BeamformingMode = "mvdr_fd" | "sd_mvdr_fd" | "gsc_fd" | "delay_sum";
+export type OwnVoiceSuppressionMode = "off" | "lcmv_null_hysteresis" | "soft_output_gate";
+export type TrackingMode = "doa_centroid_v1";
+export type CentroidAssociationMode = "hard_window" | "gaussian";
+export type EnhancementTier = "custom" | "baseline_pi" | "classical_plus" | "quality_cpu" | "quality_heavy";
+export type OutputEnhancerMode = "off" | "wiener";
 
 export type SessionLaunchConfig = {
   inputSource: InputSource;
-  algorithmMode: AlgorithmMode;
-  localizationHopMs: number;
-  localizationWindowMs: number;
-  localizationOverlap: number;
-  localizationFreqLowHz: number;
-  localizationFreqHighHz: number;
-  speakerHistorySize: number;
-  speakerActivationMinPredictions: number;
-  speakerMatchWindowDeg: number;
   scenePath: string;
   backgroundNoisePath: string;
   backgroundNoiseGain: number;
@@ -25,6 +30,37 @@ export type SessionLaunchConfig = {
   monitorSource: MonitorSource;
   sampleRateHz: number;
   micArrayProfile: MicArrayProfile;
+  fastPath: {
+    localizationBackend: LocalizationBackend;
+    localizationHopMs: number;
+    localizationWindowMs: number;
+    localizationOverlap: number;
+    localizationFreqLowHz: number;
+    localizationFreqHighHz: number;
+    localizationVadEnabled: boolean;
+    assumeSingleSpeaker: boolean;
+    beamformingMode: BeamformingMode;
+    ownVoiceSuppressionMode: OwnVoiceSuppressionMode;
+    enhancementTier: EnhancementTier;
+    outputEnhancerMode: OutputEnhancerMode;
+    postfilterEnabled: boolean;
+  };
+  slowPath: {
+    enabled: boolean;
+    trackingMode: TrackingMode;
+    singleActive: boolean;
+    speakerHistorySize: number;
+    speakerActivationMinPredictions: number;
+    speakerMatchWindowDeg: number;
+    centroidAssociationMode: CentroidAssociationMode;
+    centroidAssociationSigmaDeg: number;
+    centroidAssociationMinScore: number;
+    longMemoryEnabled: boolean;
+    longMemoryWindowMs: number;
+  };
+  sessionOverrides: Record<string, unknown>;
+  fastPathOverrides: Record<string, unknown>;
+  slowPathOverrides: Record<string, unknown>;
 };
 
 type Props = {
@@ -32,7 +68,6 @@ type Props = {
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
   defaultBackgroundNoiseGain: number;
-  defaultAlgorithmMode: AlgorithmMode;
   onStart: (config: SessionLaunchConfig) => void;
   onStop: () => void;
   onKillRun: () => void;
@@ -46,27 +81,47 @@ type Props = {
   onMonitorSourceChange: (source: MonitorSource) => void;
 };
 
-const ALGORITHM_OPTIONS: Array<{ value: AlgorithmMode; label: string }> = [
-  { value: "localization_only", label: "Localization only" },
-  { value: "spatial_baseline", label: "Spatial baseline" },
-  { value: "speaker_tracking", label: "Speaker tracking" },
-  { value: "speaker_tracking_long_memory", label: "Speaker tracking + long memory" },
-  { value: "single_dominant_no_separator", label: "Single dominant no-separator" },
+const LOCALIZATION_BACKENDS: Array<{ value: LocalizationBackend; label: string }> = [
+  { value: "srp_phat_legacy", label: "SRP-PHAT legacy" },
+  { value: "capon_1src", label: "Capon 1src" },
+  { value: "capon_mvdr_refine_1src", label: "Capon MVDR refine 1src" },
+  { value: "capon_multisrc", label: "Capon multisrc" },
+  { value: "srp_phat_localization", label: "SRP-PHAT" },
+  { value: "srp_phat_mvdr_refine", label: "SRP MVDR refine" },
+  { value: "music_1src", label: "MUSIC 1src" },
 ];
 
-function displayAlgorithmMode(mode: AlgorithmMode): Exclude<AlgorithmMode, "speaker_tracking_single_active"> {
-  if (mode === "speaker_tracking_single_active") {
-    return "speaker_tracking";
-  }
-  return mode;
-}
+const BEAMFORMING_MODES: Array<{ value: BeamformingMode; label: string }> = [
+  { value: "delay_sum", label: "Delay-and-sum" },
+  { value: "mvdr_fd", label: "MVDR FD" },
+  { value: "sd_mvdr_fd", label: "Superdirective MVDR FD" },
+  { value: "gsc_fd", label: "GSC FD" },
+];
+
+const OWN_VOICE_SUPPRESSION_MODES: Array<{ value: OwnVoiceSuppressionMode; label: string }> = [
+  { value: "lcmv_null_hysteresis", label: "LCMV null + hysteresis" },
+  { value: "soft_output_gate", label: "Soft output gate" },
+  { value: "off", label: "Off" },
+];
+
+const ENHANCEMENT_TIERS: Array<{ value: EnhancementTier; label: string }> = [
+  { value: "custom", label: "Custom" },
+  { value: "baseline_pi", label: "Baseline Pi" },
+  { value: "classical_plus", label: "Classical plus" },
+  { value: "quality_cpu", label: "Quality CPU" },
+  { value: "quality_heavy", label: "Quality heavy" },
+];
+
+const OUTPUT_ENHANCER_MODES: Array<{ value: OutputEnhancerMode; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "wiener", label: "Wiener" },
+];
 
 export function SceneLauncher({
   status,
   defaultScenePath,
   defaultBackgroundNoisePath,
   defaultBackgroundNoiseGain,
-  defaultAlgorithmMode,
   onStart,
   onStop,
   onKillRun,
@@ -80,15 +135,29 @@ export function SceneLauncher({
   onMonitorSourceChange,
 }: Props) {
   const [inputSource, setInputSource] = useState<InputSource | null>(null);
-  const [algorithmMode, setAlgorithmMode] = useState<AlgorithmMode>(defaultAlgorithmMode);
+  const [localizationBackend, setLocalizationBackend] = useState<LocalizationBackend>("capon_1src");
   const [localizationHopMs, setLocalizationHopMs] = useState(95);
   const [localizationWindowMs, setLocalizationWindowMs] = useState(300);
   const [localizationOverlap, setLocalizationOverlap] = useState(0.2);
   const [localizationFreqLowHz, setLocalizationFreqLowHz] = useState(1200);
   const [localizationFreqHighHz, setLocalizationFreqHighHz] = useState(5400);
+  const [localizationVadEnabled, setLocalizationVadEnabled] = useState(true);
+  const [assumeSingleSpeaker, setAssumeSingleSpeaker] = useState(true);
+  const [beamformingMode, setBeamformingMode] = useState<BeamformingMode>("mvdr_fd");
+  const [ownVoiceSuppressionMode, setOwnVoiceSuppressionMode] = useState<OwnVoiceSuppressionMode>("lcmv_null_hysteresis");
+  const [enhancementTier, setEnhancementTier] = useState<EnhancementTier>("custom");
+  const [outputEnhancerMode, setOutputEnhancerMode] = useState<OutputEnhancerMode>("off");
+  const [postfilterEnabled, setPostfilterEnabled] = useState(true);
+  const [slowPathEnabled, setSlowPathEnabled] = useState(false);
+  const [singleActive, setSingleActive] = useState(true);
   const [speakerHistorySize, setSpeakerHistorySize] = useState(8);
   const [speakerActivationMinPredictions, setSpeakerActivationMinPredictions] = useState(3);
   const [speakerMatchWindowDeg, setSpeakerMatchWindowDeg] = useState(30);
+  const [centroidAssociationMode, setCentroidAssociationMode] = useState<CentroidAssociationMode>("hard_window");
+  const [centroidAssociationSigmaDeg, setCentroidAssociationSigmaDeg] = useState(10);
+  const [centroidAssociationMinScore, setCentroidAssociationMinScore] = useState(0.15);
+  const [longMemoryEnabled, setLongMemoryEnabled] = useState(false);
+  const [longMemoryWindowMs, setLongMemoryWindowMs] = useState(60000);
   const [scenePath, setScenePath] = useState(defaultScenePath);
   const [backgroundNoisePath, setBackgroundNoisePath] = useState(defaultBackgroundNoisePath);
   const [backgroundNoiseGain, setBackgroundNoiseGain] = useState(defaultBackgroundNoiseGain);
@@ -97,18 +166,30 @@ export function SceneLauncher({
   const [audioDeviceQuery, setAudioDeviceQuery] = useState("ReSpeaker");
   const [sampleRateHz, setSampleRateHz] = useState(48000);
   const [micArrayProfile, setMicArrayProfile] = useState<MicArrayProfile>("respeaker_xvf3800_0650");
+  const [sessionOverridesText, setSessionOverridesText] = useState("{}");
+  const [fastPathOverridesText, setFastPathOverridesText] = useState("{}");
+  const [slowPathOverridesText, setSlowPathOverridesText] = useState("{}");
+  const [overrideError, setOverrideError] = useState("");
   const isBusy = status === "running" || status === "starting";
   const showSimulationSettings = inputSource === "simulation";
   const showLiveSettings = inputSource === "respeaker_live";
   const canStart = inputSource !== null && !isBusy;
-  const singleActiveEnabled = algorithmMode === "speaker_tracking_single_active";
-  const baseAlgorithmMode = displayAlgorithmMode(algorithmMode);
-  const supportsGroundTruthSpeakerSources =
-    algorithmMode !== "localization_only" && algorithmMode !== "single_dominant_no_separator";
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
     onLatencyMsChange(clamped);
+  }
+
+  function parseOverrideObject(label: string, text: string): Record<string, unknown> {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return {};
+    }
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+      throw new Error(`${label} must be a JSON object`);
+    }
+    return parsed as Record<string, unknown>;
   }
 
   return (
@@ -148,22 +229,77 @@ export function SceneLauncher({
         <p className="launcher-hint">Choose a mode to reveal the relevant session settings.</p>
       ) : (
         <div className="launcher-settings">
-          <label htmlFor="algorithm-mode">Algorithm mode</label>
+          <h3>Fast Path</h3>
+
+          <label htmlFor="localization-backend">Localization backend</label>
           <select
-            id="algorithm-mode"
-            aria-label="Algorithm mode"
-            value={baseAlgorithmMode}
+            id="localization-backend"
+            aria-label="Localization backend"
+            value={localizationBackend}
             disabled={isBusy}
-            onChange={(e) => {
-              const nextMode = e.target.value as Exclude<AlgorithmMode, "speaker_tracking_single_active">;
-              if (nextMode === "speaker_tracking" && singleActiveEnabled) {
-                setAlgorithmMode("speaker_tracking_single_active");
-                return;
-              }
-              setAlgorithmMode(nextMode);
-            }}
+            onChange={(e) => setLocalizationBackend(e.target.value as LocalizationBackend)}
           >
-            {ALGORITHM_OPTIONS.map((option) => (
+            {LOCALIZATION_BACKENDS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <label htmlFor="beamforming-mode">Beamforming mode</label>
+          <select
+            id="beamforming-mode"
+            aria-label="Beamforming mode"
+            value={beamformingMode}
+            disabled={isBusy}
+            onChange={(e) => setBeamformingMode(e.target.value as BeamformingMode)}
+          >
+            {BEAMFORMING_MODES.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <label htmlFor="own-voice-suppression-mode">Own voice suppression</label>
+          <select
+            id="own-voice-suppression-mode"
+            aria-label="Own voice suppression"
+            value={ownVoiceSuppressionMode}
+            disabled={isBusy}
+            onChange={(e) => setOwnVoiceSuppressionMode(e.target.value as OwnVoiceSuppressionMode)}
+          >
+            {OWN_VOICE_SUPPRESSION_MODES.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <label htmlFor="enhancement-tier">Enhancement tier</label>
+          <select
+            id="enhancement-tier"
+            aria-label="Enhancement tier"
+            value={enhancementTier}
+            disabled={isBusy}
+            onChange={(e) => setEnhancementTier(e.target.value as EnhancementTier)}
+          >
+            {ENHANCEMENT_TIERS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <label htmlFor="output-enhancer-mode">Output enhancer mode</label>
+          <select
+            id="output-enhancer-mode"
+            aria-label="Output enhancer mode"
+            value={outputEnhancerMode}
+            disabled={isBusy}
+            onChange={(e) => setOutputEnhancerMode(e.target.value as OutputEnhancerMode)}
+          >
+            {OUTPUT_ENHANCER_MODES.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -171,23 +307,49 @@ export function SceneLauncher({
           </select>
 
           <div className="switch-row">
-            <span>Single active speaker</span>
+            <span>Postfilter enabled</span>
             <button
-              id="single-active-speaker"
-              aria-label="Single active speaker"
-              aria-checked={singleActiveEnabled}
-              className={`switch ${singleActiveEnabled ? "on" : "off"}`.trim()}
+              aria-label="Postfilter enabled"
+              aria-checked={postfilterEnabled}
+              className={`switch ${postfilterEnabled ? "on" : "off"}`.trim()}
               disabled={isBusy}
               role="switch"
               type="button"
-              onClick={() => setAlgorithmMode(singleActiveEnabled ? "speaker_tracking" : "speaker_tracking_single_active")}
+              onClick={() => setPostfilterEnabled((prev) => !prev)}
             >
               <span className="switch-thumb" />
             </button>
           </div>
-          {!singleActiveEnabled && baseAlgorithmMode !== "speaker_tracking" && (
-            <p className="launcher-hint">Turning this on switches the algorithm to Speaker tracking.</p>
-          )}
+
+          <div className="switch-row">
+            <span>Single-speaker assumption</span>
+            <button
+              aria-label="Single-speaker assumption"
+              aria-checked={assumeSingleSpeaker}
+              className={`switch ${assumeSingleSpeaker ? "on" : "off"}`.trim()}
+              disabled={isBusy}
+              role="switch"
+              type="button"
+              onClick={() => setAssumeSingleSpeaker((prev) => !prev)}
+            >
+              <span className="switch-thumb" />
+            </button>
+          </div>
+
+          <div className="switch-row">
+            <span>Localization VAD</span>
+            <button
+              aria-label="Localization VAD"
+              aria-checked={localizationVadEnabled}
+              className={`switch ${localizationVadEnabled ? "on" : "off"}`.trim()}
+              disabled={isBusy}
+              role="switch"
+              type="button"
+              onClick={() => setLocalizationVadEnabled((prev) => !prev)}
+            >
+              <span className="switch-thumb" />
+            </button>
+          </div>
 
           <label htmlFor="localization-hop-ms">Localization hop (ms)</label>
           <input
@@ -271,6 +433,54 @@ export function SceneLauncher({
             }}
           />
 
+          <h3>Slow Path</h3>
+
+          <div className="switch-row">
+            <span>Enable slow path</span>
+            <button
+              aria-label="Enable slow path"
+              aria-checked={slowPathEnabled}
+              className={`switch ${slowPathEnabled ? "on" : "off"}`.trim()}
+              disabled={isBusy}
+              role="switch"
+              type="button"
+              onClick={() => setSlowPathEnabled((prev) => !prev)}
+            >
+              <span className="switch-thumb" />
+            </button>
+          </div>
+
+          <div className="switch-row">
+            <span>Single active speaker</span>
+            <button
+              id="single-active-speaker"
+              aria-label="Single active speaker"
+              aria-checked={singleActive}
+              className={`switch ${singleActive ? "on" : "off"}`.trim()}
+              disabled={isBusy}
+              role="switch"
+              type="button"
+              onClick={() => setSingleActive((prev) => !prev)}
+            >
+              <span className="switch-thumb" />
+            </button>
+          </div>
+
+          <div className="switch-row">
+            <span>Long memory</span>
+            <button
+              aria-label="Long memory"
+              aria-checked={longMemoryEnabled}
+              className={`switch ${longMemoryEnabled ? "on" : "off"}`.trim()}
+              disabled={isBusy}
+              role="switch"
+              type="button"
+              onClick={() => setLongMemoryEnabled((prev) => !prev)}
+            >
+              <span className="switch-thumb" />
+            </button>
+          </div>
+
           <label htmlFor="speaker-history-size">Speaker centroid history (M)</label>
           <input
             id="speaker-history-size"
@@ -317,24 +527,107 @@ export function SceneLauncher({
             onChange={(e) => setSpeakerMatchWindowDeg(Math.max(1, Math.min(180, Number(e.target.value) || 1)))}
           />
 
+          <label htmlFor="centroid-association-mode">Centroid association</label>
+          <select
+            id="centroid-association-mode"
+            aria-label="Centroid association"
+            value={centroidAssociationMode}
+            disabled={isBusy}
+            onChange={(e) => setCentroidAssociationMode(e.target.value as CentroidAssociationMode)}
+          >
+            <option value="hard_window">Hard window</option>
+            <option value="gaussian">Gaussian</option>
+          </select>
+
+          <label htmlFor="centroid-association-sigma-deg">Centroid sigma (deg)</label>
+          <input
+            id="centroid-association-sigma-deg"
+            aria-label="Centroid sigma (deg)"
+            type="number"
+            min={1}
+            max={90}
+            step={1}
+            value={centroidAssociationSigmaDeg}
+            disabled={isBusy}
+            onChange={(e) => setCentroidAssociationSigmaDeg(Math.max(1, Math.min(90, Number(e.target.value) || 1)))}
+          />
+
+          <label htmlFor="centroid-association-min-score">Centroid min score</label>
+          <input
+            id="centroid-association-min-score"
+            aria-label="Centroid min score"
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={centroidAssociationMinScore}
+            disabled={isBusy}
+            onChange={(e) => {
+              const nextValue = Number(e.target.value);
+              setCentroidAssociationMinScore(Math.max(0, Math.min(1, Number.isFinite(nextValue) ? nextValue : 0)));
+            }}
+          />
+
+          <label htmlFor="long-memory-window-ms">Long-memory window (ms)</label>
+          <input
+            id="long-memory-window-ms"
+            aria-label="Long-memory window (ms)"
+            type="number"
+            min={1000}
+            max={120000}
+            step={1000}
+            value={longMemoryWindowMs}
+            disabled={isBusy}
+            onChange={(e) => setLongMemoryWindowMs(Math.max(1000, Math.min(120000, Number(e.target.value) || 1000)))}
+          />
+
+          <h3>Advanced Overrides</h3>
+
+          <label htmlFor="session-overrides-json">Session overrides JSON</label>
+          <textarea
+            id="session-overrides-json"
+            aria-label="Session overrides JSON"
+            value={sessionOverridesText}
+            disabled={isBusy}
+            rows={4}
+            onChange={(e) => setSessionOverridesText(e.target.value)}
+          />
+
+          <label htmlFor="fast-path-overrides-json">Fast path overrides JSON</label>
+          <textarea
+            id="fast-path-overrides-json"
+            aria-label="Fast path overrides JSON"
+            value={fastPathOverridesText}
+            disabled={isBusy}
+            rows={4}
+            onChange={(e) => setFastPathOverridesText(e.target.value)}
+          />
+
+          <label htmlFor="slow-path-overrides-json">Slow path overrides JSON</label>
+          <textarea
+            id="slow-path-overrides-json"
+            aria-label="Slow path overrides JSON"
+            value={slowPathOverridesText}
+            disabled={isBusy}
+            rows={4}
+            onChange={(e) => setSlowPathOverridesText(e.target.value)}
+          />
+          {overrideError ? <p className="launcher-hint">{overrideError}</p> : null}
+
           {showSimulationSettings && (
             <>
-              <label htmlFor="scene">Scene config path</label>
+              <label htmlFor="scene-path">Scene path</label>
+              <input id="scene-path" aria-label="Scene path" value={scenePath} disabled={isBusy} onChange={(e) => setScenePath(e.target.value)} />
+
+              <label htmlFor="background-noise-path">Background noise path</label>
               <input
-                id="scene"
-                aria-label="Scene config path"
-                value={scenePath}
-                onChange={(e) => setScenePath(e.target.value)}
-                placeholder="simulation/simulations/configs/library_scene/library_k1_scene00.json"
-              />
-              <label htmlFor="background-noise">Background noise audio path</label>
-              <input
-                id="background-noise"
-                aria-label="Background noise audio path"
+                id="background-noise-path"
+                aria-label="Background noise path"
                 value={backgroundNoisePath}
+                disabled={isBusy}
                 onChange={(e) => setBackgroundNoisePath(e.target.value)}
-                placeholder="wham_noise/tr/01dc0215_0.22439_01fc0207_-0.22439sp12.wav"
               />
+
               <label htmlFor="background-noise-gain">Background noise gain</label>
               <input
                 id="background-noise-gain"
@@ -342,58 +635,55 @@ export function SceneLauncher({
                 type="number"
                 min={0}
                 max={2}
-                step={0.05}
+                step={0.01}
                 value={backgroundNoiseGain}
-                onChange={(e) => setBackgroundNoiseGain(Math.max(0, Math.min(2, Number(e.target.value))))}
+                disabled={isBusy}
+                onChange={(e) => setBackgroundNoiseGain(Math.max(0, Math.min(2, Number(e.target.value) || 0)))}
               />
-              <label className="checkbox-row" htmlFor="gt-location">
-                <input
-                  id="gt-location"
+
+              <div className="switch-row">
+                <span>Use ground truth location</span>
+                <button
                   aria-label="Use ground truth location"
-                  type="checkbox"
-                  checked={useGroundTruthLocation}
+                  aria-checked={useGroundTruthLocation}
+                  className={`switch ${useGroundTruthLocation ? "on" : "off"}`.trim()}
                   disabled={isBusy}
-                  onChange={(e) => setUseGroundTruthLocation(e.target.checked)}
-                />
-                <span>Location: use ground truth</span>
-              </label>
-              <label className="checkbox-row" htmlFor="gt-speaker-sources">
-                <input
-                  id="gt-speaker-sources"
+                  role="switch"
+                  type="button"
+                  onClick={() => setUseGroundTruthLocation((prev) => !prev)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
+
+              <div className="switch-row">
+                <span>Use ground truth speaker sources</span>
+                <button
                   aria-label="Use ground truth speaker sources"
-                  type="checkbox"
-                  checked={useGroundTruthSpeakerSources}
-                  disabled={isBusy || !supportsGroundTruthSpeakerSources}
-                  onChange={(e) => setUseGroundTruthSpeakerSources(e.target.checked)}
-                />
-                <span>Speaker sources: use ground truth</span>
-              </label>
-              {!supportsGroundTruthSpeakerSources && (
-                <p className="launcher-hint">This algorithm does not use separate speaker-source streams.</p>
-              )}
+                  aria-checked={useGroundTruthSpeakerSources}
+                  className={`switch ${useGroundTruthSpeakerSources ? "on" : "off"}`.trim()}
+                  disabled={isBusy}
+                  role="switch"
+                  type="button"
+                  onClick={() => setUseGroundTruthSpeakerSources((prev) => !prev)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
             </>
           )}
 
           {showLiveSettings && (
             <>
-              <label htmlFor="mic-array-profile">Mic array profile</label>
-              <select
-                id="mic-array-profile"
-                aria-label="Mic array profile"
-                value={micArrayProfile}
-                onChange={(e) => setMicArrayProfile(e.target.value as MicArrayProfile)}
-              >
-                <option value="respeaker_xvf3800_0650">ReSpeaker XVF3800 (65.0 mm)</option>
-                <option value="respeaker_v3_0457">ReSpeaker 4-Mic v3 (45.7 mm)</option>
-              </select>
               <label htmlFor="audio-device-query">Audio device query</label>
               <input
                 id="audio-device-query"
                 aria-label="Audio device query"
                 value={audioDeviceQuery}
+                disabled={isBusy}
                 onChange={(e) => setAudioDeviceQuery(e.target.value)}
-                placeholder="ReSpeaker"
               />
+
               <label htmlFor="sample-rate-hz">Sample rate (Hz)</label>
               <input
                 id="sample-rate-hz"
@@ -403,73 +693,109 @@ export function SceneLauncher({
                 max={96000}
                 step={1000}
                 value={sampleRateHz}
-                onChange={(e) => setSampleRateHz(Math.max(8000, Math.min(96000, Number(e.target.value))))}
+                disabled={isBusy}
+                onChange={(e) => setSampleRateHz(Math.max(8000, Math.min(96000, Number(e.target.value) || 8000)))}
               />
+
+              <label htmlFor="mic-array-profile">Mic array profile</label>
+              <select
+                id="mic-array-profile"
+                aria-label="Mic array profile"
+                value={micArrayProfile}
+                disabled={isBusy}
+                onChange={(e) => setMicArrayProfile(e.target.value as MicArrayProfile)}
+              >
+                <option value="respeaker_xvf3800_0650">ReSpeaker XVF3800 65mm</option>
+                <option value="respeaker_v3_0457">ReSpeaker v3 45.7mm</option>
+              </select>
             </>
           )}
 
-          <label htmlFor="latency-range">Playback latency (ms)</label>
+          <label htmlFor="launcher-monitor-source">Monitor source</label>
+          <select
+            id="launcher-monitor-source"
+            aria-label="Monitor source"
+            value={monitorSource}
+            disabled={isBusy}
+            onChange={(e) => onMonitorSourceChange(e.target.value as MonitorSource)}
+          >
+            <option value="processed">Processed</option>
+            <option value="raw_mixed">Raw mixed</option>
+          </select>
+
+          <label htmlFor="latency-ms">Playback latency target (ms)</label>
           <input
-            id="latency-range"
-            type="range"
+            id="latency-ms"
+            aria-label="Playback latency target (ms)"
+            type="number"
             min={80}
             max={2000}
             step={10}
             value={latencyMs}
-            onChange={(e) => applyLatency(Number(e.target.value))}
+            disabled={isBusy}
+            onChange={(e) => applyLatency(Number(e.target.value) || latencyMs)}
           />
-          <input
-            aria-label="Playback latency number"
-            type="number"
-            min={80}
-            max={2000}
-            value={latencyMs}
-            onChange={(e) => applyLatency(Number(e.target.value))}
-          />
-
-          <label htmlFor="monitor-source">Monitor output</label>
-          <select
-            id="monitor-source"
-            aria-label="Monitor output"
-            value={monitorSource}
-            onChange={(e) => onMonitorSourceChange(e.target.value as MonitorSource)}
-          >
-            <option value="processed">Processed (UI output)</option>
-            <option value="raw_mixed">Raw mixed input</option>
-          </select>
 
           <div className="actions">
             <button
-              onClick={() =>
-                inputSource &&
-                onStart({
-                  inputSource,
-                  algorithmMode,
-                  localizationHopMs,
-                  localizationWindowMs,
-                  localizationOverlap,
-                  localizationFreqLowHz,
-                  localizationFreqHighHz,
-                  speakerHistorySize,
-                  speakerActivationMinPredictions,
-                  speakerMatchWindowDeg,
-                  scenePath,
-                  backgroundNoisePath,
-                  backgroundNoiseGain,
-                  useGroundTruthLocation: showSimulationSettings ? useGroundTruthLocation : false,
-                  useGroundTruthSpeakerSources:
-                    showSimulationSettings && supportsGroundTruthSpeakerSources ? useGroundTruthSpeakerSources : false,
-                  audioDeviceQuery,
-                  monitorSource,
-                  sampleRateHz,
-                  micArrayProfile,
-                })
-              }
+              onClick={() => {
+                try {
+                  const sessionOverrides = parseOverrideObject("Session overrides JSON", sessionOverridesText);
+                  const fastPathOverrides = parseOverrideObject("Fast path overrides JSON", fastPathOverridesText);
+                  const slowPathOverrides = parseOverrideObject("Slow path overrides JSON", slowPathOverridesText);
+                  setOverrideError("");
+                  onStart({
+                    inputSource,
+                    scenePath,
+                    backgroundNoisePath,
+                    backgroundNoiseGain,
+                    useGroundTruthLocation,
+                    useGroundTruthSpeakerSources,
+                    audioDeviceQuery,
+                    monitorSource,
+                    sampleRateHz,
+                    micArrayProfile,
+                    fastPath: {
+                      localizationBackend,
+                      localizationHopMs,
+                      localizationWindowMs,
+                      localizationOverlap,
+                      localizationFreqLowHz,
+                      localizationFreqHighHz,
+                      localizationVadEnabled,
+                      assumeSingleSpeaker,
+                      beamformingMode,
+                      ownVoiceSuppressionMode,
+                      enhancementTier,
+                      outputEnhancerMode,
+                      postfilterEnabled,
+                    },
+                    slowPath: {
+                      enabled: slowPathEnabled,
+                      trackingMode: "doa_centroid_v1",
+                      singleActive,
+                      speakerHistorySize,
+                      speakerActivationMinPredictions,
+                      speakerMatchWindowDeg,
+                      centroidAssociationMode,
+                      centroidAssociationSigmaDeg,
+                      centroidAssociationMinScore,
+                      longMemoryEnabled,
+                      longMemoryWindowMs,
+                    },
+                    sessionOverrides,
+                    fastPathOverrides,
+                    slowPathOverrides,
+                  });
+                } catch (error) {
+                  setOverrideError(error instanceof Error ? error.message : "Invalid JSON override");
+                }
+              }}
               disabled={!canStart}
             >
               Start
             </button>
-            <button onClick={onStop} disabled={status !== "running" && status !== "starting"}>
+            <button onClick={onStop} disabled={!isBusy}>
               Stop
             </button>
             <button onClick={onDownloadWav} disabled={!canDownloadWav}>
@@ -478,7 +804,6 @@ export function SceneLauncher({
           </div>
         </div>
       )}
-      <p className="status">Status: {status}</p>
     </section>
   );
 }
