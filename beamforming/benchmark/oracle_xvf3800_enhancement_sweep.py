@@ -54,6 +54,8 @@ class OracleFrameState:
     timestamp_ms: float
     target_speaker_id: int | None
     target_doa_deg: float | None
+    target_activity_score: float
+    target_active: bool
     null_user_speaker_id: int | None
     null_user_doa_deg: float | None
     force_suppression_active: bool
@@ -300,6 +302,7 @@ def _build_oracle_frame_states(
     for frame_idx in range(n_frames):
         start = frame_idx * frame_samples
         end = min(active_speaker_ids.shape[0], start + frame_samples)
+        target_activity_score = float(np.mean(active_speaker_ids[start:end] >= 0)) if end > start else 0.0
         target_speaker_id = _sample_last_speaker_id(active_speaker_ids[start:end])
         target_doa_deg = _sample_last_finite(active_doa_deg[start:end])
         null_candidate = False
@@ -333,6 +336,8 @@ def _build_oracle_frame_states(
                 timestamp_ms=float(frame_idx * fast_frame_ms),
                 target_speaker_id=target_speaker_id,
                 target_doa_deg=target_doa_deg,
+                target_activity_score=float(target_activity_score),
+                target_active=bool(target_activity_score >= 0.5),
                 null_user_speaker_id=null_user_speaker_id,
                 null_user_doa_deg=null_user_doa_deg,
                 force_suppression_active=bool(force_suppression_active),
@@ -357,6 +362,8 @@ def _oracle_srp_override_provider(frame_states: list[OracleFrameState]):
                 "oracle_override": True,
                 "oracle_target_speaker_id": state.target_speaker_id,
                 "oracle_target_doa_deg": state.target_doa_deg,
+                "oracle_target_activity_score": float(state.target_activity_score),
+                "oracle_target_active": bool(state.target_active),
                 "oracle_null_user_speaker_id": state.null_user_speaker_id,
                 "oracle_null_user_doa_deg": state.null_user_doa_deg,
                 "force_suppression_active": bool(state.force_suppression_active),
@@ -370,6 +377,17 @@ def _oracle_srp_override_provider(frame_states: list[OracleFrameState]):
     def _provider(frame_index: int, _timestamp_ms: float) -> SRPPeakSnapshot | None:
         if 0 <= int(frame_index) < len(snapshots):
             return snapshots[int(frame_index)]
+        return None
+
+    return _provider
+
+
+def _oracle_target_activity_override_provider(frame_states: list[OracleFrameState]):
+    target_scores = [float(state.target_activity_score) for state in frame_states]
+
+    def _provider(frame_index: int, _timestamp_ms: float) -> float | None:
+        if 0 <= int(frame_index) < len(target_scores):
+            return float(target_scores[int(frame_index)])
         return None
 
     return _provider
@@ -590,6 +608,7 @@ def _build_session_request(
     channel_count: int,
     profile: str,
     null_user_doa_deg: float | None,
+    target_activity_rnn_update_mode: str | None,
 ) -> SessionStartRequest:
     shared_method = _shared_method_name(method)
     return SessionStartRequest(
@@ -617,6 +636,7 @@ def _build_session_request(
             "localization_backend": "srp_phat_localization",
             "beamforming_mode": "mvdr_fd" if shared_method in {"mvdr_fd", "lcmv_target_only", "lcmv_null"} else "delay_sum",
             "fd_analysis_window_ms": float(FD_ANALYSIS_WINDOW_MS),
+            "target_activity_rnn_update_mode": target_activity_rnn_update_mode,
             "postfilter_enabled": method not in {"mvdr_fd", "delay_sum", "lcmv_target_only", "lcmv_null"},
             "output_normalization_enabled": method not in {"mvdr_fd", "delay_sum", "lcmv_target_only", "lcmv_null"},
             "output_allow_amplification": False,
@@ -665,6 +685,7 @@ def _run_shared_oracle_method(
         channel_count=int(mic_audio.shape[1]),
         profile=profile,
         null_user_doa_deg=null_user_doa_deg,
+        target_activity_rnn_update_mode=("oracle_target_activity" if _shared_method_name(method) in {"mvdr_fd", "lcmv_target_only", "lcmv_null"} else None),
     )
     summary = run_offline_session_pipeline(
         req=req,
@@ -673,6 +694,7 @@ def _run_shared_oracle_method(
         out_dir=out_dir,
         capture_trace=bool(capture_trace),
         srp_override_provider=_oracle_srp_override_provider(frame_states),
+        target_activity_override_provider=_oracle_target_activity_override_provider(frame_states),
     )
     processed, proc_sr = sf.read(out_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
     processed = np.asarray(processed, dtype=np.float32).reshape(-1)

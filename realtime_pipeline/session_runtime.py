@@ -31,6 +31,10 @@ def build_pipeline_config_from_request(
 ) -> PipelineConfig:
     assume_single_speaker = bool(req.assume_single_speaker)
     slow_path_enabled = bool(req.slow_path_enabled)
+    beamforming_mode = str(req.beamforming_mode).strip().lower()
+    target_activity_mode = req.target_activity_rnn_update_mode
+    if beamforming_mode == "mvdr_fd" and target_activity_mode is None:
+        raise ValueError("MVDR requires fast_path.target_activity_rnn_update_mode to be explicitly set.")
     return PipelineConfig(
         sample_rate_hz=int(sample_rate_hz),
         fast_frame_ms=max(10, int(req.localization_hop_ms)),
@@ -47,8 +51,15 @@ def build_pipeline_config_from_request(
         ),
         identity_backend=str(req.identity_backend),
         identity_speaker_embedding_model=str(req.identity_speaker_embedding_model),
-        beamforming_mode=str(req.beamforming_mode),
+        beamforming_mode=beamforming_mode,
         fd_analysis_window_ms=float(req.fd_analysis_window_ms),
+        target_activity_rnn_update_mode=target_activity_mode,
+        target_activity_low_threshold=float(req.target_activity_low_threshold),
+        target_activity_high_threshold=float(req.target_activity_high_threshold),
+        target_activity_enter_frames=int(req.target_activity_enter_frames),
+        target_activity_exit_frames=int(req.target_activity_exit_frames),
+        fd_cov_update_scale_target_active=float(req.fd_cov_update_scale_target_active),
+        fd_cov_update_scale_target_inactive=float(req.fd_cov_update_scale_target_inactive),
         localization_backend=str(req.localization_backend),
         tracking_mode=str(req.tracking_mode),
         control_mode="speaker_tracking_mode" if slow_path_enabled else "spatial_peak_mode",
@@ -151,6 +162,7 @@ def run_offline_session_pipeline(
     input_recording_path: str | Path | None = None,
     capture_trace: bool = False,
     srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
+    target_activity_override_provider: Callable[[int, float], float | None] | None = None,
 ) -> dict[str, Any]:
     import soundfile as sf
 
@@ -217,6 +229,7 @@ def run_offline_session_pipeline(
         frame_sink=_sink,
         separation_backend=build_separation_backend_for_request(req, cfg),
         srp_override_provider=srp_override_provider,
+        target_activity_override_provider=target_activity_override_provider,
     )
     pipe_holder["pipe"] = pipe
     pipe.run_blocking()
@@ -268,6 +281,13 @@ def run_offline_session_pipeline(
         "separation_mode": str(req.separation_mode),
         "beamforming_mode": str(cfg.beamforming_mode),
         "fd_analysis_window_ms": float(cfg.fd_analysis_window_ms),
+        "target_activity_rnn_update_mode": None if cfg.target_activity_rnn_update_mode is None else str(cfg.target_activity_rnn_update_mode),
+        "target_activity_low_threshold": float(cfg.target_activity_low_threshold),
+        "target_activity_high_threshold": float(cfg.target_activity_high_threshold),
+        "target_activity_enter_frames": int(cfg.target_activity_enter_frames),
+        "target_activity_exit_frames": int(cfg.target_activity_exit_frames),
+        "fd_cov_update_scale_target_active": float(cfg.fd_cov_update_scale_target_active),
+        "fd_cov_update_scale_target_inactive": float(cfg.fd_cov_update_scale_target_inactive),
         "fast_path_reference_mode": str(cfg.fast_path_reference_mode),
         "slow_chunk_ms": int(cfg.slow_chunk_ms),
         "slow_chunk_hop_ms": int(cfg.slow_chunk_ms if cfg.slow_chunk_hop_ms is None else cfg.slow_chunk_hop_ms),

@@ -260,7 +260,7 @@ class _FDBufferedBeamformer:
             return base * scale
         return base
 
-    def mvdr(self, frame_mc: np.ndarray, doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
+    def mvdr(self, frame_mc: np.ndarray, doa_deg: float, covariance_alpha: float | None = None) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)  # (F, M)
         a = _steering_vector_f_domain(
@@ -274,7 +274,7 @@ class _FDBufferedBeamformer:
             self.rnn_mvdr_noise,
             x_fft,
             a,
-            self._cov_alpha_from_activity(speech_activity),
+            float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
         )
 
         f_bins = x_fft.shape[0]
@@ -291,7 +291,7 @@ class _FDBufferedBeamformer:
         y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
 
-    def lcmv_null(self, frame_mc: np.ndarray, target_doa_deg: float, null_doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
+    def lcmv_null(self, frame_mc: np.ndarray, target_doa_deg: float, null_doa_deg: float, covariance_alpha: float | None = None) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)
         a_target = _steering_vector_f_domain(
@@ -312,7 +312,7 @@ class _FDBufferedBeamformer:
             self.rnn_mvdr_noise,
             x_fft,
             a_target,
-            self._cov_alpha_from_activity(speech_activity),
+            float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
         )
 
         f_bins = x_fft.shape[0]
@@ -485,6 +485,7 @@ class FastPathWorker(threading.Thread):
         mic_geometry_xyz: np.ndarray,
         stop_event: threading.Event,
         srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
+        target_activity_override_provider: Callable[[int, float], float | None] | None = None,
     ):
         super().__init__(name="FastPathWorker", daemon=True)
         self._cfg = config
@@ -577,12 +578,86 @@ class FastPathWorker(threading.Thread):
         )
         self._postfilter = _PostFilterState(frame_samples=frame_samples, cfg=config)
         self._srp_override_provider = srp_override_provider
+        self._target_activity_override_provider = target_activity_override_provider
         self._own_voice_active = False
         self._own_voice_on_count = 0
         self._own_voice_off_count = 0
+        self._target_activity_state = False
+        self._target_activity_on_count = 0
+        self._target_activity_off_count = 0
+        self._target_activity_noise_floor = 1e-3
+
+        mode = self._target_activity_mode()
+        beamforming_mode = str(self._cfg.beamforming_mode).strip().lower()
+        if beamforming_mode == "mvdr_fd" and mode is None:
+            raise ValueError("MVDR requires target_activity_rnn_update_mode to be configured.")
+        if mode == "oracle_target_activity" and self._target_activity_override_provider is None:
+            raise ValueError("oracle_target_activity mode requires a target activity override provider.")
 
     def _suppression_mode(self) -> str:
         return str(self._cfg.own_voice_suppression_mode).strip().lower()
+
+    def _target_activity_mode(self) -> str | None:
+        value = getattr(self._cfg, "target_activity_rnn_update_mode", None)
+        if value is None:
+            return None
+        text = str(value).strip().lower()
+        return text or None
+
+    def _estimate_target_activity(self, frame_mc: np.ndarray, doa_deg: float) -> float:
+        ref = delay_and_sum_frame(
+            frame_mc,
+            doa_deg=float(doa_deg),
+            mic_geometry_xyz=self._mic_geometry_xyz,
+            fs=self._cfg.sample_rate_hz,
+            sound_speed_m_s=self._cfg.sound_speed_m_s,
+        )
+        rms = float(np.sqrt(np.mean(np.asarray(ref, dtype=np.float64) ** 2) + 1e-12))
+        noise_alpha = 0.02 if rms > self._target_activity_noise_floor else 0.12
+        self._target_activity_noise_floor = ((1.0 - noise_alpha) * self._target_activity_noise_floor) + (noise_alpha * rms)
+        floor = max(self._target_activity_noise_floor, 1e-5)
+        score = (rms - floor) / max(3.0 * floor, 1e-5)
+        return float(np.clip(score, 0.0, 1.0))
+
+    def _update_target_activity_hysteresis(self, score: float) -> bool:
+        high = float(np.clip(self._cfg.target_activity_high_threshold, 0.0, 1.0))
+        low = float(np.clip(self._cfg.target_activity_low_threshold, 0.0, high))
+        if float(score) >= high:
+            self._target_activity_on_count += 1
+            self._target_activity_off_count = 0
+            if not self._target_activity_state and self._target_activity_on_count >= max(1, int(self._cfg.target_activity_enter_frames)):
+                self._target_activity_state = True
+        elif float(score) <= low:
+            self._target_activity_off_count += 1
+            self._target_activity_on_count = 0
+            if self._target_activity_state and self._target_activity_off_count >= max(1, int(self._cfg.target_activity_exit_frames)):
+                self._target_activity_state = False
+        else:
+            self._target_activity_on_count = 0
+            self._target_activity_off_count = 0
+        return bool(self._target_activity_state)
+
+    def _resolve_target_activity(self, frame_mc: np.ndarray, target_doa_deg: float | None, now_ms: float) -> tuple[float, bool, float]:
+        mode = self._target_activity_mode()
+        if mode is None:
+            return 0.0, False, float(self._cfg.fd_cov_ema_alpha)
+        if mode == "oracle_target_activity":
+            score = 0.0
+            if self._target_activity_override_provider is not None:
+                raw = self._target_activity_override_provider(self._frame_idx, now_ms)
+                score = 0.0 if raw is None else float(np.clip(raw, 0.0, 1.0))
+        elif target_doa_deg is None:
+            score = 0.0
+        else:
+            score = self._estimate_target_activity(frame_mc, float(target_doa_deg))
+        is_active = self._update_target_activity_hysteresis(score)
+        base_alpha = float(np.clip(self._cfg.fd_cov_ema_alpha, 0.0, 1.0))
+        scale = (
+            float(np.clip(self._cfg.fd_cov_update_scale_target_active, 0.0, 1.0))
+            if is_active
+            else float(np.clip(self._cfg.fd_cov_update_scale_target_inactive, 0.0, 1.0))
+        )
+        return float(score), bool(is_active), float(base_alpha * scale)
 
     def _suppressed_user_doa(self) -> float | None:
         if self._cfg.suppressed_user_voice_doa_deg is None:
@@ -766,7 +841,13 @@ class FastPathWorker(threading.Thread):
             )
         self._state.publish_speaker_map(speaker_map)
 
-    def _beamform_single_direction(self, x: np.ndarray, doa_deg: float, speech_activity: float) -> np.ndarray:
+    def _beamform_single_direction(
+        self,
+        x: np.ndarray,
+        doa_deg: float,
+        speech_activity: float,
+        covariance_alpha: float | None = None,
+    ) -> np.ndarray:
         mode = str(self._cfg.beamforming_mode).strip().lower()
         if mode == "delay_sum":
             return delay_and_sum_frame(
@@ -778,7 +859,7 @@ class FastPathWorker(threading.Thread):
             )
         if mode == "gsc_fd":
             return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
-        return self._fd.mvdr(x, doa_deg=doa_deg, speech_activity=speech_activity)
+        return self._fd.mvdr(x, doa_deg=doa_deg, covariance_alpha=covariance_alpha)
 
     def _apply_soft_gate(self, out: np.ndarray) -> np.ndarray:
         attenuation_db = float(max(0.0, self._cfg.suppressed_user_gate_attenuation_db))
@@ -862,6 +943,9 @@ class FastPathWorker(threading.Thread):
                     suppression_mode = self._suppression_mode()
                     user_doa = self._suppressed_user_doa()
                     target_doa = None
+                    target_activity_score = 0.0
+                    target_activity_active = False
+                    target_covariance_alpha = float(self._cfg.fd_cov_ema_alpha)
                     suppression_applied = False
                     suppression_strategy = "none"
                     conflict_fallback = False
@@ -870,6 +954,11 @@ class FastPathWorker(threading.Thread):
                         target_doa, _target_score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
                         if target_doa is None and not suppression_active:
                             target_doa = float(peaks[0])
+                        target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
+                            x,
+                            target_doa_deg=target_doa,
+                            now_ms=now_ms,
+                        )
                         if target_doa is not None:
                             can_null = (
                                 suppression_mode == "lcmv_null_hysteresis"
@@ -883,7 +972,7 @@ class FastPathWorker(threading.Thread):
                                     x,
                                     target_doa_deg=float(target_doa),
                                     null_doa_deg=float(user_doa),
-                                    speech_activity=speech_activity,
+                                    covariance_alpha=target_covariance_alpha,
                                 )
                                 suppression_applied = True
                                 suppression_strategy = "lcmv_null"
@@ -892,7 +981,12 @@ class FastPathWorker(threading.Thread):
                                     conflict_fallback = bool(
                                         _angular_dist_deg(float(target_doa), float(user_doa)) < float(self._cfg.suppressed_user_target_conflict_deg)
                                     )
-                                out = self._beamform_single_direction(x, doa_deg=float(target_doa), speech_activity=speech_activity)
+                                out = self._beamform_single_direction(
+                                    x,
+                                    doa_deg=float(target_doa),
+                                    speech_activity=speech_activity,
+                                    covariance_alpha=target_covariance_alpha,
+                                )
                         else:
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
                             if suppression_active:
@@ -906,6 +1000,11 @@ class FastPathWorker(threading.Thread):
                         target_doa, _target_score = self._pick_non_user_speaker(speaker_map)
                         if target_doa is None and not suppression_active:
                             target_doa, _target_score = self._pick_best_smoothed_speaker(speaker_map)
+                        target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
+                            x,
+                            target_doa_deg=target_doa,
+                            now_ms=now_ms,
+                        )
                         if target_doa is not None:
                             can_null = (
                                 suppression_mode == "lcmv_null_hysteresis"
@@ -919,7 +1018,7 @@ class FastPathWorker(threading.Thread):
                                     x,
                                     target_doa_deg=float(target_doa),
                                     null_doa_deg=float(user_doa),
-                                    speech_activity=speech_activity,
+                                    covariance_alpha=target_covariance_alpha,
                                 )
                                 suppression_applied = True
                                 suppression_strategy = "lcmv_null"
@@ -928,7 +1027,12 @@ class FastPathWorker(threading.Thread):
                                     conflict_fallback = bool(
                                         _angular_dist_deg(float(target_doa), float(user_doa)) < float(self._cfg.suppressed_user_target_conflict_deg)
                                     )
-                                out = self._beamform_single_direction(x, doa_deg=float(target_doa), speech_activity=speech_activity)
+                                out = self._beamform_single_direction(
+                                    x,
+                                    doa_deg=float(target_doa),
+                                    speech_activity=speech_activity,
+                                    covariance_alpha=target_covariance_alpha,
+                                )
                         else:
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
                             if suppression_active:
@@ -943,7 +1047,14 @@ class FastPathWorker(threading.Thread):
                         out = self._apply_soft_gate(out)
                         suppression_applied = True
                         suppression_strategy = "soft_gate"
-                    if suppression_info or suppression_mode != "off":
+                    target_activity_debug = {
+                        "mode": self._target_activity_mode(),
+                        "score": float(target_activity_score),
+                        "active": bool(target_activity_active),
+                        "covariance_alpha": float(target_covariance_alpha),
+                        "noise_floor_rms": float(self._target_activity_noise_floor),
+                    }
+                    if suppression_info or suppression_mode != "off" or self._target_activity_mode() is not None:
                         suppression_info = self._suppression_debug(
                             matched_user_peak_deg=matched_user_peak_deg,
                             matched_user_score=matched_user_score,
@@ -959,7 +1070,11 @@ class FastPathWorker(threading.Thread):
                             peak_scores=snapshot.peak_scores,
                             raw_peaks_deg=tuple(snapshot.raw_peaks_deg),
                             raw_peak_scores=snapshot.raw_peak_scores,
-                            debug={**(dict(snapshot.debug or {})), "own_voice_suppression": suppression_info},
+                            debug={
+                                **(dict(snapshot.debug or {})),
+                                "own_voice_suppression": suppression_info,
+                                "target_activity": target_activity_debug,
+                            },
                         )
                         self._state.publish_srp_snapshot(snapshot)
                     beamform_ms += (perf_counter() - t0) * 1000.0

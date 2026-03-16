@@ -50,6 +50,7 @@ class RealtimeSpeakerPipeline:
         frame_sink: FrameSink | None = None,
         separation_backend: SeparationBackend | None = None,
         srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
+        target_activity_override_provider: Callable[[int, float], float | None] | None = None,
     ):
         self.config = config
         self._state = SharedPipelineState()
@@ -68,6 +69,7 @@ class RealtimeSpeakerPipeline:
             mic_geometry_xyz=mic_geometry_xyz,
             stop_event=self._stop,
             srp_override_provider=srp_override_provider,
+            target_activity_override_provider=target_activity_override_provider,
         )
         self._slow = None
         if bool(config.slow_path_enabled):

@@ -103,6 +103,7 @@ def run_recording_pipeline(
         direction_speaker_forget_timeout_ms=float(direction_speaker_forget_timeout_ms),
         max_speakers_hint=max(1, int(max_speakers_hint)),
         beamforming_mode=str(beamforming_mode),
+        target_activity_rnn_update_mode="estimated_target_activity" if str(beamforming_mode).strip().lower() == "mvdr_fd" else None,
         output_normalization_enabled=bool(output_normalization_enabled),
         output_allow_amplification=bool(output_allow_amplification),
         srp_prior_enabled=bool(robust_mode),

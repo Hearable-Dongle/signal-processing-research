@@ -834,6 +834,7 @@ def _run_recording_method_job(
             "localization_backend": str(localization_backend),
             "beamforming_mode": str(method),
             "fd_analysis_window_ms": float(20.0),
+            "target_activity_rnn_update_mode": "estimated_target_activity" if str(method).strip().lower() == "mvdr_fd" else None,
             "output_normalization_enabled": bool(output_normalization_enabled),
             "output_allow_amplification": bool(output_allow_amplification),
         },

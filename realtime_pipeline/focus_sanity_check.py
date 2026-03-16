@@ -319,6 +319,7 @@ def _run_scene(
         fast_frame_ms=10,
         slow_chunk_ms=200,
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
+        target_activity_rnn_update_mode="estimated_target_activity",
         direction_focus_gain_db=0.0,
         direction_non_focus_attenuation_db=0.0,
     )
