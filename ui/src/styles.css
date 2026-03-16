@@ -146,6 +146,60 @@ body {
   margin-top: 0.85rem;
 }
 
+.launcher-section {
+  margin-top: 0.9rem;
+  border: 1px solid #dfc4b2;
+  border-radius: 12px;
+  background: rgba(255, 250, 245, 0.85);
+  overflow: hidden;
+}
+
+.launcher-section-toggle {
+  width: 100%;
+  border-radius: 0;
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  justify-content: flex-start;
+  background: linear-gradient(180deg, #fff8f1 0%, #f7e7d9 100%);
+  color: #3b2d25;
+  border-bottom: 1px solid #ead4c4;
+}
+
+.launcher-section.collapsed .launcher-section-toggle {
+  border-bottom: 0;
+}
+
+.launcher-section-arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 1rem;
+  transition: transform 140ms ease;
+}
+
+.launcher-section-arrow.expanded {
+  transform: rotate(0deg);
+}
+
+.launcher-section.collapsed .launcher-section-arrow {
+  transform: rotate(-90deg);
+}
+
+.launcher-section-title {
+  font-weight: 700;
+}
+
+.launcher-section-body {
+  padding: 0 1rem 1rem;
+}
+
+.launcher-section-body > h3 {
+  margin: 0.85rem 0 0.35rem;
+  font-size: 0.96rem;
+  color: #5a463a;
+}
+
 input {
   width: 100%;
   padding: 0.5rem;
