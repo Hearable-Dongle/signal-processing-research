@@ -37,12 +37,10 @@ test("mode picker reveals explicit fast and slow path controls", async () => {
   expect(screen.getByRole("switch", { name: "Postfilter enabled" })).toHaveAttribute("aria-checked", "true");
   expect(screen.getByRole("switch", { name: "Single-speaker assumption" })).toHaveAttribute("aria-checked", "true");
   expect(screen.getByRole("switch", { name: "Localization VAD" })).toHaveAttribute("aria-checked", "true");
-  expect(screen.getByRole("switch", { name: "Enable slow path" })).toHaveAttribute("aria-checked", "false");
-  expect(screen.getByRole("switch", { name: "Single active speaker" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("button", { name: "Show slow path" })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.getByRole("button", { name: "Show advanced overrides" })).toHaveAttribute("aria-expanded", "false");
   expect(screen.getByLabelText("Localization hop (ms)")).toHaveValue(95);
   expect(screen.getByLabelText("Localization window (ms)")).toHaveValue(300);
-  expect(screen.getByLabelText("Speaker match window (deg)")).toHaveValue(30);
-  expect(screen.getByLabelText("Session overrides JSON")).toHaveValue("{}");
 
   fireEvent.change(screen.getByLabelText("Playback latency target (ms)"), { target: { value: "240" } });
   expect(onLatency).toHaveBeenCalled();
@@ -81,10 +79,12 @@ test("simulation start emits nested fast_path and slow_path config", async () =>
   await user.selectOptions(screen.getByLabelText("Enhancement tier"), "baseline_pi");
   await user.selectOptions(screen.getByLabelText("Output enhancer mode"), "wiener");
   await user.click(screen.getByRole("switch", { name: "Postfilter enabled" }));
+  await user.click(screen.getByRole("button", { name: "Show slow path" }));
   await user.click(screen.getByRole("switch", { name: "Enable slow path" }));
   await user.click(screen.getByRole("switch", { name: "Long memory" }));
   fireEvent.change(screen.getByLabelText("Localization hop (ms)"), { target: { value: "50" } });
   fireEvent.change(screen.getByLabelText("Localization window (ms)"), { target: { value: "200" } });
+  await user.click(screen.getByRole("button", { name: "Show advanced overrides" }));
   fireEvent.change(screen.getByLabelText("Session overrides JSON"), { target: { value: "{\"max_speakers_hint\":2}" } });
   await user.click(screen.getByLabelText("Use ground truth location"));
   await user.click(screen.getByLabelText("Use ground truth speaker sources"));
@@ -143,6 +143,7 @@ test("live mode reveals ReSpeaker-specific settings and accepts backend JSON ove
   expect(screen.getByLabelText("Mic array profile")).toBeInTheDocument();
   expect(screen.getByLabelText("Sample rate (Hz)")).toBeInTheDocument();
   expect(screen.queryByLabelText("Use ground truth location")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Show advanced overrides" }));
   fireEvent.change(screen.getByLabelText("Fast path overrides JSON"), {
     target: { value: "{\"suppressed_user_voice_doa_deg\":225}" },
   });

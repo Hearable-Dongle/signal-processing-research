@@ -170,6 +170,8 @@ export function SceneLauncher({
   const [fastPathOverridesText, setFastPathOverridesText] = useState("{}");
   const [slowPathOverridesText, setSlowPathOverridesText] = useState("{}");
   const [overrideError, setOverrideError] = useState("");
+  const [slowPathExpanded, setSlowPathExpanded] = useState(false);
+  const [advancedOverridesExpanded, setAdvancedOverridesExpanded] = useState(false);
   const isBusy = status === "running" || status === "starting";
   const showSimulationSettings = inputSource === "simulation";
   const showLiveSettings = inputSource === "respeaker_live";
@@ -433,186 +435,212 @@ export function SceneLauncher({
             }}
           />
 
-          <h3>Slow Path</h3>
-
-          <div className="switch-row">
-            <span>Enable slow path</span>
-            <button
-              aria-label="Enable slow path"
-              aria-checked={slowPathEnabled}
-              className={`switch ${slowPathEnabled ? "on" : "off"}`.trim()}
-              disabled={isBusy}
-              role="switch"
-              type="button"
-              onClick={() => setSlowPathEnabled((prev) => !prev)}
-            >
-              <span className="switch-thumb" />
-            </button>
-          </div>
-
-          <div className="switch-row">
-            <span>Single active speaker</span>
-            <button
-              id="single-active-speaker"
-              aria-label="Single active speaker"
-              aria-checked={singleActive}
-              className={`switch ${singleActive ? "on" : "off"}`.trim()}
-              disabled={isBusy}
-              role="switch"
-              type="button"
-              onClick={() => setSingleActive((prev) => !prev)}
-            >
-              <span className="switch-thumb" />
-            </button>
-          </div>
-
-          <div className="switch-row">
-            <span>Long memory</span>
-            <button
-              aria-label="Long memory"
-              aria-checked={longMemoryEnabled}
-              className={`switch ${longMemoryEnabled ? "on" : "off"}`.trim()}
-              disabled={isBusy}
-              role="switch"
-              type="button"
-              onClick={() => setLongMemoryEnabled((prev) => !prev)}
-            >
-              <span className="switch-thumb" />
-            </button>
-          </div>
-
-          <label htmlFor="speaker-history-size">Speaker centroid history (M)</label>
-          <input
-            id="speaker-history-size"
-            aria-label="Speaker centroid history (M)"
-            type="number"
-            min={1}
-            max={64}
-            step={1}
-            value={speakerHistorySize}
-            disabled={isBusy}
-            onChange={(e) => {
-              const nextHistory = Math.max(1, Math.min(64, Number(e.target.value) || 1));
-              setSpeakerHistorySize(nextHistory);
-              setSpeakerActivationMinPredictions((prev) => Math.min(prev, nextHistory));
-            }}
-          />
-
-          <label htmlFor="speaker-activation-min-predictions">Speaker activation observations (N)</label>
-          <input
-            id="speaker-activation-min-predictions"
-            aria-label="Speaker activation observations (N)"
-            type="number"
-            min={1}
-            max={64}
-            step={1}
-            value={speakerActivationMinPredictions}
-            disabled={isBusy}
-            onChange={(e) => {
-              const nextCount = Math.max(1, Math.min(64, Number(e.target.value) || 1));
-              setSpeakerActivationMinPredictions(Math.min(nextCount, speakerHistorySize));
-            }}
-          />
-
-          <label htmlFor="speaker-match-window-deg">Speaker match window (deg)</label>
-          <input
-            id="speaker-match-window-deg"
-            aria-label="Speaker match window (deg)"
-            type="number"
-            min={1}
-            max={180}
-            step={1}
-            value={speakerMatchWindowDeg}
-            disabled={isBusy}
-            onChange={(e) => setSpeakerMatchWindowDeg(Math.max(1, Math.min(180, Number(e.target.value) || 1)))}
-          />
-
-          <label htmlFor="centroid-association-mode">Centroid association</label>
-          <select
-            id="centroid-association-mode"
-            aria-label="Centroid association"
-            value={centroidAssociationMode}
-            disabled={isBusy}
-            onChange={(e) => setCentroidAssociationMode(e.target.value as CentroidAssociationMode)}
+          <button
+            type="button"
+            className="section-toggle"
+            aria-expanded={slowPathExpanded}
+            onClick={() => setSlowPathExpanded((prev) => !prev)}
           >
-            <option value="hard_window">Hard window</option>
-            <option value="gaussian">Gaussian</option>
-          </select>
+            {slowPathExpanded ? "Hide slow path" : "Show slow path"}
+          </button>
 
-          <label htmlFor="centroid-association-sigma-deg">Centroid sigma (deg)</label>
-          <input
-            id="centroid-association-sigma-deg"
-            aria-label="Centroid sigma (deg)"
-            type="number"
-            min={1}
-            max={90}
-            step={1}
-            value={centroidAssociationSigmaDeg}
-            disabled={isBusy}
-            onChange={(e) => setCentroidAssociationSigmaDeg(Math.max(1, Math.min(90, Number(e.target.value) || 1)))}
-          />
+          {slowPathExpanded ? (
+            <>
+              <h3>Slow Path</h3>
 
-          <label htmlFor="centroid-association-min-score">Centroid min score</label>
-          <input
-            id="centroid-association-min-score"
-            aria-label="Centroid min score"
-            type="number"
-            min={0}
-            max={1}
-            step={0.01}
-            value={centroidAssociationMinScore}
-            disabled={isBusy}
-            onChange={(e) => {
-              const nextValue = Number(e.target.value);
-              setCentroidAssociationMinScore(Math.max(0, Math.min(1, Number.isFinite(nextValue) ? nextValue : 0)));
-            }}
-          />
+              <div className="switch-row">
+                <span>Enable slow path</span>
+                <button
+                  aria-label="Enable slow path"
+                  aria-checked={slowPathEnabled}
+                  className={`switch ${slowPathEnabled ? "on" : "off"}`.trim()}
+                  disabled={isBusy}
+                  role="switch"
+                  type="button"
+                  onClick={() => setSlowPathEnabled((prev) => !prev)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
 
-          <label htmlFor="long-memory-window-ms">Long-memory window (ms)</label>
-          <input
-            id="long-memory-window-ms"
-            aria-label="Long-memory window (ms)"
-            type="number"
-            min={1000}
-            max={120000}
-            step={1000}
-            value={longMemoryWindowMs}
-            disabled={isBusy}
-            onChange={(e) => setLongMemoryWindowMs(Math.max(1000, Math.min(120000, Number(e.target.value) || 1000)))}
-          />
+              <div className="switch-row">
+                <span>Single active speaker</span>
+                <button
+                  id="single-active-speaker"
+                  aria-label="Single active speaker"
+                  aria-checked={singleActive}
+                  className={`switch ${singleActive ? "on" : "off"}`.trim()}
+                  disabled={isBusy}
+                  role="switch"
+                  type="button"
+                  onClick={() => setSingleActive((prev) => !prev)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
 
-          <h3>Advanced Overrides</h3>
+              <div className="switch-row">
+                <span>Long memory</span>
+                <button
+                  aria-label="Long memory"
+                  aria-checked={longMemoryEnabled}
+                  className={`switch ${longMemoryEnabled ? "on" : "off"}`.trim()}
+                  disabled={isBusy}
+                  role="switch"
+                  type="button"
+                  onClick={() => setLongMemoryEnabled((prev) => !prev)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
 
-          <label htmlFor="session-overrides-json">Session overrides JSON</label>
-          <textarea
-            id="session-overrides-json"
-            aria-label="Session overrides JSON"
-            value={sessionOverridesText}
-            disabled={isBusy}
-            rows={4}
-            onChange={(e) => setSessionOverridesText(e.target.value)}
-          />
+              <label htmlFor="speaker-history-size">Speaker centroid history (M)</label>
+              <input
+                id="speaker-history-size"
+                aria-label="Speaker centroid history (M)"
+                type="number"
+                min={1}
+                max={64}
+                step={1}
+                value={speakerHistorySize}
+                disabled={isBusy}
+                onChange={(e) => {
+                  const nextHistory = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+                  setSpeakerHistorySize(nextHistory);
+                  setSpeakerActivationMinPredictions((prev) => Math.min(prev, nextHistory));
+                }}
+              />
 
-          <label htmlFor="fast-path-overrides-json">Fast path overrides JSON</label>
-          <textarea
-            id="fast-path-overrides-json"
-            aria-label="Fast path overrides JSON"
-            value={fastPathOverridesText}
-            disabled={isBusy}
-            rows={4}
-            onChange={(e) => setFastPathOverridesText(e.target.value)}
-          />
+              <label htmlFor="speaker-activation-min-predictions">Speaker activation observations (N)</label>
+              <input
+                id="speaker-activation-min-predictions"
+                aria-label="Speaker activation observations (N)"
+                type="number"
+                min={1}
+                max={64}
+                step={1}
+                value={speakerActivationMinPredictions}
+                disabled={isBusy}
+                onChange={(e) => {
+                  const nextCount = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+                  setSpeakerActivationMinPredictions(Math.min(nextCount, speakerHistorySize));
+                }}
+              />
 
-          <label htmlFor="slow-path-overrides-json">Slow path overrides JSON</label>
-          <textarea
-            id="slow-path-overrides-json"
-            aria-label="Slow path overrides JSON"
-            value={slowPathOverridesText}
-            disabled={isBusy}
-            rows={4}
-            onChange={(e) => setSlowPathOverridesText(e.target.value)}
-          />
-          {overrideError ? <p className="launcher-hint">{overrideError}</p> : null}
+              <label htmlFor="speaker-match-window-deg">Speaker match window (deg)</label>
+              <input
+                id="speaker-match-window-deg"
+                aria-label="Speaker match window (deg)"
+                type="number"
+                min={1}
+                max={180}
+                step={1}
+                value={speakerMatchWindowDeg}
+                disabled={isBusy}
+                onChange={(e) => setSpeakerMatchWindowDeg(Math.max(1, Math.min(180, Number(e.target.value) || 1)))}
+              />
+
+              <label htmlFor="centroid-association-mode">Centroid association</label>
+              <select
+                id="centroid-association-mode"
+                aria-label="Centroid association"
+                value={centroidAssociationMode}
+                disabled={isBusy}
+                onChange={(e) => setCentroidAssociationMode(e.target.value as CentroidAssociationMode)}
+              >
+                <option value="hard_window">Hard window</option>
+                <option value="gaussian">Gaussian</option>
+              </select>
+
+              <label htmlFor="centroid-association-sigma-deg">Centroid sigma (deg)</label>
+              <input
+                id="centroid-association-sigma-deg"
+                aria-label="Centroid sigma (deg)"
+                type="number"
+                min={1}
+                max={90}
+                step={1}
+                value={centroidAssociationSigmaDeg}
+                disabled={isBusy}
+                onChange={(e) => setCentroidAssociationSigmaDeg(Math.max(1, Math.min(90, Number(e.target.value) || 1)))}
+              />
+
+              <label htmlFor="centroid-association-min-score">Centroid min score</label>
+              <input
+                id="centroid-association-min-score"
+                aria-label="Centroid min score"
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                value={centroidAssociationMinScore}
+                disabled={isBusy}
+                onChange={(e) => {
+                  const nextValue = Number(e.target.value);
+                  setCentroidAssociationMinScore(Math.max(0, Math.min(1, Number.isFinite(nextValue) ? nextValue : 0)));
+                }}
+              />
+
+              <label htmlFor="long-memory-window-ms">Long-memory window (ms)</label>
+              <input
+                id="long-memory-window-ms"
+                aria-label="Long-memory window (ms)"
+                type="number"
+                min={1000}
+                max={120000}
+                step={1000}
+                value={longMemoryWindowMs}
+                disabled={isBusy}
+                onChange={(e) => setLongMemoryWindowMs(Math.max(1000, Math.min(120000, Number(e.target.value) || 1000)))}
+              />
+            </>
+          ) : null}
+
+          <button
+            type="button"
+            className="section-toggle"
+            aria-expanded={advancedOverridesExpanded}
+            onClick={() => setAdvancedOverridesExpanded((prev) => !prev)}
+          >
+            {advancedOverridesExpanded ? "Hide advanced overrides" : "Show advanced overrides"}
+          </button>
+
+          {advancedOverridesExpanded ? (
+            <>
+              <h3>Advanced Overrides</h3>
+
+              <label htmlFor="session-overrides-json">Session overrides JSON</label>
+              <textarea
+                id="session-overrides-json"
+                aria-label="Session overrides JSON"
+                value={sessionOverridesText}
+                disabled={isBusy}
+                rows={4}
+                onChange={(e) => setSessionOverridesText(e.target.value)}
+              />
+
+              <label htmlFor="fast-path-overrides-json">Fast path overrides JSON</label>
+              <textarea
+                id="fast-path-overrides-json"
+                aria-label="Fast path overrides JSON"
+                value={fastPathOverridesText}
+                disabled={isBusy}
+                rows={4}
+                onChange={(e) => setFastPathOverridesText(e.target.value)}
+              />
+
+              <label htmlFor="slow-path-overrides-json">Slow path overrides JSON</label>
+              <textarea
+                id="slow-path-overrides-json"
+                aria-label="Slow path overrides JSON"
+                value={slowPathOverridesText}
+                disabled={isBusy}
+                rows={4}
+                onChange={(e) => setSlowPathOverridesText(e.target.value)}
+              />
+              {overrideError ? <p className="launcher-hint">{overrideError}</p> : null}
+            </>
+          ) : null}
 
           {showSimulationSettings && (
             <>
