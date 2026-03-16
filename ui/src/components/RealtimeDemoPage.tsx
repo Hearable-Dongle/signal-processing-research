@@ -221,8 +221,15 @@ export function RealtimeDemoPage({
           if (msg.type === "metrics") {
             setMetrics(msg);
           }
-          if (msg.type === "session_event" && msg.event === "stopped") {
-            setStatus("stopped");
+          if (msg.type === "session_event") {
+            if (msg.event === "stopped") {
+              setStatus("stopped");
+            }
+            if (msg.event === "error") {
+              setStatus(msg.detail ? `error: ${msg.detail}` : "error");
+              audioRef.current.stop();
+              stopOutputPlayback();
+            }
           }
         },
         onAudioChunk: (chunk: ArrayBuffer) => {
@@ -283,7 +290,8 @@ export function RealtimeDemoPage({
     const requestBody = {
       input_source: inputSource,
       scene_config_path: scenePath,
-      processing_mode: "specific_speaker_enhancement",
+      processing_mode: "localize_and_beamform",
+      separation_mode: "single_dominant_no_separator",
       monitor_source: nextMonitorSource,
       sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
       mic_array_profile: inputSource === "respeaker_live" ? micArrayProfile : undefined,
