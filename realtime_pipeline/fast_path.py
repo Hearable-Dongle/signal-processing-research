@@ -8,6 +8,7 @@ from typing import Callable
 import numpy as np
 
 from .contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
+from .localization_strategies.vad_utils import WebRTCVADGate
 from .shared_state import SharedPipelineState, Timer
 from .srp_tracker import SRPPeakTracker
 
@@ -180,16 +181,21 @@ class _FDBufferedBeamformer:
         x_fft: np.ndarray,
         steering: np.ndarray,
         cov_alpha: float,
+        *,
+        target_active: bool,
     ) -> np.ndarray:
-        # Estimate interference/noise covariance by subtracting the steered target covariance from the
-        # full mixture covariance, then project back onto the PSD cone for numerical stability.
+        # When the target is inactive, the mixture is a direct observation of the noise field and can
+        # refresh Rnn without any target subtraction. Otherwise estimate interference/noise covariance
+        # by subtracting the steered target covariance from the full mixture covariance.
         f_bins, mics = x_fft.shape
         inst_rxx = np.einsum("fm,fn->fmn", x_fft, x_fft.conj())
+        a = float(np.clip(cov_alpha, 0.0, 1.0))
         if self.rxx_mvdr is None:
             self.rxx_mvdr = inst_rxx
         else:
-            a = float(np.clip(cov_alpha, 0.0, 1.0))
             self.rxx_mvdr = (1.0 - a) * self.rxx_mvdr + a * inst_rxx
+        if not bool(target_active):
+            return self._update_covariance(rnn_prev, x_fft, a)
 
         a_norm_sq = np.sum(np.abs(steering) ** 2, axis=1) + 1e-10
         target_ref = np.sum(np.conj(steering) * x_fft, axis=1) / a_norm_sq
@@ -200,7 +206,6 @@ class _FDBufferedBeamformer:
         if self.target_psd_mvdr is None:
             self.target_psd_mvdr = inst_target_psd
         else:
-            a = float(np.clip(cov_alpha, 0.0, 1.0))
             self.target_psd_mvdr = (1.0 - a) * self.target_psd_mvdr + a * inst_target_psd
 
         target_cov = self.target_psd_mvdr[:, None, None] * np.einsum("fm,fn->fmn", steering, steering.conj())
@@ -208,7 +213,6 @@ class _FDBufferedBeamformer:
         if rnn_prev is None:
             smoothed_residual_cov = residual_cov
         else:
-            a = float(np.clip(cov_alpha, 0.0, 1.0))
             smoothed_residual_cov = (1.0 - a) * rnn_prev + a * residual_cov
         subtractive_rnn = self.rxx_mvdr - target_cov
         rnn = (0.75 * subtractive_rnn) + (0.25 * smoothed_residual_cov)
@@ -260,7 +264,14 @@ class _FDBufferedBeamformer:
             return base * scale
         return base
 
-    def mvdr(self, frame_mc: np.ndarray, doa_deg: float, covariance_alpha: float | None = None) -> np.ndarray:
+    def mvdr(
+        self,
+        frame_mc: np.ndarray,
+        doa_deg: float,
+        covariance_alpha: float | None = None,
+        *,
+        target_active: bool = True,
+    ) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)  # (F, M)
         a = _steering_vector_f_domain(
@@ -275,6 +286,7 @@ class _FDBufferedBeamformer:
             x_fft,
             a,
             float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+            target_active=bool(target_active),
         )
 
         f_bins = x_fft.shape[0]
@@ -291,7 +303,15 @@ class _FDBufferedBeamformer:
         y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
 
-    def lcmv_null(self, frame_mc: np.ndarray, target_doa_deg: float, null_doa_deg: float, covariance_alpha: float | None = None) -> np.ndarray:
+    def lcmv_null(
+        self,
+        frame_mc: np.ndarray,
+        target_doa_deg: float,
+        null_doa_deg: float,
+        covariance_alpha: float | None = None,
+        *,
+        target_active: bool = True,
+    ) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)
         a_target = _steering_vector_f_domain(
@@ -313,6 +333,7 @@ class _FDBufferedBeamformer:
             x_fft,
             a_target,
             float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+            target_active=bool(target_active),
         )
 
         f_bins = x_fft.shape[0]
@@ -586,6 +607,12 @@ class FastPathWorker(threading.Thread):
         self._target_activity_on_count = 0
         self._target_activity_off_count = 0
         self._target_activity_noise_floor = 1e-3
+        self._last_target_doa_deg: float | None = None
+        self._target_activity_vad = WebRTCVADGate(
+            sample_rate_hz=int(config.sample_rate_hz),
+            frame_ms=max(10, int(config.fast_frame_ms)),
+            hangover_frames=2,
+        )
 
         mode = self._target_activity_mode()
         beamforming_mode = str(self._cfg.beamforming_mode).strip().lower()
@@ -613,10 +640,12 @@ class FastPathWorker(threading.Thread):
             sound_speed_m_s=self._cfg.sound_speed_m_s,
         )
         rms = float(np.sqrt(np.mean(np.asarray(ref, dtype=np.float64) ** 2) + 1e-12))
-        noise_alpha = 0.02 if rms > self._target_activity_noise_floor else 0.12
-        self._target_activity_noise_floor = ((1.0 - noise_alpha) * self._target_activity_noise_floor) + (noise_alpha * rms)
-        floor = max(self._target_activity_noise_floor, 1e-5)
-        score = (rms - floor) / max(3.0 * floor, 1e-5)
+        vad = self._target_activity_vad.process(np.asarray(ref, dtype=np.float32))
+        noise_obs = rms if not bool(vad.raw_active) else min(rms, self._target_activity_noise_floor)
+        noise_alpha = 0.01 if noise_obs > (1.25 * self._target_activity_noise_floor) else 0.10
+        self._target_activity_noise_floor = ((1.0 - noise_alpha) * self._target_activity_noise_floor) + (noise_alpha * noise_obs)
+        rms_hint = np.clip((rms - self._target_activity_noise_floor) / max(4.0 * self._target_activity_noise_floor, 1e-5), 0.0, 1.0)
+        score = np.sqrt(np.clip(float(vad.speech_score), 0.0, 1.0) * np.clip(float(rms_hint), 0.0, 1.0))
         return float(np.clip(score, 0.0, 1.0))
 
     def _update_target_activity_hysteresis(self, score: float) -> bool:
@@ -646,10 +675,11 @@ class FastPathWorker(threading.Thread):
             if self._target_activity_override_provider is not None:
                 raw = self._target_activity_override_provider(self._frame_idx, now_ms)
                 score = 0.0 if raw is None else float(np.clip(raw, 0.0, 1.0))
-        elif target_doa_deg is None:
-            score = 0.0
         else:
-            score = self._estimate_target_activity(frame_mc, float(target_doa_deg))
+            estimate_doa = target_doa_deg if target_doa_deg is not None else self._last_target_doa_deg
+            score = 0.0 if estimate_doa is None else self._estimate_target_activity(frame_mc, float(estimate_doa))
+        if target_doa_deg is not None:
+            self._last_target_doa_deg = float(target_doa_deg)
         is_active = self._update_target_activity_hysteresis(score)
         base_alpha = float(np.clip(self._cfg.fd_cov_ema_alpha, 0.0, 1.0))
         scale = (
@@ -847,6 +877,8 @@ class FastPathWorker(threading.Thread):
         doa_deg: float,
         speech_activity: float,
         covariance_alpha: float | None = None,
+        *,
+        target_active: bool = True,
     ) -> np.ndarray:
         mode = str(self._cfg.beamforming_mode).strip().lower()
         if mode == "delay_sum":
@@ -859,7 +891,12 @@ class FastPathWorker(threading.Thread):
             )
         if mode == "gsc_fd":
             return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
-        return self._fd.mvdr(x, doa_deg=doa_deg, covariance_alpha=covariance_alpha)
+        return self._fd.mvdr(
+            x,
+            doa_deg=doa_deg,
+            covariance_alpha=covariance_alpha,
+            target_active=bool(target_active),
+        )
 
     def _apply_soft_gate(self, out: np.ndarray) -> np.ndarray:
         attenuation_db = float(max(0.0, self._cfg.suppressed_user_gate_attenuation_db))
@@ -949,6 +986,7 @@ class FastPathWorker(threading.Thread):
                     suppression_applied = False
                     suppression_strategy = "none"
                     conflict_fallback = False
+                    fallback_beam_doa = self._last_target_doa_deg
                     if ref_mode == "srp_peak" and peaks:
                         speech_activity = _frame_speech_activity(x)
                         target_doa, _target_score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
@@ -973,6 +1011,7 @@ class FastPathWorker(threading.Thread):
                                     target_doa_deg=float(target_doa),
                                     null_doa_deg=float(user_doa),
                                     covariance_alpha=target_covariance_alpha,
+                                    target_active=bool(target_activity_active),
                                 )
                                 suppression_applied = True
                                 suppression_strategy = "lcmv_null"
@@ -986,7 +1025,16 @@ class FastPathWorker(threading.Thread):
                                     doa_deg=float(target_doa),
                                     speech_activity=speech_activity,
                                     covariance_alpha=target_covariance_alpha,
+                                    target_active=bool(target_activity_active),
                                 )
+                        elif fallback_beam_doa is not None and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd":
+                            out = self._beamform_single_direction(
+                                x,
+                                doa_deg=float(fallback_beam_doa),
+                                speech_activity=speech_activity,
+                                covariance_alpha=target_covariance_alpha,
+                                target_active=False,
+                            )
                         else:
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
                             if suppression_active:
@@ -1019,6 +1067,7 @@ class FastPathWorker(threading.Thread):
                                     target_doa_deg=float(target_doa),
                                     null_doa_deg=float(user_doa),
                                     covariance_alpha=target_covariance_alpha,
+                                    target_active=bool(target_activity_active),
                                 )
                                 suppression_applied = True
                                 suppression_strategy = "lcmv_null"
@@ -1032,7 +1081,16 @@ class FastPathWorker(threading.Thread):
                                     doa_deg=float(target_doa),
                                     speech_activity=speech_activity,
                                     covariance_alpha=target_covariance_alpha,
+                                    target_active=bool(target_activity_active),
                                 )
+                        elif fallback_beam_doa is not None and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd":
+                            out = self._beamform_single_direction(
+                                x,
+                                doa_deg=float(fallback_beam_doa),
+                                speech_activity=speech_activity,
+                                covariance_alpha=target_covariance_alpha,
+                                target_active=False,
+                            )
                         else:
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
                             if suppression_active:
@@ -1040,7 +1098,23 @@ class FastPathWorker(threading.Thread):
                         if self._cfg.postfilter_enabled:
                             out = self._postfilter.process(out, speech_activity=speech_activity)
                     else:
-                        out = np.mean(x, axis=1).astype(np.float32, copy=False)
+                        speech_activity = _frame_speech_activity(x)
+                        target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
+                            x,
+                            target_doa_deg=None,
+                            now_ms=now_ms,
+                        )
+                        if fallback_beam_doa is not None and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd":
+                            target_doa = float(fallback_beam_doa)
+                            out = self._beamform_single_direction(
+                                x,
+                                doa_deg=float(fallback_beam_doa),
+                                speech_activity=speech_activity,
+                                covariance_alpha=target_covariance_alpha,
+                                target_active=False,
+                            )
+                        else:
+                            out = np.mean(x, axis=1).astype(np.float32, copy=False)
                     if suppression_active and suppression_mode in {"soft_output_gate", "lcmv_null_hysteresis"} and (
                         suppression_mode == "soft_output_gate" or conflict_fallback or target_doa is None
                     ):

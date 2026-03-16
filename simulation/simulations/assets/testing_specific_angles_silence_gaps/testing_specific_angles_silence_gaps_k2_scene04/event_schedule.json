@@ -1,0 +1,88 @@
+{
+  "speech_events": [
+    {
+      "speaker_id": 0,
+      "start_sec": 0.0,
+      "end_sec": 1.9,
+      "angle_deg": 135
+    },
+    {
+      "speaker_id": 0,
+      "start_sec": 5.2,
+      "end_sec": 7.1,
+      "angle_deg": 135
+    },
+    {
+      "speaker_id": 1,
+      "start_sec": 2.6,
+      "end_sec": 4.5,
+      "angle_deg": 225
+    },
+    {
+      "speaker_id": 1,
+      "start_sec": 7.8,
+      "end_sec": 9.7,
+      "angle_deg": 225
+    }
+  ],
+  "silence_events": [
+    {
+      "start_sec": 1.9,
+      "end_sec": 2.6
+    },
+    {
+      "start_sec": 4.5,
+      "end_sec": 5.2
+    },
+    {
+      "start_sec": 7.1,
+      "end_sec": 7.8
+    },
+    {
+      "start_sec": 9.7,
+      "end_sec": 10.0
+    }
+  ],
+  "noise_events": [
+    {
+      "noise_id": 0,
+      "start_sec": 0.0,
+      "end_sec": 10.0,
+      "angle_deg": 0,
+      "keyframe_sec": [
+        0.0,
+        2.5,
+        5.0,
+        7.5,
+        10.0
+      ],
+      "gain_points": [
+        0.12,
+        0.18,
+        0.24,
+        0.3,
+        0.34
+      ]
+    },
+    {
+      "noise_id": 1,
+      "start_sec": 0.0,
+      "end_sec": 10.0,
+      "angle_deg": 300,
+      "keyframe_sec": [
+        0.0,
+        2.5,
+        5.0,
+        7.5,
+        10.0
+      ],
+      "gain_points": [
+        0.2,
+        0.16,
+        0.14,
+        0.22,
+        0.28
+      ]
+    }
+  ]
+}
