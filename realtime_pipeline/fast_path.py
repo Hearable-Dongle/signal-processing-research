@@ -151,6 +151,8 @@ class _FDBufferedBeamformer:
         self.cfg = cfg
         self.mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=np.float64)
         self.rnn_mvdr_noise: np.ndarray | None = None
+        self.rxx_mvdr: np.ndarray | None = None
+        self.target_psd_mvdr: np.ndarray | None = None
         self.rnn_gsc: np.ndarray | None = None
         self._win = np.sqrt(np.hanning(max(4, self.analysis_n))).astype(np.float64)
         self._prev_mc = np.zeros((max(0, self.analysis_n - self.hop), self.n_mics), dtype=np.float64)
@@ -179,11 +181,38 @@ class _FDBufferedBeamformer:
         steering: np.ndarray,
         cov_alpha: float,
     ) -> np.ndarray:
-        # Estimate interference/noise covariance by projecting out the target-aligned component.
-        a_norm_sq = np.sum(np.abs(steering) ** 2, axis=1, keepdims=True) + 1e-10
-        target_ref = np.sum(np.conj(steering) * x_fft, axis=1, keepdims=True) / a_norm_sq
-        residual = x_fft - (steering * target_ref)
-        return self._update_covariance(rnn_prev, residual, cov_alpha)
+        # Estimate interference/noise covariance by subtracting the steered target covariance from the
+        # full mixture covariance, then project back onto the PSD cone for numerical stability.
+        del rnn_prev
+        f_bins, mics = x_fft.shape
+        inst_rxx = np.einsum("fm,fn->fmn", x_fft, x_fft.conj())
+        if self.rxx_mvdr is None:
+            self.rxx_mvdr = inst_rxx
+        else:
+            a = float(np.clip(cov_alpha, 0.0, 1.0))
+            self.rxx_mvdr = (1.0 - a) * self.rxx_mvdr + a * inst_rxx
+
+        a_norm_sq = np.sum(np.abs(steering) ** 2, axis=1) + 1e-10
+        target_ref = np.sum(np.conj(steering) * x_fft, axis=1) / a_norm_sq
+        inst_target_psd = np.abs(target_ref) ** 2
+        if self.target_psd_mvdr is None:
+            self.target_psd_mvdr = inst_target_psd
+        else:
+            a = float(np.clip(cov_alpha, 0.0, 1.0))
+            self.target_psd_mvdr = (1.0 - a) * self.target_psd_mvdr + a * inst_target_psd
+
+        target_cov = self.target_psd_mvdr[:, None, None] * np.einsum("fm,fn->fmn", steering, steering.conj())
+        rnn = self.rxx_mvdr - target_cov
+        rnn = 0.5 * (rnn + np.conjugate(np.swapaxes(rnn, 1, 2)))
+        diag = float(max(self.cfg.fd_diag_load, 1e-9))
+        eye = np.eye(mics, dtype=np.complex128)
+        for f in range(f_bins):
+            eigvals, eigvecs = np.linalg.eigh(rnn[f])
+            avg_power = float(np.real(np.trace(self.rxx_mvdr[f]))) / max(mics, 1)
+            floor = max(diag, 1e-4 * avg_power)
+            eigvals = np.maximum(np.real(eigvals), floor)
+            rnn[f] = (eigvecs @ np.diag(eigvals.astype(np.complex128)) @ eigvecs.conj().T) + (diag * eye)
+        return rnn
 
     def _analysis_block(self, frame_mc: np.ndarray) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
