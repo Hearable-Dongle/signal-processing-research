@@ -1,7 +1,0 @@
-PR title example: Align oracle enhancement benchmark with shared beamforming path
-
-Concise description:
-Add an oracle-steered XVF3800 enhancement benchmark that reuses the shared realtime beamforming family (`delay_sum`, `mvdr_fd`, `lcmv_null`) instead of a benchmark-local beamformer path. Wire offline oracle SRP overrides into the shared runtime, add a configurable FD analysis window for beamforming, fix the shared fast-path beamforming logic by using target-rejected noise covariance and correcting the steering-direction convention, and add trivial sanity scenes for `target 0° / interferer 90°` and `target 0° / interferer 45°` so spatial interference suppression can be validated directly.
-
-Deprecated:
-None.
