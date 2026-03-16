@@ -206,6 +206,14 @@ class PipelineConfig:
     target_activity_exit_frames: int = 4
     fd_cov_update_scale_target_active: float = 0.0
     fd_cov_update_scale_target_inactive: float = 1.0
+    target_activity_detector_mode: str = "target_blocker_calibrated"
+    target_activity_detector_backend: str = "webrtc_fused"
+    target_activity_blocker_offset_deg: float = 90.0
+    target_activity_bootstrap_only_calibration: bool = True
+    target_activity_ratio_floor_db: float = 0.0
+    target_activity_ratio_active_db: float = 4.0
+    target_activity_target_rms_floor_scale: float = 1.8
+    target_activity_blocker_rms_floor_scale: float = 1.1
     target_activity_vad_mode: int = 2
     target_activity_vad_hangover_frames: int = 2
     target_activity_noise_floor_rise_alpha: float = 0.01

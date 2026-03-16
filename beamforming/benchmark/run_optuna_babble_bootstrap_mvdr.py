@@ -30,6 +30,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--background-babble-gain-min", type=float, default=0.045)
     parser.add_argument("--background-babble-gain-max", type=float, default=0.10)
     parser.add_argument("--background-wham-gain", type=float, default=0.16)
+    parser.add_argument("--target-activity-detector-backend", default="webrtc_fused", choices=["webrtc_fused", "silero_fused"])
     parser.add_argument("--manifest-path", default=None)
     parser.add_argument("--regenerate-scenes", action="store_true")
     return parser.parse_args()
@@ -57,7 +58,7 @@ def _objective_factory(args: argparse.Namespace, trial_root: Path):
 
     def objective(trial):
         params = {
-            "fd_analysis_window_ms": trial.suggest_float("fd_analysis_window_ms", 30.0, 60.0, step=10.0),
+            "fd_analysis_window_ms": trial.suggest_float("fd_analysis_window_ms", 80.0, 80.0, step=10.0),
             "fd_cov_ema_alpha": trial.suggest_float("fd_cov_ema_alpha", 0.04, 0.25),
             "fd_diag_load": trial.suggest_float("fd_diag_load", 1e-4, 5e-2, log=True),
             "target_activity_low_threshold": trial.suggest_float("target_activity_low_threshold", 0.05, 0.45),
@@ -65,6 +66,11 @@ def _objective_factory(args: argparse.Namespace, trial_root: Path):
             "target_activity_exit_frames": trial.suggest_int("target_activity_exit_frames", 1, 8),
             "fd_cov_update_scale_target_active": trial.suggest_float("fd_cov_update_scale_target_active", 0.0, 0.5),
             "fd_cov_update_scale_target_inactive": trial.suggest_float("fd_cov_update_scale_target_inactive", 0.6, 1.5),
+            "target_activity_blocker_offset_deg": trial.suggest_float("target_activity_blocker_offset_deg", 75.0, 120.0, step=15.0),
+            "target_activity_ratio_floor_db": trial.suggest_float("target_activity_ratio_floor_db", -2.0, 8.0),
+            "target_activity_ratio_active_db": trial.suggest_float("target_activity_ratio_active_db", 1.0, 12.0),
+            "target_activity_target_rms_floor_scale": trial.suggest_float("target_activity_target_rms_floor_scale", 1.0, 3.5),
+            "target_activity_blocker_rms_floor_scale": trial.suggest_float("target_activity_blocker_rms_floor_scale", 0.8, 2.0),
             "target_activity_vad_mode": trial.suggest_int("target_activity_vad_mode", 0, 3),
             "target_activity_vad_hangover_frames": trial.suggest_int("target_activity_vad_hangover_frames", 0, 6),
             "target_activity_noise_floor_rise_alpha": trial.suggest_float("target_activity_noise_floor_rise_alpha", 0.001, 0.08, log=True),
@@ -119,6 +125,21 @@ def _objective_factory(args: argparse.Namespace, trial_root: Path):
             str(float(params["fd_cov_update_scale_target_active"])),
             "--fd-cov-update-scale-target-inactive",
             str(float(params["fd_cov_update_scale_target_inactive"])),
+            "--target-activity-detector-mode",
+            "target_blocker_calibrated",
+            "--target-activity-detector-backend",
+            str(args.target_activity_detector_backend),
+            "--target-activity-blocker-offset-deg",
+            str(float(params["target_activity_blocker_offset_deg"])),
+            "--target-activity-bootstrap-only-calibration",
+            "--target-activity-ratio-floor-db",
+            str(float(params["target_activity_ratio_floor_db"])),
+            "--target-activity-ratio-active-db",
+            str(float(params["target_activity_ratio_active_db"])),
+            "--target-activity-target-rms-floor-scale",
+            str(float(params["target_activity_target_rms_floor_scale"])),
+            "--target-activity-blocker-rms-floor-scale",
+            str(float(params["target_activity_blocker_rms_floor_scale"])),
             "--target-activity-vad-mode",
             str(int(params["target_activity_vad_mode"])),
             "--target-activity-vad-hangover-frames",

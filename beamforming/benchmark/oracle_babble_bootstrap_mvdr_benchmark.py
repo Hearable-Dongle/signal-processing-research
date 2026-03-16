@@ -51,9 +51,14 @@ from simulation.simulation_config import SimulationConfig
 DEFAULT_SCENES_ROOT = Path("simulation/simulations/configs/testing_specific_angles_babble_bootstrap")
 DEFAULT_ASSETS_ROOT = Path("simulation/simulations/assets/testing_specific_angles_babble_bootstrap")
 DEFAULT_OUT_ROOT = Path("beamforming/benchmark/oracle_babble_bootstrap_mvdr")
-DEFAULT_METHODS = ["delay_sum", "mvdr_fd_bootstrap_oracle_activity", "mvdr_fd_bootstrap_estimated_activity"]
-FAST_FRAME_MS = 10
-DEFAULT_FD_ANALYSIS_WINDOW_MS = 40.0
+DEFAULT_METHODS = [
+    "delay_sum",
+    "mvdr_fd_bootstrap_oracle_activity",
+    "mvdr_fd_bootstrap_estimated_activity",
+    "mvdr_fd_bootstrap_estimated_activity_silero",
+]
+FAST_FRAME_MS = 40
+DEFAULT_FD_ANALYSIS_WINDOW_MS = 80.0
 DEFAULT_FD_COV_EMA_ALPHA = 0.08
 DEFAULT_FD_DIAG_LOAD = 1e-3
 DEFAULT_ACTIVE_UPDATE_SCALE = 0.20
@@ -77,6 +82,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "delay_sum": MethodSpec("delay_sum", "delay_sum", None),
     "mvdr_fd_bootstrap_oracle_activity": MethodSpec("mvdr_fd_bootstrap_oracle_activity", "mvdr_fd", "oracle_target_activity"),
     "mvdr_fd_bootstrap_estimated_activity": MethodSpec("mvdr_fd_bootstrap_estimated_activity", "mvdr_fd", "estimated_target_activity"),
+    "mvdr_fd_bootstrap_estimated_activity_silero": MethodSpec("mvdr_fd_bootstrap_estimated_activity_silero", "mvdr_fd", "estimated_target_activity"),
 }
 
 
@@ -195,6 +201,8 @@ def _aggregate(rows: list[dict[str, object]], group_fields: list[str]) -> list[d
         "speech_delta_sii",
         "bootstrap_noise_reduction_db",
         "background_only_noise_reduction_db",
+        "trace_false_active_rate",
+        "trace_false_inactive_rate",
         "rtf",
         "fast_rtf",
         "slow_rtf",
@@ -244,6 +252,14 @@ def _build_session_request(
             "target_activity_exit_frames": int(params["target_activity_exit_frames"]),
             "fd_cov_update_scale_target_active": float(params["fd_cov_update_scale_target_active"]),
             "fd_cov_update_scale_target_inactive": float(params["fd_cov_update_scale_target_inactive"]),
+            "target_activity_detector_mode": str(params["target_activity_detector_mode"]),
+            "target_activity_detector_backend": str(params["target_activity_detector_backend"]),
+            "target_activity_blocker_offset_deg": float(params["target_activity_blocker_offset_deg"]),
+            "target_activity_bootstrap_only_calibration": bool(params["target_activity_bootstrap_only_calibration"]),
+            "target_activity_ratio_floor_db": float(params["target_activity_ratio_floor_db"]),
+            "target_activity_ratio_active_db": float(params["target_activity_ratio_active_db"]),
+            "target_activity_target_rms_floor_scale": float(params["target_activity_target_rms_floor_scale"]),
+            "target_activity_blocker_rms_floor_scale": float(params["target_activity_blocker_rms_floor_scale"]),
             "target_activity_vad_mode": int(params["target_activity_vad_mode"]),
             "target_activity_vad_hangover_frames": int(params["target_activity_vad_hangover_frames"]),
             "target_activity_noise_floor_rise_alpha": float(params["target_activity_noise_floor_rise_alpha"]),
@@ -438,6 +454,7 @@ def _run_job(
         "method": method_spec.method_key,
         "beamforming_mode_runtime": str(runtime_summary.get("beamforming_mode", "")),
         "target_activity_mode": "" if method_spec.target_activity_mode is None else str(method_spec.target_activity_mode),
+        "target_activity_detector_backend": str(params["target_activity_detector_backend"]),
         "main_angle_deg": scene_meta["main_angle_deg"],
         "secondary_angle_deg": scene_meta["secondary_angle_deg"],
         "scene_layout_family": scene_meta["scene_layout_family"],
@@ -507,6 +524,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-activity-exit-frames", type=int, default=3)
     parser.add_argument("--fd-cov-update-scale-target-active", type=float, default=DEFAULT_ACTIVE_UPDATE_SCALE)
     parser.add_argument("--fd-cov-update-scale-target-inactive", type=float, default=DEFAULT_INACTIVE_UPDATE_SCALE)
+    parser.add_argument("--target-activity-detector-mode", default="target_blocker_calibrated")
+    parser.add_argument("--target-activity-detector-backend", default="webrtc_fused", choices=["webrtc_fused", "silero_fused"])
+    parser.add_argument("--target-activity-blocker-offset-deg", type=float, default=90.0)
+    parser.add_argument("--target-activity-bootstrap-only-calibration", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--target-activity-ratio-floor-db", type=float, default=0.0)
+    parser.add_argument("--target-activity-ratio-active-db", type=float, default=4.0)
+    parser.add_argument("--target-activity-target-rms-floor-scale", type=float, default=1.8)
+    parser.add_argument("--target-activity-blocker-rms-floor-scale", type=float, default=1.1)
     parser.add_argument("--target-activity-vad-mode", type=int, default=2)
     parser.add_argument("--target-activity-vad-hangover-frames", type=int, default=2)
     parser.add_argument("--target-activity-noise-floor-rise-alpha", type=float, default=0.01)
@@ -553,6 +578,14 @@ def main() -> None:
         "target_activity_exit_frames": int(args.target_activity_exit_frames),
         "fd_cov_update_scale_target_active": float(args.fd_cov_update_scale_target_active),
         "fd_cov_update_scale_target_inactive": float(args.fd_cov_update_scale_target_inactive),
+        "target_activity_detector_mode": str(args.target_activity_detector_mode),
+        "target_activity_detector_backend": str(args.target_activity_detector_backend),
+        "target_activity_blocker_offset_deg": float(args.target_activity_blocker_offset_deg),
+        "target_activity_bootstrap_only_calibration": bool(args.target_activity_bootstrap_only_calibration),
+        "target_activity_ratio_floor_db": float(args.target_activity_ratio_floor_db),
+        "target_activity_ratio_active_db": float(args.target_activity_ratio_active_db),
+        "target_activity_target_rms_floor_scale": float(args.target_activity_target_rms_floor_scale),
+        "target_activity_blocker_rms_floor_scale": float(args.target_activity_blocker_rms_floor_scale),
         "target_activity_vad_mode": int(args.target_activity_vad_mode),
         "target_activity_vad_hangover_frames": int(args.target_activity_vad_hangover_frames),
         "target_activity_noise_floor_rise_alpha": float(args.target_activity_noise_floor_rise_alpha),
@@ -573,7 +606,14 @@ def main() -> None:
             "out_root": str(out_root.resolve()),
             "profile": str(args.profile),
             "method": str(method),
-            "params": params,
+            "params": {
+                **params,
+                "target_activity_detector_backend": (
+                    "silero_fused"
+                    if str(method) == "mvdr_fd_bootstrap_estimated_activity_silero"
+                    else str(params["target_activity_detector_backend"])
+                ),
+            },
         }
         for scene in scenes
         for method in list(args.methods)
