@@ -200,8 +200,8 @@ class PipelineConfig:
     fd_cov_ema_alpha: float = 0.08
     fd_diag_load: float = 1e-3
     target_activity_rnn_update_mode: str | None = None  # one of: oracle_target_activity, estimated_target_activity
-    target_activity_low_threshold: float = 0.25
-    target_activity_high_threshold: float = 0.45
+    target_activity_low_threshold: float = 0.22
+    target_activity_high_threshold: float = 0.40
     target_activity_enter_frames: int = 2
     target_activity_exit_frames: int = 4
     fd_cov_update_scale_target_active: float = 0.0
@@ -211,8 +211,8 @@ class PipelineConfig:
     target_activity_blocker_offset_deg: float = 90.0
     target_activity_bootstrap_only_calibration: bool = True
     target_activity_ratio_floor_db: float = 0.0
-    target_activity_ratio_active_db: float = 4.0
-    target_activity_target_rms_floor_scale: float = 1.8
+    target_activity_ratio_active_db: float = 3.0
+    target_activity_target_rms_floor_scale: float = 1.6
     target_activity_blocker_rms_floor_scale: float = 1.1
     target_activity_vad_mode: int = 2
     target_activity_vad_hangover_frames: int = 2

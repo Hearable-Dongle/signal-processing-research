@@ -8,7 +8,7 @@ from typing import Callable
 import numpy as np
 
 from .contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
-from .localization_strategies.vad_utils import WebRTCVADGate
+from .localization_strategies.vad_utils import SileroVADGate, WebRTCVADGate
 from .shared_state import SharedPipelineState, Timer
 from .srp_tracker import SRPPeakTracker
 
@@ -82,6 +82,11 @@ def _frame_speech_activity(frame_mc: np.ndarray) -> float:
     mono = np.mean(np.asarray(frame_mc, dtype=np.float64), axis=1)
     rms = float(np.sqrt(np.mean(mono**2) + 1e-12))
     return float(np.clip((rms - 0.005) / 0.03, 0.0, 1.0))
+
+
+def _rms_db(x: np.ndarray) -> float:
+    rms = float(np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2) + 1e-12))
+    return float(20.0 * np.log10(max(rms, 1e-12)))
 
 
 def delay_and_sum_frame(
@@ -607,13 +612,27 @@ class FastPathWorker(threading.Thread):
         self._target_activity_on_count = 0
         self._target_activity_off_count = 0
         self._target_activity_noise_floor = 1e-3
+        self._target_activity_target_floor = 1e-3
+        self._target_activity_blocker_floor = 1e-3
+        self._target_activity_ratio_baseline_db = 0.0
+        self._target_activity_calibration_frames = 0
+        self._target_activity_bootstrap_complete = False
+        self._target_activity_last_debug: dict[str, float | str | bool] = {}
         self._last_target_doa_deg: float | None = None
-        self._target_activity_vad = WebRTCVADGate(
-            sample_rate_hz=int(config.sample_rate_hz),
-            mode=max(0, min(3, int(config.target_activity_vad_mode))),
-            frame_ms=max(10, int(config.fast_frame_ms)),
-            hangover_frames=max(0, int(config.target_activity_vad_hangover_frames)),
-        )
+        backend = str(getattr(config, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
+        if backend == "silero_fused":
+            self._target_activity_vad = SileroVADGate(
+                sample_rate_hz=int(config.sample_rate_hz),
+                frame_ms=max(10, int(config.fast_frame_ms)),
+                hangover_frames=max(0, int(config.target_activity_vad_hangover_frames)),
+            )
+        else:
+            self._target_activity_vad = WebRTCVADGate(
+                sample_rate_hz=int(config.sample_rate_hz),
+                mode=max(0, min(3, int(config.target_activity_vad_mode))),
+                frame_ms=max(10, int(config.fast_frame_ms)),
+                hangover_frames=max(0, int(config.target_activity_vad_hangover_frames)),
+            )
 
         mode = self._target_activity_mode()
         beamforming_mode = str(self._cfg.beamforming_mode).strip().lower()
@@ -632,26 +651,88 @@ class FastPathWorker(threading.Thread):
         text = str(value).strip().lower()
         return text or None
 
-    def _estimate_target_activity(self, frame_mc: np.ndarray, doa_deg: float) -> float:
-        ref = delay_and_sum_frame(
+    def _target_activity_detector_backend(self) -> str:
+        return str(getattr(self._cfg, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
+
+    def _target_activity_blocker_doa(self, doa_deg: float) -> float:
+        offset = float(getattr(self._cfg, "target_activity_blocker_offset_deg", 90.0))
+        candidate = _norm_deg(float(doa_deg) + offset)
+        user_doa = self._suppressed_user_doa()
+        if user_doa is not None and _angular_dist_deg(candidate, user_doa) <= float(self._cfg.suppressed_user_match_window_deg):
+            candidate = _norm_deg(float(doa_deg) - offset)
+        return float(candidate)
+
+    def _target_activity_beams(self, frame_mc: np.ndarray, doa_deg: float) -> tuple[np.ndarray, np.ndarray, float]:
+        target_ref = delay_and_sum_frame(
             frame_mc,
             doa_deg=float(doa_deg),
             mic_geometry_xyz=self._mic_geometry_xyz,
             fs=self._cfg.sample_rate_hz,
             sound_speed_m_s=self._cfg.sound_speed_m_s,
         )
-        rms = float(np.sqrt(np.mean(np.asarray(ref, dtype=np.float64) ** 2) + 1e-12))
-        vad = self._target_activity_vad.process(np.asarray(ref, dtype=np.float32))
-        noise_obs = rms if not bool(vad.raw_active) else min(rms, self._target_activity_noise_floor)
+        blocker_doa = self._target_activity_blocker_doa(doa_deg)
+        blocker_ref = delay_and_sum_frame(
+            frame_mc,
+            doa_deg=float(blocker_doa),
+            mic_geometry_xyz=self._mic_geometry_xyz,
+            fs=self._cfg.sample_rate_hz,
+            sound_speed_m_s=self._cfg.sound_speed_m_s,
+        )
+        return target_ref, blocker_ref, float(blocker_doa)
+
+    def _update_target_activity_calibration(self, *, target_rms: float, blocker_rms: float, ratio_db: float) -> None:
         rise_alpha = float(np.clip(self._cfg.target_activity_noise_floor_rise_alpha, 0.0, 1.0))
         fall_alpha = float(np.clip(self._cfg.target_activity_noise_floor_fall_alpha, 0.0, 1.0))
         floor_margin = float(max(self._cfg.target_activity_noise_floor_margin_scale, 1.0))
-        noise_alpha = rise_alpha if noise_obs > (floor_margin * self._target_activity_noise_floor) else fall_alpha
-        self._target_activity_noise_floor = ((1.0 - noise_alpha) * self._target_activity_noise_floor) + (noise_alpha * noise_obs)
+        target_obs = float(target_rms)
+        blocker_obs = float(blocker_rms)
+        target_alpha = rise_alpha if target_obs > self._target_activity_target_floor else fall_alpha
+        blocker_alpha = rise_alpha if blocker_obs > self._target_activity_blocker_floor else fall_alpha
+        self._target_activity_target_floor = ((1.0 - target_alpha) * self._target_activity_target_floor) + (target_alpha * target_obs)
+        self._target_activity_blocker_floor = ((1.0 - blocker_alpha) * self._target_activity_blocker_floor) + (blocker_alpha * blocker_obs)
+        ratio_alpha = float(np.clip(max(rise_alpha, 0.02), 0.0, 1.0))
+        self._target_activity_ratio_baseline_db = ((1.0 - ratio_alpha) * self._target_activity_ratio_baseline_db) + (ratio_alpha * float(ratio_db))
+        self._target_activity_noise_floor = float(self._target_activity_target_floor)
+        self._target_activity_calibration_frames += 1
+
+    def _estimate_target_activity(self, frame_mc: np.ndarray, doa_deg: float) -> float:
+        target_ref, blocker_ref, blocker_doa = self._target_activity_beams(frame_mc, doa_deg)
+        target_rms = float(np.sqrt(np.mean(np.asarray(target_ref, dtype=np.float64) ** 2) + 1e-12))
+        blocker_rms = float(np.sqrt(np.mean(np.asarray(blocker_ref, dtype=np.float64) ** 2) + 1e-12))
+        ratio_db = float(20.0 * np.log10(max(target_rms, 1e-12) / max(blocker_rms, 1e-12)))
+        vad = self._target_activity_vad.process(np.asarray(target_ref, dtype=np.float32))
+        allow_calibration = bool(getattr(self._cfg, "target_activity_bootstrap_only_calibration", True))
+        should_calibrate = (not self._target_activity_bootstrap_complete) if allow_calibration else (not bool(vad.raw_active))
+        if should_calibrate:
+            self._update_target_activity_calibration(target_rms=target_rms, blocker_rms=blocker_rms, ratio_db=ratio_db)
+        target_scale = float(max(getattr(self._cfg, "target_activity_target_rms_floor_scale", 1.8), 1e-5))
+        blocker_scale = float(max(getattr(self._cfg, "target_activity_blocker_rms_floor_scale", 1.1), 1e-5))
         rms_scale = float(max(self._cfg.target_activity_rms_scale, 1e-5))
-        rms_hint = np.clip((rms - self._target_activity_noise_floor) / max(rms_scale * self._target_activity_noise_floor, 1e-5), 0.0, 1.0)
+        target_hint = np.clip((target_rms - (target_scale * self._target_activity_target_floor)) / max(rms_scale * self._target_activity_target_floor, 1e-5), 0.0, 1.0)
+        blocker_penalty = np.clip((blocker_rms - (blocker_scale * self._target_activity_blocker_floor)) / max(blocker_scale * self._target_activity_blocker_floor, 1e-5), 0.0, 1.0)
+        ratio_floor_db = float(getattr(self._cfg, "target_activity_ratio_floor_db", 0.0))
+        ratio_active_db = float(max(getattr(self._cfg, "target_activity_ratio_active_db", 4.0), ratio_floor_db + 1e-3))
+        ratio_hint = np.clip((ratio_db - self._target_activity_ratio_baseline_db - ratio_floor_db) / max(ratio_active_db - ratio_floor_db, 1e-5), 0.0, 1.0)
         score_power = float(np.clip(self._cfg.target_activity_score_exponent, 0.0, 1.0))
-        score = np.power(np.clip(float(vad.speech_score), 0.0, 1.0), score_power) * np.power(np.clip(float(rms_hint), 0.0, 1.0), 1.0 - score_power)
+        speech_feature = np.power(np.clip(float(vad.speech_score), 0.0, 1.0), score_power) * np.power(np.clip(float(target_hint), 0.0, 1.0), 1.0 - score_power)
+        blocker_suppression = np.clip(1.0 - float(blocker_penalty), 0.0, 1.0)
+        score = (0.55 * float(speech_feature)) + (0.30 * float(ratio_hint)) + (0.15 * float(blocker_suppression))
+        self._target_activity_last_debug = {
+            "backend": self._target_activity_detector_backend(),
+            "vad_source": str(vad.source),
+            "target_rms_dbfs": _rms_db(target_ref),
+            "blocker_rms_dbfs": _rms_db(blocker_ref),
+            "target_floor_dbfs": float(20.0 * np.log10(max(self._target_activity_target_floor, 1e-12))),
+            "blocker_floor_dbfs": float(20.0 * np.log10(max(self._target_activity_blocker_floor, 1e-12))),
+            "ratio_db": float(ratio_db),
+            "ratio_baseline_db": float(self._target_activity_ratio_baseline_db),
+            "ratio_hint": float(ratio_hint),
+            "target_hint": float(target_hint),
+            "blocker_penalty": float(blocker_penalty),
+            "blocker_doa_deg": float(blocker_doa),
+            "calibration_frames": float(self._target_activity_calibration_frames),
+            "bootstrap_complete": bool(self._target_activity_bootstrap_complete),
+        }
         return float(np.clip(score, 0.0, 1.0))
 
     def _update_target_activity_hysteresis(self, score: float) -> bool:
@@ -686,7 +767,11 @@ class FastPathWorker(threading.Thread):
             score = 0.0 if estimate_doa is None else self._estimate_target_activity(frame_mc, float(estimate_doa))
         if target_doa_deg is not None:
             self._last_target_doa_deg = float(target_doa_deg)
+        if mode == "estimated_target_activity" and not self._target_activity_bootstrap_complete and self._target_activity_calibration_frames < 12:
+            score = min(float(score), 0.8 * float(np.clip(self._cfg.target_activity_low_threshold, 0.0, 1.0)))
         is_active = self._update_target_activity_hysteresis(score)
+        if bool(is_active):
+            self._target_activity_bootstrap_complete = True
         base_alpha = float(np.clip(self._cfg.fd_cov_ema_alpha, 0.0, 1.0))
         scale = (
             float(np.clip(self._cfg.fd_cov_update_scale_target_active, 0.0, 1.0))
@@ -1133,6 +1218,7 @@ class FastPathWorker(threading.Thread):
                         "active": bool(target_activity_active),
                         "covariance_alpha": float(target_covariance_alpha),
                         "noise_floor_rms": float(self._target_activity_noise_floor),
+                        **dict(self._target_activity_last_debug),
                     }
                     if suppression_info or suppression_mode != "off" or self._target_activity_mode() is not None:
                         suppression_info = self._suppression_debug(

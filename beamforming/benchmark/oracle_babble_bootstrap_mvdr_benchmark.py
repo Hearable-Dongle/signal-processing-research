@@ -55,7 +55,6 @@ DEFAULT_METHODS = [
     "delay_sum",
     "mvdr_fd_bootstrap_oracle_activity",
     "mvdr_fd_bootstrap_estimated_activity",
-    "mvdr_fd_bootstrap_estimated_activity_silero",
 ]
 FAST_FRAME_MS = 40
 DEFAULT_FD_ANALYSIS_WINDOW_MS = 80.0
@@ -181,6 +180,33 @@ def _summarize_trace(summary: dict[str, object]) -> dict[str, float]:
         "trace_cov_alpha_active_mean": float(np.mean(alphas_active)) if alphas_active else float("nan"),
         "trace_cov_alpha_inactive_mean": float(np.mean(alphas_inactive)) if alphas_inactive else float("nan"),
         "trace_target_activity_score_mean": float(np.mean(scores)) if scores else float("nan"),
+    }
+
+
+def _trace_activity_errors(summary: dict[str, object], frame_states: list[OracleFrameState]) -> dict[str, float]:
+    srp_trace = list(summary.get("srp_trace", []))
+    false_active = 0
+    false_inactive = 0
+    compared = 0
+    for idx, row in enumerate(srp_trace):
+        if idx >= len(frame_states):
+            break
+        debug = dict(row.get("debug", {}))
+        target_debug = dict(debug.get("target_activity", {}))
+        detected = target_debug.get("active")
+        if detected is None:
+            continue
+        compared += 1
+        oracle_active = bool(frame_states[idx].target_active)
+        if bool(detected) and not oracle_active:
+            false_active += 1
+        elif oracle_active and not bool(detected):
+            false_inactive += 1
+    denom = max(compared, 1)
+    return {
+        "trace_activity_compared_frames": float(compared),
+        "trace_false_active_rate": float(false_active / denom),
+        "trace_false_inactive_rate": float(false_inactive / denom),
     }
 
 
@@ -447,6 +473,7 @@ def _run_job(
     bootstrap_metrics = _noise_reduction_metrics(raw_mix, processed_audio, bootstrap_mask, "bootstrap")
     background_only_metrics = _noise_reduction_metrics(raw_mix, processed_audio, background_only_mask, "background_only")
     trace_metrics = _summarize_trace(runtime_summary)
+    trace_error_metrics = _trace_activity_errors(runtime_summary, frame_states)
     duration_s = float(len(processed_audio) / max(sample_rate, 1))
 
     row: dict[str, object] = {
@@ -474,6 +501,7 @@ def _run_job(
         **bootstrap_metrics,
         **background_only_metrics,
         **trace_metrics,
+        **trace_error_metrics,
         "run_dir": str(run_dir.resolve()),
     }
 
@@ -492,6 +520,7 @@ def _run_job(
             "bootstrap_only": bootstrap_metrics,
             "background_only": background_only_metrics,
             "trace": trace_metrics,
+            "trace_errors": trace_error_metrics,
         },
     }
     _write_json(run_dir / "summary.json", run_summary)
@@ -518,8 +547,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--fd-analysis-window-ms", type=float, default=DEFAULT_FD_ANALYSIS_WINDOW_MS)
     parser.add_argument("--fd-cov-ema-alpha", type=float, default=DEFAULT_FD_COV_EMA_ALPHA)
     parser.add_argument("--fd-diag-load", type=float, default=DEFAULT_FD_DIAG_LOAD)
-    parser.add_argument("--target-activity-low-threshold", type=float, default=0.25)
-    parser.add_argument("--target-activity-high-threshold", type=float, default=0.45)
+    parser.add_argument("--target-activity-low-threshold", type=float, default=0.22)
+    parser.add_argument("--target-activity-high-threshold", type=float, default=0.40)
     parser.add_argument("--target-activity-enter-frames", type=int, default=2)
     parser.add_argument("--target-activity-exit-frames", type=int, default=3)
     parser.add_argument("--fd-cov-update-scale-target-active", type=float, default=DEFAULT_ACTIVE_UPDATE_SCALE)
@@ -529,8 +558,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-activity-blocker-offset-deg", type=float, default=90.0)
     parser.add_argument("--target-activity-bootstrap-only-calibration", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--target-activity-ratio-floor-db", type=float, default=0.0)
-    parser.add_argument("--target-activity-ratio-active-db", type=float, default=4.0)
-    parser.add_argument("--target-activity-target-rms-floor-scale", type=float, default=1.8)
+    parser.add_argument("--target-activity-ratio-active-db", type=float, default=3.0)
+    parser.add_argument("--target-activity-target-rms-floor-scale", type=float, default=1.6)
     parser.add_argument("--target-activity-blocker-rms-floor-scale", type=float, default=1.1)
     parser.add_argument("--target-activity-vad-mode", type=int, default=2)
     parser.add_argument("--target-activity-vad-hangover-frames", type=int, default=2)
