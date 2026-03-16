@@ -57,6 +57,7 @@ def build_pipeline_config_from_request(
         localization_hop_ms=max(10, int(req.localization_hop_ms)),
         direction_long_memory_enabled=bool(req.direction_long_memory_enabled),
         direction_long_memory_window_ms=float(req.direction_long_memory_window_ms),
+        postfilter_enabled=bool(req.postfilter_enabled),
         output_normalization_enabled=bool(req.output_normalization_enabled),
         output_allow_amplification=bool(req.output_allow_amplification),
         srp_overlap=float(req.overlap),

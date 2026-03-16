@@ -36,7 +36,7 @@ class FastPathConfig(BaseModel):
     enhancement_tier: Literal["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"] = "custom"
     output_enhancer_mode: Literal["off", "wiener"] = "off"
     postfilter_enabled: bool = True
-    own_voice_suppression_mode: Literal["off", "lcmv_null_hysteresis", "soft_output_gate"] = "lcmv_null_hysteresis"
+    own_voice_suppression_mode: Literal["off", "lcmv_null_hysteresis", "soft_output_gate"] = "off"
     suppressed_user_voice_doa_deg: float | None = None
     suppressed_user_match_window_deg: float = 33.0
     suppressed_user_null_on_frames: int = 3
