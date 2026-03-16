@@ -34,6 +34,19 @@ def _fractional_delay_shift(x: np.ndarray, delay_samples: float) -> np.ndarray:
     return np.interp(src_t, t, np.asarray(x, dtype=np.float64), left=0.0, right=0.0)
 
 
+def _center_mic_geometry_xyz(mic_geometry_xyz: np.ndarray) -> np.ndarray:
+    mic_pos = np.asarray(mic_geometry_xyz, dtype=np.float64)
+    if mic_pos.ndim != 2:
+        raise ValueError("mic geometry must be 2D")
+    if mic_pos.shape[0] == 3:
+        centered = mic_pos - np.mean(mic_pos, axis=1, keepdims=True)
+        return centered.astype(np.float64, copy=False)
+    if mic_pos.shape[1] == 3:
+        centered = mic_pos - np.mean(mic_pos, axis=0, keepdims=True)
+        return centered.astype(np.float64, copy=False)
+    raise ValueError("mic geometry must have 3 rows or 3 columns")
+
+
 def _norm_deg(v: float) -> float:
     return float(v % 360.0)
 
@@ -143,6 +156,8 @@ class _FDBufferedBeamformer:
         self._prev_mc = np.zeros((max(0, self.analysis_n - self.hop), self.n_mics), dtype=np.float64)
         self._ola_tail_mvdr = np.zeros(self.analysis_n, dtype=np.float64)
         self._ola_tail_gsc = np.zeros(self.analysis_n, dtype=np.float64)
+        self._ola_norm_mvdr = np.zeros(self.analysis_n, dtype=np.float64)
+        self._ola_norm_gsc = np.zeros(self.analysis_n, dtype=np.float64)
 
     def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
@@ -180,15 +195,25 @@ class _FDBufferedBeamformer:
         xw = block * self._win[:, None]
         return np.fft.rfft(xw, axis=0)  # (F, M)
 
-    def _synthesis_block(self, y_fft: np.ndarray, ola_buffer: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _synthesis_block(
+        self,
+        y_fft: np.ndarray,
+        ola_buffer: np.ndarray,
+        norm_buffer: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         y_block = np.fft.irfft(y_fft, n=self.analysis_n).real
         yw = y_block * self._win
+        win_sq = self._win**2
         buffer = np.asarray(ola_buffer, dtype=np.float64).copy()
+        norm = np.asarray(norm_buffer, dtype=np.float64).copy()
         buffer[: self.analysis_n] += yw
-        out = buffer[: self.hop].copy()
+        norm[: self.analysis_n] += win_sq
+        out = buffer[: self.hop] / np.maximum(norm[: self.hop], 1e-8)
         buffer[:-self.hop] = buffer[self.hop :]
         buffer[-self.hop :] = 0.0
-        return out.astype(np.float32, copy=False), buffer
+        norm[:-self.hop] = norm[self.hop :]
+        norm[-self.hop :] = 0.0
+        return out.astype(np.float32, copy=False), buffer, norm
 
     def _cov_alpha_from_activity(self, speech_activity: float) -> float:
         base = float(np.clip(self.cfg.fd_cov_ema_alpha, 0.0, 1.0))
@@ -225,7 +250,7 @@ class _FDBufferedBeamformer:
             wf = rinv_a / (denom + 1e-10)
             y_fft[f] = (wf.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
 
-        y, self._ola_tail_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr)
+        y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
 
     def lcmv_null(self, frame_mc: np.ndarray, target_doa_deg: float, null_doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
@@ -264,7 +289,7 @@ class _FDBufferedBeamformer:
             weights = r_inv @ constraint @ np.linalg.pinv(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128)) @ response
             y_fft[f] = (weights.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
 
-        y, self._ola_tail_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr)
+        y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
 
     def gsc(self, frame_mc: np.ndarray, doa_deg: float, speech_activity: float = 0.0) -> np.ndarray:
@@ -299,7 +324,7 @@ class _FDBufferedBeamformer:
                 wf = wq - b @ wa
             y_fft[f] = (wf.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
 
-        y, self._ola_tail_gsc = self._synthesis_block(y_fft, self._ola_tail_gsc)
+        y, self._ola_tail_gsc, self._ola_norm_gsc = self._synthesis_block(y_fft, self._ola_tail_gsc, self._ola_norm_gsc)
         return y
 
 
@@ -429,7 +454,7 @@ class FastPathWorker(threading.Thread):
         self._source = frame_source
         self._sink = frame_sink
         self._slow_queue = slow_queue
-        self._mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=float)
+        self._mic_geometry_xyz = _center_mic_geometry_xyz(mic_geometry_xyz)
         self._stop = stop_event
         dominant_lock_mode = str(config.tracking_mode).strip().lower() == "dominant_lock_v1"
         single_source_backend = (

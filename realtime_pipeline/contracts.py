@@ -101,7 +101,7 @@ class PipelineConfig:
     capon_peak_min_sharpness: float = 0.12
     capon_peak_min_margin: float = 0.04
     capon_hold_frames: int = 2
-    own_voice_suppression_mode: str = "lcmv_null_hysteresis"  # one of: off, lcmv_null_hysteresis, soft_output_gate
+    own_voice_suppression_mode: str = "off"  # one of: off, lcmv_null_hysteresis, soft_output_gate
     suppressed_user_voice_doa_deg: float | None = None
     suppressed_user_match_window_deg: float = 33.0
     suppressed_user_null_on_frames: int = 3

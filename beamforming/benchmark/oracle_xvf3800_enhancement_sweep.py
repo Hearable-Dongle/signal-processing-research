@@ -617,7 +617,8 @@ def _build_session_request(
             "localization_backend": "srp_phat_localization",
             "beamforming_mode": "mvdr_fd" if shared_method in {"mvdr_fd", "lcmv_target_only", "lcmv_null"} else "delay_sum",
             "fd_analysis_window_ms": float(FD_ANALYSIS_WINDOW_MS),
-            "output_normalization_enabled": True,
+            "postfilter_enabled": method not in {"mvdr_fd", "delay_sum", "lcmv_target_only", "lcmv_null"},
+            "output_normalization_enabled": method not in {"mvdr_fd", "delay_sum", "lcmv_target_only", "lcmv_null"},
             "output_allow_amplification": False,
         },
         slow_path={
