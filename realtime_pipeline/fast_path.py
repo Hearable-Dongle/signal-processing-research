@@ -183,7 +183,6 @@ class _FDBufferedBeamformer:
     ) -> np.ndarray:
         # Estimate interference/noise covariance by subtracting the steered target covariance from the
         # full mixture covariance, then project back onto the PSD cone for numerical stability.
-        del rnn_prev
         f_bins, mics = x_fft.shape
         inst_rxx = np.einsum("fm,fn->fmn", x_fft, x_fft.conj())
         if self.rxx_mvdr is None:
@@ -195,6 +194,9 @@ class _FDBufferedBeamformer:
         a_norm_sq = np.sum(np.abs(steering) ** 2, axis=1) + 1e-10
         target_ref = np.sum(np.conj(steering) * x_fft, axis=1) / a_norm_sq
         inst_target_psd = np.abs(target_ref) ** 2
+        if rnn_prev is not None:
+            noise_ref_psd = np.real(np.einsum("fm,fmn,fn->f", np.conj(steering), rnn_prev, steering)) / (a_norm_sq**2)
+            inst_target_psd = np.maximum(inst_target_psd - np.maximum(noise_ref_psd, 0.0), 0.0)
         if self.target_psd_mvdr is None:
             self.target_psd_mvdr = inst_target_psd
         else:
@@ -202,7 +204,14 @@ class _FDBufferedBeamformer:
             self.target_psd_mvdr = (1.0 - a) * self.target_psd_mvdr + a * inst_target_psd
 
         target_cov = self.target_psd_mvdr[:, None, None] * np.einsum("fm,fn->fmn", steering, steering.conj())
-        rnn = self.rxx_mvdr - target_cov
+        residual_cov = np.einsum("fm,fn->fmn", x_fft - (steering * target_ref[:, None]), np.conj(x_fft - (steering * target_ref[:, None])))
+        if rnn_prev is None:
+            smoothed_residual_cov = residual_cov
+        else:
+            a = float(np.clip(cov_alpha, 0.0, 1.0))
+            smoothed_residual_cov = (1.0 - a) * rnn_prev + a * residual_cov
+        subtractive_rnn = self.rxx_mvdr - target_cov
+        rnn = (0.75 * subtractive_rnn) + (0.25 * smoothed_residual_cov)
         rnn = 0.5 * (rnn + np.conjugate(np.swapaxes(rnn, 1, 2)))
         diag = float(max(self.cfg.fd_diag_load, 1e-9))
         eye = np.eye(mics, dtype=np.complex128)
