@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { MonitorSource } from "../types/contracts";
 
@@ -16,7 +16,6 @@ export type BeamformingMode = "mvdr_fd" | "sd_mvdr_fd" | "gsc_fd" | "delay_sum";
 export type OwnVoiceSuppressionMode = "off" | "lcmv_null_hysteresis" | "soft_output_gate";
 export type TrackingMode = "doa_centroid_v1";
 export type CentroidAssociationMode = "hard_window" | "gaussian";
-export type EnhancementTier = "custom" | "baseline_pi" | "classical_plus" | "quality_cpu" | "quality_heavy";
 export type OutputEnhancerMode = "off" | "wiener";
 
 export type SessionLaunchConfig = {
@@ -28,6 +27,7 @@ export type SessionLaunchConfig = {
   useGroundTruthSpeakerSources: boolean;
   audioDeviceQuery: string;
   monitorSource: MonitorSource;
+  livePlaybackEnabled: boolean;
   sampleRateHz: number;
   micArrayProfile: MicArrayProfile;
   fastPath: {
@@ -41,7 +41,6 @@ export type SessionLaunchConfig = {
     assumeSingleSpeaker: boolean;
     beamformingMode: BeamformingMode;
     ownVoiceSuppressionMode: OwnVoiceSuppressionMode;
-    enhancementTier: EnhancementTier;
     outputEnhancerMode: OutputEnhancerMode;
     postfilterEnabled: boolean;
   };
@@ -104,18 +103,37 @@ const OWN_VOICE_SUPPRESSION_MODES: Array<{ value: OwnVoiceSuppressionMode; label
   { value: "off", label: "Off" },
 ];
 
-const ENHANCEMENT_TIERS: Array<{ value: EnhancementTier; label: string }> = [
-  { value: "custom", label: "Custom" },
-  { value: "baseline_pi", label: "Baseline Pi" },
-  { value: "classical_plus", label: "Classical plus" },
-  { value: "quality_cpu", label: "Quality CPU" },
-  { value: "quality_heavy", label: "Quality heavy" },
-];
-
 const OUTPUT_ENHANCER_MODES: Array<{ value: OutputEnhancerMode; label: string }> = [
   { value: "off", label: "Off" },
   { value: "wiener", label: "Wiener" },
 ];
+
+type CollapsibleSectionProps = {
+  title: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+};
+
+function CollapsibleSection({ title, expanded, onToggle, children }: CollapsibleSectionProps) {
+  return (
+    <div className={`launcher-section ${expanded ? "expanded" : "collapsed"}`.trim()}>
+      <button
+        type="button"
+        className="launcher-section-toggle"
+        aria-expanded={expanded}
+        aria-label={title}
+        onClick={onToggle}
+      >
+        <span className={`launcher-section-arrow ${expanded ? "expanded" : ""}`.trim()} aria-hidden="true">
+          ▾
+        </span>
+        <span className="launcher-section-title">{title}</span>
+      </button>
+      {expanded ? <div className="launcher-section-body">{children}</div> : null}
+    </div>
+  );
+}
 
 export function SceneLauncher({
   status,
@@ -145,9 +163,9 @@ export function SceneLauncher({
   const [assumeSingleSpeaker, setAssumeSingleSpeaker] = useState(true);
   const [beamformingMode, setBeamformingMode] = useState<BeamformingMode>("mvdr_fd");
   const [ownVoiceSuppressionMode, setOwnVoiceSuppressionMode] = useState<OwnVoiceSuppressionMode>("lcmv_null_hysteresis");
-  const [enhancementTier, setEnhancementTier] = useState<EnhancementTier>("custom");
   const [outputEnhancerMode, setOutputEnhancerMode] = useState<OutputEnhancerMode>("off");
   const [postfilterEnabled, setPostfilterEnabled] = useState(true);
+  const [livePlaybackEnabled, setLivePlaybackEnabled] = useState(true);
   const [slowPathEnabled, setSlowPathEnabled] = useState(false);
   const [singleActive, setSingleActive] = useState(true);
   const [speakerHistorySize, setSpeakerHistorySize] = useState(8);
@@ -170,6 +188,9 @@ export function SceneLauncher({
   const [fastPathOverridesText, setFastPathOverridesText] = useState("{}");
   const [slowPathOverridesText, setSlowPathOverridesText] = useState("{}");
   const [overrideError, setOverrideError] = useState("");
+  const [localizationExpanded, setLocalizationExpanded] = useState(true);
+  const [beamformingExpanded, setBeamformingExpanded] = useState(true);
+  const [postProcExpanded, setPostProcExpanded] = useState(true);
   const [slowPathExpanded, setSlowPathExpanded] = useState(false);
   const [advancedOverridesExpanded, setAdvancedOverridesExpanded] = useState(false);
   const isBusy = status === "running" || status === "starting";
@@ -231,223 +252,231 @@ export function SceneLauncher({
         <p className="launcher-hint">Choose a mode to reveal the relevant session settings.</p>
       ) : (
         <div className="launcher-settings">
-          <h3>Fast Path</h3>
-
-          <label htmlFor="localization-backend">Localization backend</label>
-          <select
-            id="localization-backend"
-            aria-label="Localization backend"
-            value={localizationBackend}
-            disabled={isBusy}
-            onChange={(e) => setLocalizationBackend(e.target.value as LocalizationBackend)}
-          >
-            {LOCALIZATION_BACKENDS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <label htmlFor="beamforming-mode">Beamforming mode</label>
-          <select
-            id="beamforming-mode"
-            aria-label="Beamforming mode"
-            value={beamformingMode}
-            disabled={isBusy}
-            onChange={(e) => setBeamformingMode(e.target.value as BeamformingMode)}
-          >
-            {BEAMFORMING_MODES.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <label htmlFor="own-voice-suppression-mode">Own voice suppression</label>
-          <select
-            id="own-voice-suppression-mode"
-            aria-label="Own voice suppression"
-            value={ownVoiceSuppressionMode}
-            disabled={isBusy}
-            onChange={(e) => setOwnVoiceSuppressionMode(e.target.value as OwnVoiceSuppressionMode)}
-          >
-            {OWN_VOICE_SUPPRESSION_MODES.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <label htmlFor="enhancement-tier">Enhancement tier</label>
-          <select
-            id="enhancement-tier"
-            aria-label="Enhancement tier"
-            value={enhancementTier}
-            disabled={isBusy}
-            onChange={(e) => setEnhancementTier(e.target.value as EnhancementTier)}
-          >
-            {ENHANCEMENT_TIERS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <label htmlFor="output-enhancer-mode">Output enhancer mode</label>
-          <select
-            id="output-enhancer-mode"
-            aria-label="Output enhancer mode"
-            value={outputEnhancerMode}
-            disabled={isBusy}
-            onChange={(e) => setOutputEnhancerMode(e.target.value as OutputEnhancerMode)}
-          >
-            {OUTPUT_ENHANCER_MODES.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
           <div className="switch-row">
-            <span>Postfilter enabled</span>
+            <span>Live playback</span>
             <button
-              aria-label="Postfilter enabled"
-              aria-checked={postfilterEnabled}
-              className={`switch ${postfilterEnabled ? "on" : "off"}`.trim()}
+              aria-label="Live playback"
+              aria-checked={livePlaybackEnabled}
+              className={`switch ${livePlaybackEnabled ? "on" : "off"}`.trim()}
               disabled={isBusy}
               role="switch"
               type="button"
-              onClick={() => setPostfilterEnabled((prev) => !prev)}
+              onClick={() => setLivePlaybackEnabled((prev) => !prev)}
             >
               <span className="switch-thumb" />
             </button>
           </div>
 
-          <div className="switch-row">
-            <span>Single-speaker assumption</span>
-            <button
-              aria-label="Single-speaker assumption"
-              aria-checked={assumeSingleSpeaker}
-              className={`switch ${assumeSingleSpeaker ? "on" : "off"}`.trim()}
-              disabled={isBusy}
-              role="switch"
-              type="button"
-              onClick={() => setAssumeSingleSpeaker((prev) => !prev)}
-            >
-              <span className="switch-thumb" />
-            </button>
-          </div>
-
-          <div className="switch-row">
-            <span>Localization VAD</span>
-            <button
-              aria-label="Localization VAD"
-              aria-checked={localizationVadEnabled}
-              className={`switch ${localizationVadEnabled ? "on" : "off"}`.trim()}
-              disabled={isBusy}
-              role="switch"
-              type="button"
-              onClick={() => setLocalizationVadEnabled((prev) => !prev)}
-            >
-              <span className="switch-thumb" />
-            </button>
-          </div>
-
-          <label htmlFor="localization-hop-ms">Localization hop (ms)</label>
-          <input
-            id="localization-hop-ms"
-            aria-label="Localization hop (ms)"
-            type="number"
-            min={10}
-            max={500}
-            step={10}
-            value={localizationHopMs}
-            disabled={isBusy}
-            onChange={(e) => {
-              const nextHop = Math.max(10, Math.min(500, Number(e.target.value) || 10));
-              setLocalizationHopMs(nextHop);
-              setLocalizationWindowMs((prev) => Math.max(prev, nextHop));
-            }}
-          />
-
-          <label htmlFor="localization-window-ms">Localization window (ms)</label>
-          <input
-            id="localization-window-ms"
-            aria-label="Localization window (ms)"
-            type="number"
-            min={20}
-            max={2000}
-            step={10}
-            value={localizationWindowMs}
-            disabled={isBusy}
-            onChange={(e) => {
-              const nextWindow = Math.min(2000, Number(e.target.value) || 160);
-              setLocalizationWindowMs(Math.max(Math.max(20, localizationHopMs), nextWindow));
-            }}
-          />
-
-          <label htmlFor="localization-overlap">Localization overlap</label>
-          <input
-            id="localization-overlap"
-            aria-label="Localization overlap"
-            type="number"
-            min={0}
-            max={0.99}
-            step={0.01}
-            value={localizationOverlap}
-            disabled={isBusy}
-            onChange={(e) => {
-              const nextOverlap = Number(e.target.value);
-              setLocalizationOverlap(Math.max(0, Math.min(0.99, Number.isFinite(nextOverlap) ? nextOverlap : 0)));
-            }}
-          />
-
-          <label htmlFor="localization-freq-low-hz">Localization freq low (Hz)</label>
-          <input
-            id="localization-freq-low-hz"
-            aria-label="Localization freq low (Hz)"
-            type="number"
-            min={0}
-            max={24000}
-            step={50}
-            value={localizationFreqLowHz}
-            disabled={isBusy}
-            onChange={(e) => {
-              const nextLow = Math.max(0, Math.min(24000, Number(e.target.value) || 0));
-              setLocalizationFreqLowHz(nextLow);
-              setLocalizationFreqHighHz((prev) => Math.max(prev, nextLow));
-            }}
-          />
-
-          <label htmlFor="localization-freq-high-hz">Localization freq high (Hz)</label>
-          <input
-            id="localization-freq-high-hz"
-            aria-label="Localization freq high (Hz)"
-            type="number"
-            min={0}
-            max={24000}
-            step={50}
-            value={localizationFreqHighHz}
-            disabled={isBusy}
-            onChange={(e) => {
-              const nextHigh = Math.max(0, Math.min(24000, Number(e.target.value) || 0));
-              setLocalizationFreqHighHz(Math.max(nextHigh, localizationFreqLowHz));
-            }}
-          />
-
-          <button
-            type="button"
-            className="section-toggle"
-            aria-expanded={slowPathExpanded}
-            onClick={() => setSlowPathExpanded((prev) => !prev)}
+          <CollapsibleSection
+            title="Localization"
+            expanded={localizationExpanded}
+            onToggle={() => setLocalizationExpanded((prev) => !prev)}
           >
-            {slowPathExpanded ? "Hide slow path" : "Show slow path"}
-          </button>
+              <label htmlFor="localization-backend">Localization backend</label>
+              <select
+                id="localization-backend"
+                aria-label="Localization backend"
+                value={localizationBackend}
+                disabled={isBusy}
+                onChange={(e) => setLocalizationBackend(e.target.value as LocalizationBackend)}
+              >
+                {LOCALIZATION_BACKENDS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
 
-          {slowPathExpanded ? (
-            <>
-              <h3>Slow Path</h3>
+              <div className="switch-row">
+                <span>Single-speaker assumption</span>
+                <button
+                  aria-label="Single-speaker assumption"
+                  aria-checked={assumeSingleSpeaker}
+                  className={`switch ${assumeSingleSpeaker ? "on" : "off"}`.trim()}
+                  disabled={isBusy}
+                  role="switch"
+                  type="button"
+                  onClick={() => setAssumeSingleSpeaker((prev) => !prev)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
 
+              <div className="switch-row">
+                <span>Localization VAD</span>
+                <button
+                  aria-label="Localization VAD"
+                  aria-checked={localizationVadEnabled}
+                  className={`switch ${localizationVadEnabled ? "on" : "off"}`.trim()}
+                  disabled={isBusy}
+                  role="switch"
+                  type="button"
+                  onClick={() => setLocalizationVadEnabled((prev) => !prev)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
+
+              <label htmlFor="localization-hop-ms">Localization hop (ms)</label>
+              <input
+                id="localization-hop-ms"
+                aria-label="Localization hop (ms)"
+                type="number"
+                min={10}
+                max={500}
+                step={10}
+                value={localizationHopMs}
+                disabled={isBusy}
+                onChange={(e) => {
+                  const nextHop = Math.max(10, Math.min(500, Number(e.target.value) || 10));
+                  setLocalizationHopMs(nextHop);
+                  setLocalizationWindowMs((prev) => Math.max(prev, nextHop));
+                }}
+              />
+
+              <label htmlFor="localization-window-ms">Localization window (ms)</label>
+              <input
+                id="localization-window-ms"
+                aria-label="Localization window (ms)"
+                type="number"
+                min={20}
+                max={2000}
+                step={10}
+                value={localizationWindowMs}
+                disabled={isBusy}
+                onChange={(e) => {
+                  const nextWindow = Math.min(2000, Number(e.target.value) || 160);
+                  setLocalizationWindowMs(Math.max(Math.max(20, localizationHopMs), nextWindow));
+                }}
+              />
+
+              <label htmlFor="localization-overlap">Localization overlap</label>
+              <input
+                id="localization-overlap"
+                aria-label="Localization overlap"
+                type="number"
+                min={0}
+                max={0.99}
+                step={0.01}
+                value={localizationOverlap}
+                disabled={isBusy}
+                onChange={(e) => {
+                  const nextOverlap = Number(e.target.value);
+                  setLocalizationOverlap(Math.max(0, Math.min(0.99, Number.isFinite(nextOverlap) ? nextOverlap : 0)));
+                }}
+              />
+
+              <label htmlFor="localization-freq-low-hz">Localization freq low (Hz)</label>
+              <input
+                id="localization-freq-low-hz"
+                aria-label="Localization freq low (Hz)"
+                type="number"
+                min={0}
+                max={24000}
+                step={50}
+                value={localizationFreqLowHz}
+                disabled={isBusy}
+                onChange={(e) => {
+                  const nextLow = Math.max(0, Math.min(24000, Number(e.target.value) || 0));
+                  setLocalizationFreqLowHz(nextLow);
+                  setLocalizationFreqHighHz((prev) => Math.max(prev, nextLow));
+                }}
+              />
+
+              <label htmlFor="localization-freq-high-hz">Localization freq high (Hz)</label>
+              <input
+                id="localization-freq-high-hz"
+                aria-label="Localization freq high (Hz)"
+                type="number"
+                min={0}
+                max={24000}
+                step={50}
+                value={localizationFreqHighHz}
+                disabled={isBusy}
+                onChange={(e) => {
+                  const nextHigh = Math.max(0, Math.min(24000, Number(e.target.value) || 0));
+                  setLocalizationFreqHighHz(Math.max(nextHigh, localizationFreqLowHz));
+                }}
+              />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Beamforming"
+            expanded={beamformingExpanded}
+            onToggle={() => setBeamformingExpanded((prev) => !prev)}
+          >
+              <label htmlFor="beamforming-mode">Beamforming mode</label>
+              <select
+                id="beamforming-mode"
+                aria-label="Beamforming mode"
+                value={beamformingMode}
+                disabled={isBusy}
+                onChange={(e) => setBeamformingMode(e.target.value as BeamformingMode)}
+              >
+                {BEAMFORMING_MODES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <label htmlFor="own-voice-suppression-mode">Own voice suppression</label>
+              <select
+                id="own-voice-suppression-mode"
+                aria-label="Own voice suppression"
+                value={ownVoiceSuppressionMode}
+                disabled={isBusy}
+                onChange={(e) => setOwnVoiceSuppressionMode(e.target.value as OwnVoiceSuppressionMode)}
+              >
+                {OWN_VOICE_SUPPRESSION_MODES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Post-proc"
+            expanded={postProcExpanded}
+            onToggle={() => setPostProcExpanded((prev) => !prev)}
+          >
+              <label htmlFor="output-enhancer-mode">Output enhancer mode</label>
+              <select
+                id="output-enhancer-mode"
+                aria-label="Output enhancer mode"
+                value={outputEnhancerMode}
+                disabled={isBusy}
+                onChange={(e) => setOutputEnhancerMode(e.target.value as OutputEnhancerMode)}
+              >
+                {OUTPUT_ENHANCER_MODES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <div className="switch-row">
+                <span>Postfilter enabled</span>
+                <button
+                  aria-label="Postfilter enabled"
+                  aria-checked={postfilterEnabled}
+                  className={`switch ${postfilterEnabled ? "on" : "off"}`.trim()}
+                  disabled={isBusy}
+                  role="switch"
+                  type="button"
+                  onClick={() => setPostfilterEnabled((prev) => !prev)}
+                >
+                  <span className="switch-thumb" />
+                </button>
+              </div>
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Slow path"
+            expanded={slowPathExpanded}
+            onToggle={() => setSlowPathExpanded((prev) => !prev)}
+          >
               <div className="switch-row">
                 <span>Enable slow path</span>
                 <button
@@ -593,22 +622,13 @@ export function SceneLauncher({
                 disabled={isBusy}
                 onChange={(e) => setLongMemoryWindowMs(Math.max(1000, Math.min(120000, Number(e.target.value) || 1000)))}
               />
-            </>
-          ) : null}
+          </CollapsibleSection>
 
-          <button
-            type="button"
-            className="section-toggle"
-            aria-expanded={advancedOverridesExpanded}
-            onClick={() => setAdvancedOverridesExpanded((prev) => !prev)}
+          <CollapsibleSection
+            title="Advanced overrides"
+            expanded={advancedOverridesExpanded}
+            onToggle={() => setAdvancedOverridesExpanded((prev) => !prev)}
           >
-            {advancedOverridesExpanded ? "Hide advanced overrides" : "Show advanced overrides"}
-          </button>
-
-          {advancedOverridesExpanded ? (
-            <>
-              <h3>Advanced Overrides</h3>
-
               <label htmlFor="session-overrides-json">Session overrides JSON</label>
               <textarea
                 id="session-overrides-json"
@@ -639,8 +659,7 @@ export function SceneLauncher({
                 onChange={(e) => setSlowPathOverridesText(e.target.value)}
               />
               {overrideError ? <p className="launcher-hint">{overrideError}</p> : null}
-            </>
-          ) : null}
+          </CollapsibleSection>
 
           {showSimulationSettings && (
             <>
@@ -781,6 +800,7 @@ export function SceneLauncher({
                     useGroundTruthSpeakerSources,
                     audioDeviceQuery,
                     monitorSource,
+                    livePlaybackEnabled,
                     sampleRateHz,
                     micArrayProfile,
                     fastPath: {
@@ -794,7 +814,6 @@ export function SceneLauncher({
                       assumeSingleSpeaker,
                       beamformingMode,
                       ownVoiceSuppressionMode,
-                      enhancementTier,
                       outputEnhancerMode,
                       postfilterEnabled,
                     },

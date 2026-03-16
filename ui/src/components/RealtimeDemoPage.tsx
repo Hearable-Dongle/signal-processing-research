@@ -143,6 +143,7 @@ export function RealtimeDemoPage({
   const [activeInputSource, setActiveInputSource] = useState<SessionLaunchConfig["inputSource"]>("simulation");
   const [activeMicArrayProfile, setActiveMicArrayProfile] = useState<SessionLaunchConfig["micArrayProfile"]>("respeaker_xvf3800_0650");
   const [audioSampleRateHz, setAudioSampleRateHz] = useState(DEFAULT_SAMPLE_RATE);
+  const livePlaybackEnabledRef = useRef(true);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
   const capturedAudioRef = useRef<Float32Array[]>([]);
@@ -247,9 +248,11 @@ export function RealtimeDemoPage({
               });
             }
           }
-          audioRef.current.pushPacket(chunk);
-          setPlaybackStats(audioRef.current.getStats());
-          setPlayheadMs(audioRef.current.getPlaybackPositionMs());
+          if (livePlaybackEnabledRef.current) {
+            audioRef.current.pushPacket(chunk);
+            setPlaybackStats(audioRef.current.getStats());
+            setPlayheadMs(audioRef.current.getPlaybackPositionMs());
+          }
         },
         onClose: () => setStatus((s) => (s === "running" ? "disconnected" : s)),
       }),
@@ -266,6 +269,7 @@ export function RealtimeDemoPage({
       useGroundTruthSpeakerSources,
       audioDeviceQuery,
       monitorSource: nextMonitorSource,
+      livePlaybackEnabled,
       sampleRateHz,
       micArrayProfile,
       fastPath,
@@ -280,6 +284,7 @@ export function RealtimeDemoPage({
     setActiveMicArrayProfile(micArrayProfile);
     setMonitorSource(nextMonitorSource);
     setAudioSampleRateHz(playbackSampleRateHz);
+    livePlaybackEnabledRef.current = livePlaybackEnabled;
     capturedAudioRef.current = [];
     totalSamplesRef.current = 0;
     rawMixedTotalSamplesRef.current = 0;
@@ -311,7 +316,6 @@ export function RealtimeDemoPage({
         assume_single_speaker: fastPath.assumeSingleSpeaker,
         beamforming_mode: fastPath.beamformingMode,
         own_voice_suppression_mode: fastPath.ownVoiceSuppressionMode,
-        enhancement_tier: fastPath.enhancementTier,
         output_enhancer_mode: fastPath.outputEnhancerMode,
         postfilter_enabled: fastPath.postfilterEnabled,
         ...fastPathOverrides,
@@ -358,8 +362,13 @@ export function RealtimeDemoPage({
       }
     })();
     audioRef.current.setTargetLatencyMs(latencyMs);
-    await audioRef.current.start(playbackSampleRateHz);
-    setPlaybackStats(audioRef.current.getStats());
+    if (livePlaybackEnabled) {
+      await audioRef.current.start(playbackSampleRateHz);
+      setPlaybackStats(audioRef.current.getStats());
+    } else {
+      audioRef.current.stop();
+      setPlaybackStats(DEFAULT_PLAYBACK_STATS);
+    }
     ws.connect(payload.session_id);
     setStatus("running");
   }
