@@ -45,6 +45,9 @@ class FastPathConfig(BaseModel):
     target_activity_ratio_active_db: float = 3.0
     target_activity_target_rms_floor_scale: float = 1.6
     target_activity_blocker_rms_floor_scale: float = 1.1
+    target_activity_speech_weight: float = 0.55
+    target_activity_ratio_weight: float = 0.30
+    target_activity_blocker_weight: float = 0.15
     target_activity_vad_mode: int = 2
     target_activity_vad_hangover_frames: int = 2
     target_activity_noise_floor_rise_alpha: float = 0.01
@@ -230,6 +233,18 @@ class SessionStartRequest(BaseModel):
     @property
     def target_activity_blocker_rms_floor_scale(self) -> float:
         return float(self.fast_path.target_activity_blocker_rms_floor_scale)
+
+    @property
+    def target_activity_speech_weight(self) -> float:
+        return float(self.fast_path.target_activity_speech_weight)
+
+    @property
+    def target_activity_ratio_weight(self) -> float:
+        return float(self.fast_path.target_activity_ratio_weight)
+
+    @property
+    def target_activity_blocker_weight(self) -> float:
+        return float(self.fast_path.target_activity_blocker_weight)
 
     @property
     def target_activity_vad_mode(self) -> int:

@@ -716,7 +716,15 @@ class FastPathWorker(threading.Thread):
         score_power = float(np.clip(self._cfg.target_activity_score_exponent, 0.0, 1.0))
         speech_feature = np.power(np.clip(float(vad.speech_score), 0.0, 1.0), score_power) * np.power(np.clip(float(target_hint), 0.0, 1.0), 1.0 - score_power)
         blocker_suppression = np.clip(1.0 - float(blocker_penalty), 0.0, 1.0)
-        score = (0.55 * float(speech_feature)) + (0.30 * float(ratio_hint)) + (0.15 * float(blocker_suppression))
+        speech_w = float(max(getattr(self._cfg, "target_activity_speech_weight", 0.55), 0.0))
+        ratio_w = float(max(getattr(self._cfg, "target_activity_ratio_weight", 0.30), 0.0))
+        blocker_w = float(max(getattr(self._cfg, "target_activity_blocker_weight", 0.15), 0.0))
+        weight_sum = max(speech_w + ratio_w + blocker_w, 1e-6)
+        score = (
+            ((speech_w / weight_sum) * float(speech_feature))
+            + ((ratio_w / weight_sum) * float(ratio_hint))
+            + ((blocker_w / weight_sum) * float(blocker_suppression))
+        )
         self._target_activity_last_debug = {
             "backend": self._target_activity_detector_backend(),
             "vad_source": str(vad.source),
@@ -729,6 +737,9 @@ class FastPathWorker(threading.Thread):
             "ratio_hint": float(ratio_hint),
             "target_hint": float(target_hint),
             "blocker_penalty": float(blocker_penalty),
+            "speech_weight": float(speech_w / weight_sum),
+            "ratio_weight": float(ratio_w / weight_sum),
+            "blocker_weight": float(blocker_w / weight_sum),
             "blocker_doa_deg": float(blocker_doa),
             "calibration_frames": float(self._target_activity_calibration_frames),
             "bootstrap_complete": bool(self._target_activity_bootstrap_complete),

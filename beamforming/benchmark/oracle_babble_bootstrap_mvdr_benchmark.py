@@ -286,6 +286,9 @@ def _build_session_request(
             "target_activity_ratio_active_db": float(params["target_activity_ratio_active_db"]),
             "target_activity_target_rms_floor_scale": float(params["target_activity_target_rms_floor_scale"]),
             "target_activity_blocker_rms_floor_scale": float(params["target_activity_blocker_rms_floor_scale"]),
+            "target_activity_speech_weight": float(params["target_activity_speech_weight"]),
+            "target_activity_ratio_weight": float(params["target_activity_ratio_weight"]),
+            "target_activity_blocker_weight": float(params["target_activity_blocker_weight"]),
             "target_activity_vad_mode": int(params["target_activity_vad_mode"]),
             "target_activity_vad_hangover_frames": int(params["target_activity_vad_hangover_frames"]),
             "target_activity_noise_floor_rise_alpha": float(params["target_activity_noise_floor_rise_alpha"]),
@@ -561,6 +564,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-activity-ratio-active-db", type=float, default=3.0)
     parser.add_argument("--target-activity-target-rms-floor-scale", type=float, default=1.6)
     parser.add_argument("--target-activity-blocker-rms-floor-scale", type=float, default=1.1)
+    parser.add_argument("--target-activity-speech-weight", type=float, default=0.55)
+    parser.add_argument("--target-activity-ratio-weight", type=float, default=0.30)
+    parser.add_argument("--target-activity-blocker-weight", type=float, default=0.15)
     parser.add_argument("--target-activity-vad-mode", type=int, default=2)
     parser.add_argument("--target-activity-vad-hangover-frames", type=int, default=2)
     parser.add_argument("--target-activity-noise-floor-rise-alpha", type=float, default=0.01)
@@ -615,6 +621,9 @@ def main() -> None:
         "target_activity_ratio_active_db": float(args.target_activity_ratio_active_db),
         "target_activity_target_rms_floor_scale": float(args.target_activity_target_rms_floor_scale),
         "target_activity_blocker_rms_floor_scale": float(args.target_activity_blocker_rms_floor_scale),
+        "target_activity_speech_weight": float(args.target_activity_speech_weight),
+        "target_activity_ratio_weight": float(args.target_activity_ratio_weight),
+        "target_activity_blocker_weight": float(args.target_activity_blocker_weight),
         "target_activity_vad_mode": int(args.target_activity_vad_mode),
         "target_activity_vad_hangover_frames": int(args.target_activity_vad_hangover_frames),
         "target_activity_noise_floor_rise_alpha": float(args.target_activity_noise_floor_rise_alpha),
