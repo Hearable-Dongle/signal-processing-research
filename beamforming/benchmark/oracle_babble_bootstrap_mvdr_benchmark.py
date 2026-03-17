@@ -63,11 +63,11 @@ DEFAULT_SCENES_ROOT = Path("simulation/simulations/configs/testing_specific_angl
 DEFAULT_ASSETS_ROOT = Path("simulation/simulations/assets/testing_specific_angles_babble_bootstrap")
 DEFAULT_OUT_ROOT = Path("beamforming/benchmark/oracle_babble_bootstrap_mvdr")
 DEFAULT_METHODS = [
-    "mvdr_fd_bootstrap_estimated_activity_silero",
-    "mvdr_fd_bootstrap_oracle_activity",
-    "mvdr_fd_bootstrap_oracle_noise_mild",
-    "mvdr_fd_bootstrap_oracle_noise_medium",
-    "mvdr_fd_bootstrap_oracle_noise_hard",
+    "mvdr_fd_silero_no_pf",
+    "mvdr_fd_silero_pf_wiener",
+    "mvdr_fd_silero_pf_rnnoise",
+    "mvdr_fd_silero_pf_coherence_wiener",
+    "mvdr_fd_silero_pf_wiener_then_rnnoise",
 ]
 FAST_FRAME_MS = 40
 DEFAULT_MVDR_HOP_MS = 40
@@ -193,6 +193,103 @@ DEFAULT_ORACLE_NOISE_PRESETS: dict[str, dict[str, object]] = {
     },
 }
 
+DEFAULT_POSTFILTER_PRESETS: dict[str, dict[str, object]] = {
+    "no_pf": {
+        "postfilter_enabled": False,
+        "postfilter_method": "off",
+        "postfilter_noise_ema_alpha": 0.08,
+        "postfilter_speech_ema_alpha": 0.12,
+        "postfilter_gain_floor": 0.22,
+        "postfilter_gain_ema_alpha": 0.2,
+        "postfilter_dd_alpha": 0.92,
+        "postfilter_noise_update_speech_scale": 0.2,
+        "postfilter_freq_smoothing_bins": 2,
+        "postfilter_gain_max_step_db": 2.5,
+        "rnnoise_wet_mix": 1.0,
+        "rnnoise_input_gain_db": 0.0,
+        "coherence_wiener_gain_floor": 0.12,
+        "coherence_wiener_coherence_exponent": 1.5,
+        "coherence_wiener_temporal_alpha": 0.65,
+    },
+    "pf_mild": {
+        "postfilter_enabled": True,
+        "postfilter_method": "wiener_dd",
+        "postfilter_noise_ema_alpha": 0.06,
+        "postfilter_speech_ema_alpha": 0.10,
+        "postfilter_gain_floor": 0.34,
+        "postfilter_gain_ema_alpha": 0.16,
+        "postfilter_dd_alpha": 0.94,
+        "postfilter_noise_update_speech_scale": 0.12,
+        "postfilter_freq_smoothing_bins": 1,
+        "postfilter_gain_max_step_db": 1.8,
+        "rnnoise_wet_mix": 1.0,
+        "rnnoise_input_gain_db": 0.0,
+        "coherence_wiener_gain_floor": 0.12,
+        "coherence_wiener_coherence_exponent": 1.5,
+        "coherence_wiener_temporal_alpha": 0.65,
+    },
+    "pf_medium": {
+        "postfilter_enabled": True,
+        "postfilter_method": "wiener_dd",
+        "postfilter_noise_ema_alpha": 0.08,
+        "postfilter_speech_ema_alpha": 0.12,
+        "postfilter_gain_floor": 0.26,
+        "postfilter_gain_ema_alpha": 0.20,
+        "postfilter_dd_alpha": 0.92,
+        "postfilter_noise_update_speech_scale": 0.15,
+        "postfilter_freq_smoothing_bins": 2,
+        "postfilter_gain_max_step_db": 2.2,
+        "rnnoise_wet_mix": 1.0,
+        "rnnoise_input_gain_db": 0.0,
+        "coherence_wiener_gain_floor": 0.12,
+        "coherence_wiener_coherence_exponent": 1.5,
+        "coherence_wiener_temporal_alpha": 0.65,
+    },
+    "pf_rnnoise": {
+        "postfilter_enabled": True,
+        "postfilter_method": "rnnoise",
+        "postfilter_noise_ema_alpha": 0.08,
+        "postfilter_speech_ema_alpha": 0.12,
+        "postfilter_gain_floor": 0.22,
+        "postfilter_gain_ema_alpha": 0.2,
+        "postfilter_dd_alpha": 0.92,
+        "postfilter_noise_update_speech_scale": 0.2,
+        "postfilter_freq_smoothing_bins": 2,
+        "postfilter_gain_max_step_db": 2.5,
+        "rnnoise_wet_mix": 1.0,
+        "rnnoise_input_gain_db": 0.0,
+    },
+    "pf_coherence_wiener": {
+        "postfilter_enabled": True,
+        "postfilter_method": "coherence_wiener",
+        "postfilter_noise_ema_alpha": 0.08,
+        "postfilter_speech_ema_alpha": 0.12,
+        "postfilter_gain_floor": 0.22,
+        "postfilter_gain_ema_alpha": 0.2,
+        "postfilter_dd_alpha": 0.92,
+        "postfilter_noise_update_speech_scale": 0.2,
+        "postfilter_freq_smoothing_bins": 2,
+        "postfilter_gain_max_step_db": 2.5,
+        "coherence_wiener_gain_floor": 0.12,
+        "coherence_wiener_coherence_exponent": 1.5,
+        "coherence_wiener_temporal_alpha": 0.65,
+    },
+    "pf_wiener_then_rnnoise": {
+        "postfilter_enabled": True,
+        "postfilter_method": "wiener_then_rnnoise",
+        "postfilter_noise_ema_alpha": 0.06,
+        "postfilter_speech_ema_alpha": 0.10,
+        "postfilter_gain_floor": 0.34,
+        "postfilter_gain_ema_alpha": 0.16,
+        "postfilter_dd_alpha": 0.94,
+        "postfilter_noise_update_speech_scale": 0.12,
+        "postfilter_freq_smoothing_bins": 1,
+        "postfilter_gain_max_step_db": 1.8,
+        "rnnoise_wet_mix": 1.0,
+        "rnnoise_input_gain_db": 0.0,
+    },
+}
+
 
 @dataclass(frozen=True)
 class MethodSpec:
@@ -201,6 +298,7 @@ class MethodSpec:
     target_activity_mode: str | None
     noise_covariance_mode: str = "estimated_target_subtractive"
     aggression_level: str = "baseline"
+    postfilter_preset: str = "no_pf"
 
 
 @dataclass(frozen=True)
@@ -217,6 +315,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "mvdr_fd_bootstrap_oracle_noise_mild": MethodSpec("mvdr_fd_bootstrap_oracle_noise_mild", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "mild"),
     "mvdr_fd_bootstrap_oracle_noise_medium": MethodSpec("mvdr_fd_bootstrap_oracle_noise_medium", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "medium"),
     "mvdr_fd_bootstrap_oracle_noise_hard": MethodSpec("mvdr_fd_bootstrap_oracle_noise_hard", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "hard"),
+    "mvdr_fd_silero_no_pf": MethodSpec("mvdr_fd_silero_no_pf", "mvdr_fd", "estimated_target_activity", postfilter_preset="no_pf"),
+    "mvdr_fd_silero_pf_wiener": MethodSpec("mvdr_fd_silero_pf_wiener", "mvdr_fd", "estimated_target_activity", postfilter_preset="pf_mild"),
+    "mvdr_fd_silero_pf_rnnoise": MethodSpec("mvdr_fd_silero_pf_rnnoise", "mvdr_fd", "estimated_target_activity", postfilter_preset="pf_rnnoise"),
+    "mvdr_fd_silero_pf_coherence_wiener": MethodSpec("mvdr_fd_silero_pf_coherence_wiener", "mvdr_fd", "estimated_target_activity", postfilter_preset="pf_coherence_wiener"),
+    "mvdr_fd_silero_pf_wiener_then_rnnoise": MethodSpec("mvdr_fd_silero_pf_wiener_then_rnnoise", "mvdr_fd", "estimated_target_activity", postfilter_preset="pf_wiener_then_rnnoise"),
 }
 
 
@@ -257,9 +360,24 @@ def _detector_param_overrides(args: argparse.Namespace) -> dict[str, object]:
         "target_activity_noise_floor_margin_scale",
         "target_activity_rms_scale",
         "target_activity_score_exponent",
+        "postfilter_enabled",
+        "postfilter_method",
+        "postfilter_noise_ema_alpha",
+        "postfilter_speech_ema_alpha",
+        "postfilter_gain_floor",
+        "postfilter_gain_ema_alpha",
+        "postfilter_dd_alpha",
+        "postfilter_noise_update_speech_scale",
+        "postfilter_freq_smoothing_bins",
+        "postfilter_gain_max_step_db",
+        "rnnoise_wet_mix",
+        "rnnoise_input_gain_db",
+        "coherence_wiener_gain_floor",
+        "coherence_wiener_coherence_exponent",
+        "coherence_wiener_temporal_alpha",
     ]
     for field in detector_fields:
-        value = getattr(args, field)
+        value = getattr(args, field, None)
         if value is not None:
             out[field] = value
     return out
@@ -474,7 +592,21 @@ def _build_session_request(
             "target_activity_noise_floor_margin_scale": float(params["target_activity_noise_floor_margin_scale"]),
             "target_activity_rms_scale": float(params["target_activity_rms_scale"]),
             "target_activity_score_exponent": float(params["target_activity_score_exponent"]),
-            "postfilter_enabled": False,
+            "postfilter_enabled": bool(params["postfilter_enabled"]),
+            "postfilter_method": str(params["postfilter_method"]),
+            "postfilter_noise_ema_alpha": float(params["postfilter_noise_ema_alpha"]),
+            "postfilter_speech_ema_alpha": float(params["postfilter_speech_ema_alpha"]),
+            "postfilter_gain_floor": float(params["postfilter_gain_floor"]),
+            "postfilter_gain_ema_alpha": float(params["postfilter_gain_ema_alpha"]),
+            "postfilter_dd_alpha": float(params["postfilter_dd_alpha"]),
+            "postfilter_noise_update_speech_scale": float(params["postfilter_noise_update_speech_scale"]),
+            "postfilter_freq_smoothing_bins": int(params["postfilter_freq_smoothing_bins"]),
+            "postfilter_gain_max_step_db": float(params["postfilter_gain_max_step_db"]),
+            "rnnoise_wet_mix": float(params["rnnoise_wet_mix"]),
+            "rnnoise_input_gain_db": float(params["rnnoise_input_gain_db"]),
+            "coherence_wiener_gain_floor": float(params["coherence_wiener_gain_floor"]),
+            "coherence_wiener_coherence_exponent": float(params["coherence_wiener_coherence_exponent"]),
+            "coherence_wiener_temporal_alpha": float(params["coherence_wiener_temporal_alpha"]),
             "output_normalization_enabled": False,
             "output_allow_amplification": False,
             "own_voice_suppression_mode": "off",
@@ -771,6 +903,9 @@ def _run_job(
         "target_activity_mode": "" if method_spec.target_activity_mode is None else str(method_spec.target_activity_mode),
         "fd_noise_covariance_mode": str(params["fd_noise_covariance_mode"]),
         "aggression_level": str(method_spec.aggression_level),
+        "postfilter_preset": str(method_spec.postfilter_preset),
+        "postfilter_enabled": bool(params["postfilter_enabled"]),
+        "postfilter_method": str(params["postfilter_method"]),
         "target_activity_detector_backend": str(params["target_activity_detector_backend"]),
         "mvdr_hop_ms": int(params["mvdr_hop_ms"]),
         "target_activity_update_every_n_fast_frames": int(params["target_activity_update_every_n_fast_frames"]),
@@ -870,6 +1005,20 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-activity-noise-floor-margin-scale", type=float, default=None)
     parser.add_argument("--target-activity-rms-scale", type=float, default=None)
     parser.add_argument("--target-activity-score-exponent", type=float, default=None)
+    parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--postfilter-noise-ema-alpha", type=float, default=None)
+    parser.add_argument("--postfilter-speech-ema-alpha", type=float, default=None)
+    parser.add_argument("--postfilter-gain-floor", type=float, default=None)
+    parser.add_argument("--postfilter-gain-ema-alpha", type=float, default=None)
+    parser.add_argument("--postfilter-dd-alpha", type=float, default=None)
+    parser.add_argument("--postfilter-noise-update-speech-scale", type=float, default=None)
+    parser.add_argument("--postfilter-freq-smoothing-bins", type=int, default=None)
+    parser.add_argument("--postfilter-gain-max-step-db", type=float, default=None)
+    parser.add_argument("--rnnoise-wet-mix", type=float, default=None)
+    parser.add_argument("--rnnoise-input-gain-db", type=float, default=None)
+    parser.add_argument("--coherence-wiener-gain-floor", type=float, default=None)
+    parser.add_argument("--coherence-wiener-coherence-exponent", type=float, default=None)
+    parser.add_argument("--coherence-wiener-temporal-alpha", type=float, default=None)
     return parser.parse_args()
 
 
@@ -936,6 +1085,7 @@ def main() -> None:
         "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
         "fd_noise_covariance_mode": "estimated_target_subtractive",
         **base_detector_params,
+        **DEFAULT_POSTFILTER_PRESETS["no_pf"],
         **detector_overrides,
         "scene_family": str(args.scene_family),
         "bootstrap_noise_only_sec": bootstrap_noise_only_sec,
@@ -954,8 +1104,13 @@ def main() -> None:
             "params": {
                 **params,
                 **(
+                    DEFAULT_POSTFILTER_PRESETS.get(METHOD_SPECS[str(method)].postfilter_preset, {})
+                    if str(method) in METHOD_SPECS
+                    else {}
+                ),
+                **(
                     DEFAULT_TARGET_ACTIVITY_PRESETS["silero_fused"]
-                    if str(method) == "mvdr_fd_bootstrap_estimated_activity_silero"
+                    if str(method) in {"mvdr_fd_bootstrap_estimated_activity_silero", "mvdr_fd_silero_no_pf", "mvdr_fd_silero_pf_mild", "mvdr_fd_silero_pf_medium"}
                     else {}
                 ),
                 **(

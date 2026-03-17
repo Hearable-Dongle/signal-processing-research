@@ -233,6 +233,7 @@ class PipelineConfig:
     fd_speech_cov_update_scale: float = 0.25
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True
+    postfilter_method: str = "off"  # one of: off, wiener_dd, rnnoise, coherence_wiener, wiener_then_rnnoise
     postfilter_noise_ema_alpha: float = 0.08
     postfilter_speech_ema_alpha: float = 0.12
     postfilter_gain_floor: float = 0.22
@@ -241,6 +242,11 @@ class PipelineConfig:
     postfilter_noise_update_speech_scale: float = 0.2
     postfilter_freq_smoothing_bins: int = 2
     postfilter_gain_max_step_db: float = 2.5
+    rnnoise_wet_mix: float = 1.0
+    rnnoise_input_gain_db: float = 0.0
+    coherence_wiener_gain_floor: float = 0.12
+    coherence_wiener_coherence_exponent: float = 1.5
+    coherence_wiener_temporal_alpha: float = 0.65
     # Fast-path safety
     output_soft_clip_enabled: bool = True
     output_soft_clip_drive: float = 1.2

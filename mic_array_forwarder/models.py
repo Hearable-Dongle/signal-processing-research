@@ -68,7 +68,21 @@ class FastPathConfig(BaseModel):
     capon_hold_frames: int = 2
     enhancement_tier: Literal["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"] = "custom"
     output_enhancer_mode: Literal["off", "wiener"] = "off"
+    postfilter_method: Literal["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise"] = "off"
     postfilter_enabled: bool = True
+    postfilter_noise_ema_alpha: float = 0.08
+    postfilter_speech_ema_alpha: float = 0.12
+    postfilter_gain_floor: float = 0.22
+    postfilter_gain_ema_alpha: float = 0.2
+    postfilter_dd_alpha: float = 0.92
+    postfilter_noise_update_speech_scale: float = 0.2
+    postfilter_freq_smoothing_bins: int = 2
+    postfilter_gain_max_step_db: float = 2.5
+    rnnoise_wet_mix: float = 1.0
+    rnnoise_input_gain_db: float = 0.0
+    coherence_wiener_gain_floor: float = 0.12
+    coherence_wiener_coherence_exponent: float = 1.5
+    coherence_wiener_temporal_alpha: float = 0.65
     own_voice_suppression_mode: Literal["off", "lcmv_null_hysteresis", "soft_output_gate"] = "off"
     suppressed_user_voice_doa_deg: float | None = None
     suppressed_user_match_window_deg: float = 33.0
@@ -324,6 +338,62 @@ class SessionStartRequest(BaseModel):
     @property
     def postfilter_enabled(self) -> bool:
         return bool(self.fast_path.postfilter_enabled)
+
+    @property
+    def postfilter_method(self) -> str:
+        return str(self.fast_path.postfilter_method)
+
+    @property
+    def postfilter_noise_ema_alpha(self) -> float:
+        return float(self.fast_path.postfilter_noise_ema_alpha)
+
+    @property
+    def postfilter_speech_ema_alpha(self) -> float:
+        return float(self.fast_path.postfilter_speech_ema_alpha)
+
+    @property
+    def postfilter_gain_floor(self) -> float:
+        return float(self.fast_path.postfilter_gain_floor)
+
+    @property
+    def postfilter_gain_ema_alpha(self) -> float:
+        return float(self.fast_path.postfilter_gain_ema_alpha)
+
+    @property
+    def postfilter_dd_alpha(self) -> float:
+        return float(self.fast_path.postfilter_dd_alpha)
+
+    @property
+    def postfilter_noise_update_speech_scale(self) -> float:
+        return float(self.fast_path.postfilter_noise_update_speech_scale)
+
+    @property
+    def postfilter_freq_smoothing_bins(self) -> int:
+        return int(self.fast_path.postfilter_freq_smoothing_bins)
+
+    @property
+    def postfilter_gain_max_step_db(self) -> float:
+        return float(self.fast_path.postfilter_gain_max_step_db)
+
+    @property
+    def rnnoise_wet_mix(self) -> float:
+        return float(self.fast_path.rnnoise_wet_mix)
+
+    @property
+    def rnnoise_input_gain_db(self) -> float:
+        return float(self.fast_path.rnnoise_input_gain_db)
+
+    @property
+    def coherence_wiener_gain_floor(self) -> float:
+        return float(self.fast_path.coherence_wiener_gain_floor)
+
+    @property
+    def coherence_wiener_coherence_exponent(self) -> float:
+        return float(self.fast_path.coherence_wiener_coherence_exponent)
+
+    @property
+    def coherence_wiener_temporal_alpha(self) -> float:
+        return float(self.fast_path.coherence_wiener_temporal_alpha)
 
     @property
     def own_voice_suppression_mode(self) -> str:

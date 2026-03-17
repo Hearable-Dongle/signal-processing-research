@@ -7,6 +7,11 @@ from typing import Callable
 
 import numpy as np
 
+try:
+    from pyrnnoise import RNNoise as PyRNNoise  # type: ignore
+except ImportError:  # pragma: no cover
+    PyRNNoise = None
+
 from .contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
 from .localization_strategies.vad_utils import SileroVADGate, WebRTCVADGate
 from .shared_state import SharedPipelineState, Timer
@@ -589,6 +594,122 @@ class _PostFilterState:
         return out.astype(np.float32, copy=False)
 
 
+class _RNNoisePostFilter:
+    def __init__(self, cfg: PipelineConfig):
+        if PyRNNoise is None:
+            raise RuntimeError("RNNoise postfilter requested but pyrnnoise is unavailable.")
+        self.cfg = cfg
+        self._backend = PyRNNoise(48000)
+
+    def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
+        del speech_activity
+        x = np.asarray(frame, dtype=np.float32).reshape(-1)
+        gain = float(10.0 ** (float(self.cfg.rnnoise_input_gain_db) / 20.0))
+        x_in = (x * gain).astype(np.float32, copy=False)
+        parts: list[np.ndarray] = []
+        for _vad, den in self._backend.denoise_chunk(x_in):
+            den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
+            if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
+                den_arr = den_arr / 32768.0
+            parts.append(den_arr)
+        out = np.concatenate(parts, axis=0) if parts else np.zeros_like(x)
+        if out.shape[0] < x.shape[0]:
+            out = np.pad(out, (0, x.shape[0] - out.shape[0]))
+        out = out[: x.shape[0]]
+        wet = float(np.clip(self.cfg.rnnoise_wet_mix, 0.0, 1.0))
+        return (((wet * out) + ((1.0 - wet) * x))).astype(np.float32, copy=False)
+
+
+class _CoherenceWienerPostFilter:
+    def __init__(self, cfg: PipelineConfig, mic_geometry_xyz: np.ndarray):
+        self.cfg = cfg
+        self.mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=np.float64)
+        self._prev_gain: np.ndarray | None = None
+
+    def process(self, frame_mc: np.ndarray, beamformed: np.ndarray, doa_deg: float) -> np.ndarray:
+        x_mc = np.asarray(frame_mc, dtype=np.float64)
+        y = np.asarray(beamformed, dtype=np.float64).reshape(-1)
+        n = int(y.shape[0])
+        win = np.sqrt(np.hanning(max(4, n))).astype(np.float64)
+        x_fft = np.fft.rfft(x_mc * win[:, None], axis=0)
+        y_fft = np.fft.rfft(y * win)
+        steering = _steering_vector_f_domain(
+            doa_deg=float(doa_deg),
+            n_fft=n,
+            fs=self.cfg.sample_rate_hz,
+            mic_geometry_xyz=self.mic_geometry_xyz,
+            sound_speed_m_s=self.cfg.sound_speed_m_s,
+        )
+        aligned = x_fft * np.conj(steering)
+        auto_psd = np.mean(np.abs(aligned) ** 2, axis=1)
+        pair_terms = []
+        for i in range(aligned.shape[1]):
+            for j in range(i + 1, aligned.shape[1]):
+                denom = np.sqrt((np.abs(aligned[:, i]) ** 2) * (np.abs(aligned[:, j]) ** 2)) + 1e-12
+                pair_terms.append(np.abs(aligned[:, i] * np.conj(aligned[:, j])) / denom)
+        coherence = np.mean(pair_terms, axis=0) if pair_terms else np.ones_like(auto_psd)
+        coherence = np.clip(coherence, 0.0, 1.0)
+        noise_psd = np.maximum((1.0 - coherence) * auto_psd, 1e-10)
+        speech_psd = np.maximum(np.abs(y_fft) ** 2 - noise_psd, 1e-10)
+        wiener = speech_psd / (speech_psd + noise_psd + 1e-10)
+        floor = float(np.clip(self.cfg.coherence_wiener_gain_floor, 0.05, 1.0))
+        exponent = float(max(self.cfg.coherence_wiener_coherence_exponent, 0.1))
+        temporal_alpha = float(np.clip(self.cfg.coherence_wiener_temporal_alpha, 0.0, 0.999))
+        gain = floor + (1.0 - floor) * ((coherence**exponent) * wiener)
+        if self._prev_gain is None:
+            self._prev_gain = np.ones_like(gain)
+        gain = (temporal_alpha * self._prev_gain) + ((1.0 - temporal_alpha) * gain)
+        self._prev_gain = gain
+        out = np.fft.irfft(y_fft * gain, n=n).real
+        return out.astype(np.float32, copy=False)
+
+
+class _HybridPostFilter:
+    def __init__(self, first, second):
+        self._first = first
+        self._second = second
+
+    def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
+        first = self._first.process(frame, speech_activity=speech_activity)
+        return self._second.process(first, speech_activity=speech_activity)
+
+
+class _PostFilterRouter:
+    def __init__(self, frame_samples: int, cfg: PipelineConfig, mic_geometry_xyz: np.ndarray):
+        self.cfg = cfg
+        self.method = str(getattr(cfg, "postfilter_method", "off")).strip().lower()
+        self._wiener = _PostFilterState(frame_samples=frame_samples, cfg=cfg)
+        self._rnnoise = None
+        self._coherence = None
+        if self.method in {"rnnoise", "wiener_then_rnnoise"}:
+            self._rnnoise = _RNNoisePostFilter(cfg)
+        if self.method == "coherence_wiener":
+            self._coherence = _CoherenceWienerPostFilter(cfg, mic_geometry_xyz)
+        if self.method == "wiener_then_rnnoise":
+            self._hybrid = _HybridPostFilter(self._wiener, self._rnnoise)
+        else:
+            self._hybrid = None
+
+    def process(self, beamformed: np.ndarray, *, speech_activity: float, frame_mc: np.ndarray | None = None, doa_deg: float | None = None) -> np.ndarray:
+        if not bool(self.cfg.postfilter_enabled) or self.method == "off":
+            return np.asarray(beamformed, dtype=np.float32)
+        if self.method == "wiener_dd":
+            return self._wiener.process(beamformed, speech_activity=speech_activity)
+        if self.method == "rnnoise":
+            if self._rnnoise is None:
+                raise RuntimeError("RNNoise postfilter not initialized.")
+            return self._rnnoise.process(beamformed, speech_activity=speech_activity)
+        if self.method == "coherence_wiener":
+            if self._coherence is None or frame_mc is None or doa_deg is None:
+                raise RuntimeError("coherence_wiener postfilter requires frame_mc and doa_deg.")
+            return self._coherence.process(frame_mc, beamformed, doa_deg)
+        if self.method == "wiener_then_rnnoise":
+            if self._hybrid is None:
+                raise RuntimeError("Hybrid postfilter not initialized.")
+            return self._hybrid.process(beamformed, speech_activity=speech_activity)
+        return np.asarray(beamformed, dtype=np.float32)
+
+
 def _soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
     d = max(float(drive), 1e-6)
     y = np.tanh(d * np.asarray(x, dtype=np.float64))
@@ -721,7 +842,7 @@ class FastPathWorker(threading.Thread):
             cfg=config,
             mic_geometry_xyz=self._mic_geometry_xyz,
         )
-        self._postfilter = _PostFilterState(frame_samples=frame_samples, cfg=config)
+        self._postfilter = _PostFilterRouter(frame_samples=frame_samples, cfg=config, mic_geometry_xyz=self._mic_geometry_xyz)
         self._srp_override_provider = srp_override_provider
         self._target_activity_override_provider = target_activity_override_provider
         self._oracle_noise_frame_provider = oracle_noise_frame_provider
@@ -1309,7 +1430,7 @@ class FastPathWorker(threading.Thread):
                             if suppression_active:
                                 conflict_fallback = True
                         if self._cfg.postfilter_enabled:
-                            out = self._postfilter.process(out, speech_activity=speech_activity)
+                            out = self._postfilter.process(out, speech_activity=speech_activity, frame_mc=x, doa_deg=float(target_doa) if target_doa is not None else None)
                     elif speaker_map:
                         speech_activity = float(
                             max((float(getattr(v, "activity_confidence", 0.0)) for v in speaker_map.values()), default=0.0)
@@ -1368,7 +1489,7 @@ class FastPathWorker(threading.Thread):
                             if suppression_active:
                                 conflict_fallback = True
                         if self._cfg.postfilter_enabled:
-                            out = self._postfilter.process(out, speech_activity=speech_activity)
+                            out = self._postfilter.process(out, speech_activity=speech_activity, frame_mc=x, doa_deg=float(target_doa) if target_doa is not None else None)
                     else:
                         speech_activity = _frame_speech_activity(x)
                         target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
