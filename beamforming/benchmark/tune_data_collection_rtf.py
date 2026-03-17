@@ -45,7 +45,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--localization-backends",
         nargs="+",
-        choices=["capon_1src", "capon_mvdr_refine_1src", "music_1src", "srp_phat_localization"],
+        choices=["capon_1src", "capon_multisrc", "capon_mvdr_refine_1src", "music_1src", "srp_phat_localization"],
         default=["capon_1src"],
     )
     return parser.parse_args()

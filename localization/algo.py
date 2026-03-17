@@ -3,6 +3,33 @@ import pyroomacoustics as pra
 import scipy.signal as signal
 from scipy.linalg import eigh
 
+
+def _circular_local_maxima(
+    values: np.ndarray,
+    *,
+    min_separation_bins: int,
+    max_peaks: int,
+) -> list[int]:
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    if arr.size == 0:
+        return []
+    peaks: list[tuple[float, int]] = []
+    for idx in range(arr.size):
+        prev_v = float(arr[(idx - 1) % arr.size])
+        cur_v = float(arr[idx])
+        next_v = float(arr[(idx + 1) % arr.size])
+        if cur_v > prev_v and cur_v >= next_v:
+            peaks.append((cur_v, int(idx)))
+    peaks.sort(key=lambda item: item[0], reverse=True)
+    picked: list[int] = []
+    for _score, idx in peaks:
+        if any(min(abs(idx - prev), arr.size - abs(idx - prev)) < min_separation_bins for prev in picked):
+            continue
+        picked.append(int(idx))
+        if len(picked) >= max_peaks:
+            break
+    return picked
+
 class SSZLocalization:
     def __init__(self, mic_pos, fs=16000, nfft=512, overlap=0.5, epsilon=0.2, d_freq=2, freq_range=(200, 3000), max_sources=4):
         """
@@ -806,6 +833,7 @@ class CaponLocalization:
         self.max_sources = int(max_sources)
         self.c = 343.0
         self.grid_size = int(kwargs.get("grid_size", 360))
+        self.min_separation_deg = float(kwargs.get("min_separation_deg", 15.0))
         self.diagonal_loading = float(kwargs.get("diagonal_loading", 1e-3))
         self.vad_enabled = bool(kwargs.get("vad_enabled", True))
         self.vad_frame_ms = int(kwargs.get("vad_frame_ms", 20))
@@ -925,6 +953,17 @@ class CaponLocalization:
     def _score_peak(self, spectrum: np.ndarray, *, exclusion_deg: float = 12.0) -> dict[str, float | int | None | bool]:
         smooth_spectrum = np.asarray(spectrum, dtype=np.float64)
         best_idx = int(np.argmax(smooth_spectrum))
+        return self._score_peak_at_index(smooth_spectrum, best_idx, exclusion_deg=exclusion_deg)
+
+    def _score_peak_at_index(
+        self,
+        spectrum: np.ndarray,
+        peak_idx: int,
+        *,
+        exclusion_deg: float = 12.0,
+    ) -> dict[str, float | int | None | bool]:
+        smooth_spectrum = np.asarray(spectrum, dtype=np.float64)
+        best_idx = int(peak_idx % max(1, smooth_spectrum.size))
         best_score = float(smooth_spectrum[best_idx])
         left = float(smooth_spectrum[(best_idx - 1) % smooth_spectrum.size])
         right = float(smooth_spectrum[(best_idx + 1) % smooth_spectrum.size])
@@ -1026,6 +1065,89 @@ class CaponLocalization:
         self.last_debug["output_mode"] = "abstained"
         self.last_peak_scores = []
         return [], smooth_spectrum, []
+
+
+class CaponMultiSourceLocalization(CaponLocalization):
+    def process(self, audio):
+        speech_active = self._speech_active(audio)
+        self.last_debug = {
+            "vad_enabled": bool(self.vad_enabled),
+            "window_speech_active": bool(speech_active),
+        }
+        if not speech_active:
+            self._spectrum_accum = None
+            self.last_peak_scores = []
+            self.last_debug.update(
+                {
+                    "output_mode": "no_speech",
+                    "accepted_peak_count": 0,
+                    "accepted_peak_indices": [],
+                    "accepted_peak_scores": [],
+                }
+            )
+            return [], np.zeros(self.grid_size), []
+
+        roi = self._compute_stft_roi(audio)
+        if roi is None:
+            self.last_peak_scores = []
+            self.last_debug.update(
+                {
+                    "output_mode": "empty_roi",
+                    "accepted_peak_count": 0,
+                    "accepted_peak_indices": [],
+                    "accepted_peak_scores": [],
+                }
+            )
+            return [], np.zeros(self.grid_size), []
+        relevant_freqs, Zxx_roi = roi
+
+        search_angles = np.linspace(0, 2 * np.pi, self.grid_size, endpoint=False)
+        spectrum = self._capon_spectrum_from_roi(relevant_freqs, Zxx_roi, search_angles)
+        smooth_spectrum = self._smooth_spectrum(spectrum)
+        if smooth_spectrum.size == 0:
+            self.last_peak_scores = []
+            self.last_debug.update(
+                {
+                    "output_mode": "empty_spectrum",
+                    "accepted_peak_count": 0,
+                    "accepted_peak_indices": [],
+                    "accepted_peak_scores": [],
+                }
+            )
+            return [], smooth_spectrum, []
+
+        min_sep_bins = max(1, int(round(self.min_separation_deg / max(360.0 / max(smooth_spectrum.size, 1), 1e-6))))
+        peak_indices = _circular_local_maxima(
+            smooth_spectrum,
+            min_separation_bins=min_sep_bins,
+            max_peaks=max(1, self.max_sources),
+        )
+
+        accepted_indices: list[int] = []
+        accepted_scores: list[float] = []
+        accepted_angles: list[float] = []
+        peak_debug: list[dict[str, float | int | None | bool]] = []
+        for idx in peak_indices:
+            peak_eval = self._score_peak_at_index(smooth_spectrum, idx)
+            peak_debug.append(peak_eval)
+            if not bool(peak_eval["accepted"]):
+                continue
+            accepted_indices.append(int(idx))
+            accepted_scores.append(float(peak_eval["confidence"]))
+            accepted_angles.append(float(search_angles[idx]))
+
+        self.last_peak_scores = [float(v) for v in accepted_scores]
+        self.last_debug.update(
+            {
+                "output_mode": "accepted" if accepted_angles else "abstained",
+                "candidate_peak_indices": [int(v) for v in peak_indices],
+                "accepted_peak_indices": [int(v) for v in accepted_indices],
+                "accepted_peak_scores": [float(v) for v in accepted_scores],
+                "accepted_peak_count": int(len(accepted_angles)),
+                "peak_evaluations": peak_debug,
+            }
+        )
+        return accepted_angles, smooth_spectrum, []
 
 
 class CaponMVDRRefineLocalization(CaponLocalization):

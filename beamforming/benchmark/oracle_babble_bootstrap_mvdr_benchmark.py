@@ -1405,7 +1405,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest-path", default=None)
     parser.add_argument("--mvdr-hop-ms", type=int, default=DEFAULT_MVDR_HOP_MS)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=DEFAULT_FD_ANALYSIS_WINDOW_MS)
-    parser.add_argument("--localization-backend", default="srp_phat_localization", choices=["srp_phat_localization", "capon_1src", "capon_mvdr_refine_1src", "music_1src"])
+    parser.add_argument(
+        "--localization-backend",
+        default="srp_phat_localization",
+        choices=["srp_phat_localization", "capon_1src", "capon_multisrc", "capon_mvdr_refine_1src", "music_1src"],
+    )
     parser.add_argument("--split-runtime-mode", default="monolithic", choices=["monolithic", "pipelined", "beamforming_only", "postfilter_only"])
     parser.add_argument("--postfilter-queue-max-frames", type=int, default=4)
     parser.add_argument("--postfilter-queue-drop-oldest", action=argparse.BooleanOptionalAction, default=False)
