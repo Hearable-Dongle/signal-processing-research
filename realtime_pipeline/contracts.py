@@ -185,6 +185,10 @@ class PipelineConfig:
     speaker_match_window_deg: float = 25.0
     focus_direction_match_window_deg: float = 30.0
     focus_target_hold_frames: int = 8
+    multi_target_max_speakers: int = 2
+    multi_target_hold_frames: int = 12
+    multi_target_min_confidence: float = 0.2
+    multi_target_min_activity: float = 0.15
     centroid_association_mode: str = "hard_window"  # one of: hard_window, gaussian
     centroid_association_sigma_deg: float = 10.0
     centroid_association_min_score: float = 0.15
@@ -269,7 +273,7 @@ class PipelineConfig:
     speaker_map_confidence_decay: float = 0.9
     speaker_map_activity_decay: float = 0.92
     # Beamformer mode
-    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum
+    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum, lcmv_top2_tracked
     mvdr_hop_ms: int | None = None
     # DOA/gain smoothing to reduce steering chatter
     doa_ema_alpha: float = 0.2

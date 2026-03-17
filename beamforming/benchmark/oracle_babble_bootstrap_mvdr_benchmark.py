@@ -319,6 +319,8 @@ class MethodSpec:
     aggression_level: str = "baseline"
     postfilter_preset: str = "no_pf"
     focus_zone_target: bool = False
+    slow_path_enabled: bool = False
+    multi_target_tracked: bool = False
 
 
 @dataclass(frozen=True)
@@ -343,6 +345,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "delay_sum_zone_target": MethodSpec("delay_sum_zone_target", "delay_sum", None, focus_zone_target=True),
     "mvdr_fd_zone_target_oracle_activity": MethodSpec("mvdr_fd_zone_target_oracle_activity", "mvdr_fd", "oracle_target_activity", focus_zone_target=True),
     "mvdr_fd_zone_target_estimated_activity": MethodSpec("mvdr_fd_zone_target_estimated_activity", "mvdr_fd", "estimated_target_activity", focus_zone_target=True),
+    "lcmv_top2_tracked_oracle": MethodSpec("lcmv_top2_tracked_oracle", "lcmv_top2_tracked", "oracle_target_activity", multi_target_tracked=True),
+    "lcmv_top2_tracked_estimated": MethodSpec("lcmv_top2_tracked_estimated", "lcmv_top2_tracked", "estimated_target_activity", slow_path_enabled=True, multi_target_tracked=True),
 }
 
 
@@ -578,6 +582,7 @@ def _build_session_request(
     profile: str,
     params: dict[str, object],
 ) -> SessionStartRequest:
+    slow_path_enabled = bool(method_spec.slow_path_enabled)
     return SessionStartRequest(
         input_source="simulation",
         channel_count=int(channel_count),
@@ -645,12 +650,16 @@ def _build_session_request(
             "coherence_wiener_temporal_alpha": float(params["coherence_wiener_temporal_alpha"]),
             "focus_direction_match_window_deg": float(params["focus_direction_match_window_deg"]),
             "focus_target_hold_frames": int(params["focus_target_hold_frames"]),
+            "multi_target_max_speakers": int(params["multi_target_max_speakers"]),
+            "multi_target_hold_frames": int(params["multi_target_hold_frames"]),
+            "multi_target_min_confidence": float(params["multi_target_min_confidence"]),
+            "multi_target_min_activity": float(params["multi_target_min_activity"]),
             "output_normalization_enabled": False,
             "output_allow_amplification": False,
             "own_voice_suppression_mode": "off",
         },
         slow_path={
-            "enabled": False,
+            "enabled": bool(slow_path_enabled),
             "tracking_mode": "doa_centroid_v1",
             "speaker_match_window_deg": 25.0,
             "centroid_association_mode": "hard_window",
@@ -688,6 +697,28 @@ def _build_target_only_schedule(
     return active_speaker_ids, active_doa_deg
 
 
+def _build_multi_target_activity_mask(
+    metadata: dict[str, object],
+    *,
+    target_speaker_ids: set[int],
+    sample_rate: int,
+    n_samples: int,
+) -> np.ndarray:
+    mask = np.zeros(n_samples, dtype=bool)
+    for row in list(metadata.get("assets", {}).get("speech", [])):
+        sid = int(row.get("speaker_id", -1))
+        if sid not in target_speaker_ids:
+            continue
+        window = row.get("active_window_sec")
+        if not isinstance(window, list) or len(window) < 2:
+            continue
+        start = max(0, int(round(float(window[0]) * sample_rate)))
+        end = min(n_samples, int(round(float(window[1]) * sample_rate)))
+        if end > start:
+            mask[start:end] = True
+    return mask
+
+
 def _build_clean_reference_for_target(
     source_signals: list[np.ndarray],
     speaker_to_source_idx: dict[int, int],
@@ -707,6 +738,37 @@ def _build_clean_reference_for_target(
         if source.shape[0] < n_samples:
             source = np.pad(source, (0, n_samples - source.shape[0]))
         clean_ref[mask] = source[:n_samples][mask]
+    return clean_ref
+
+
+def _build_clean_reference_sum_for_targets(
+    metadata: dict[str, object],
+    *,
+    source_signals: list[np.ndarray],
+    speaker_to_source_idx: dict[int, int],
+    target_speaker_ids: set[int],
+    sample_rate: int,
+    n_samples: int,
+) -> np.ndarray:
+    clean_ref = np.zeros(n_samples, dtype=np.float64)
+    for row in list(metadata.get("assets", {}).get("speech", [])):
+        sid = int(row.get("speaker_id", -1))
+        if sid not in target_speaker_ids:
+            continue
+        source_idx = speaker_to_source_idx.get(sid)
+        if source_idx is None:
+            continue
+        window = row.get("active_window_sec")
+        if not isinstance(window, list) or len(window) < 2:
+            continue
+        start = max(0, int(round(float(window[0]) * sample_rate)))
+        end = min(n_samples, int(round(float(window[1]) * sample_rate)))
+        if end <= start:
+            continue
+        source = np.asarray(source_signals[int(source_idx)], dtype=np.float64).reshape(-1)
+        if source.shape[0] < n_samples:
+            source = np.pad(source, (0, n_samples - source.shape[0]))
+        clean_ref[start:end] += source[start:end]
     return clean_ref
 
 
@@ -752,6 +814,58 @@ def _build_oracle_non_target_mic_audio_for_target(
         n_mics=int(n_mics),
     )
     return (np.asarray(mic_audio, dtype=np.float32) - oracle_target).astype(np.float32, copy=False)
+
+
+def _build_pair_activity_frame_states(
+    *,
+    metadata: dict[str, object],
+    sample_rate: int,
+    n_samples: int,
+    fast_frame_ms: int,
+    target_speaker_ids: set[int],
+    bootstrap_window_sec: tuple[float, float],
+    bootstrap_reference_doa_deg: float,
+) -> list[OracleFrameState]:
+    frame_samples = max(1, int(round(sample_rate * (float(fast_frame_ms) / 1000.0))))
+    n_frames = int(math.ceil(n_samples / frame_samples))
+    speech_rows = [row for row in list(metadata.get("assets", {}).get("speech", [])) if int(row.get("speaker_id", -1)) in target_speaker_ids]
+    states: list[OracleFrameState] = []
+    for frame_idx in range(n_frames):
+        start = frame_idx * frame_samples
+        start_sec = float(start) / max(sample_rate, 1)
+        active_ids: list[int] = []
+        active_peaks: list[float] = []
+        for row in speech_rows:
+            window = row.get("active_window_sec")
+            if not isinstance(window, list) or len(window) < 2:
+                continue
+            if float(window[0]) <= start_sec < float(window[1]):
+                active_ids.append(int(row.get("speaker_id", -1)))
+                active_peaks.append(float(row.get("angle_deg", math.nan)))
+        if float(bootstrap_window_sec[0]) <= start_sec < float(bootstrap_window_sec[1]):
+            peaks = [float(bootstrap_reference_doa_deg)]
+            scores = [1.0]
+        else:
+            peaks = [float(v) for v in active_peaks]
+            scores = [1.0 for _ in active_peaks]
+        states.append(
+            OracleFrameState(
+                frame_index=frame_idx,
+                timestamp_ms=float(frame_idx * fast_frame_ms),
+                target_speaker_id=(int(active_ids[0]) if active_ids else None),
+                target_doa_deg=(float(active_peaks[0]) if active_peaks else None),
+                target_activity_score=1.0 if active_ids else 0.0,
+                target_active=bool(active_ids),
+                null_user_speaker_id=None,
+                null_user_doa_deg=None,
+                force_suppression_active=False,
+                null_candidate=False,
+                null_fallback=False,
+                peaks_deg=tuple(peaks),
+                peak_scores=tuple(scores),
+            )
+        )
+    return states
 
 
 def _build_zone_overlap_frame_states(
@@ -947,6 +1061,11 @@ def _run_job(
     n_samples = int(mic_audio.shape[0])
     speech_rows = list(metadata_payload.get("assets", {}).get("speech", []))
     target_speaker_id = int(metadata_payload.get("zone_target_speaker_id", 0))
+    multi_target_speaker_ids = {
+        int(row.get("speaker_id", -1))
+        for row in speech_rows
+        if int(row.get("speaker_id", -1)) >= 0
+    } if method_spec.multi_target_tracked else {int(target_speaker_id)}
     if method_spec.focus_zone_target:
         active_speaker_ids, active_doa_deg = _build_target_only_schedule(
             metadata_payload,
@@ -954,6 +1073,9 @@ def _run_job(
             sample_rate=sample_rate,
             n_samples=n_samples,
         )
+    elif method_spec.multi_target_tracked:
+        active_speaker_ids = np.full(n_samples, -1, dtype=np.int32)
+        active_doa_deg = np.full(n_samples, np.nan, dtype=np.float64)
     else:
         active_speaker_ids = np.full(n_samples, -1, dtype=np.int32)
         active_doa_deg = np.full(n_samples, np.nan, dtype=np.float64)
@@ -970,13 +1092,31 @@ def _run_job(
             active_speaker_ids[start:end] = speaker_id
             active_doa_deg[start:end] = doa_deg
 
-    speech_mask = np.asarray(active_speaker_ids >= 0, dtype=bool)
+    speech_mask = (
+        _build_multi_target_activity_mask(
+            metadata_payload,
+            target_speaker_ids=multi_target_speaker_ids,
+            sample_rate=sample_rate,
+            n_samples=n_samples,
+        )
+        if method_spec.multi_target_tracked
+        else np.asarray(active_speaker_ids >= 0, dtype=bool)
+    )
     bootstrap_window = tuple(float(v) for v in metadata_payload.get("bootstrap_noise_only_window_sec", [0.0, 0.0])[:2])
     bootstrap_reference_doa_deg = float(metadata_payload.get("bootstrap_reference_doa_deg", scene_meta["main_angle_deg"] or 0.0))
     bootstrap_mask = _bootstrap_mask(n_samples, sample_rate, bootstrap_window)
     background_only_mask = np.logical_not(speech_mask)
     speaker_to_source_idx = _speaker_source_index_map(sim_cfg, metadata_payload)
-    if method_spec.focus_zone_target:
+    if method_spec.multi_target_tracked:
+        clean_ref_dry = _build_clean_reference_sum_for_targets(
+            metadata_payload,
+            source_signals=source_signals,
+            speaker_to_source_idx=speaker_to_source_idx,
+            target_speaker_ids=multi_target_speaker_ids,
+            sample_rate=sample_rate,
+            n_samples=n_samples,
+        )
+    elif method_spec.focus_zone_target:
         clean_ref_dry = _build_clean_reference_for_target(
             source_signals,
             speaker_to_source_idx,
@@ -986,7 +1126,24 @@ def _run_job(
     else:
         clean_ref_dry = _build_clean_reference(source_signals, speaker_to_source_idx, active_speaker_ids)
     raw_mix = np.mean(np.asarray(mic_audio, dtype=np.float64), axis=1).astype(np.float32, copy=False)
-    if method_spec.focus_zone_target:
+    if method_spec.multi_target_tracked:
+        oracle_target_mic_audio = np.zeros((int(n_samples), int(mic_audio.shape[1])), dtype=np.float32)
+        for sid in multi_target_speaker_ids:
+            sid_active_ids, _sid_doa = _build_target_only_schedule(
+                metadata_payload,
+                target_speaker_id=int(sid),
+                sample_rate=sample_rate,
+                n_samples=n_samples,
+            )
+            oracle_target_mic_audio += _build_oracle_target_mic_audio_for_target(
+                source_mic_audio=source_mic_audio,
+                speaker_to_source_idx=speaker_to_source_idx,
+                active_speaker_ids=sid_active_ids,
+                target_speaker_ids={int(sid)},
+                n_samples=n_samples,
+                n_mics=int(mic_audio.shape[1]),
+            )
+    elif method_spec.focus_zone_target:
         oracle_target_mic_audio = _build_oracle_target_mic_audio_for_target(
             source_mic_audio=source_mic_audio,
             speaker_to_source_idx=speaker_to_source_idx,
@@ -1005,7 +1162,9 @@ def _run_job(
         )
     oracle_noise_audio = None
     if method_spec.noise_covariance_mode == "oracle_non_target_residual":
-        if method_spec.focus_zone_target:
+        if method_spec.multi_target_tracked:
+            oracle_noise_audio = (np.asarray(mic_audio, dtype=np.float32) - oracle_target_mic_audio).astype(np.float32, copy=False)
+        elif method_spec.focus_zone_target:
             oracle_noise_audio = _build_oracle_non_target_mic_audio_for_target(
                 mic_audio=np.asarray(mic_audio, dtype=np.float32),
                 source_mic_audio=source_mic_audio,
@@ -1022,7 +1181,17 @@ def _run_job(
                 active_speaker_ids=active_speaker_ids,
             )
 
-    if method_spec.focus_zone_target:
+    if method_spec.multi_target_tracked:
+        frame_states = _build_pair_activity_frame_states(
+            metadata=metadata_payload,
+            sample_rate=sample_rate,
+            n_samples=n_samples,
+            fast_frame_ms=FAST_FRAME_MS,
+            target_speaker_ids=multi_target_speaker_ids,
+            bootstrap_window_sec=bootstrap_window,
+            bootstrap_reference_doa_deg=bootstrap_reference_doa_deg,
+        )
+    elif method_spec.focus_zone_target:
         frame_states = _build_zone_overlap_frame_states(
             metadata=metadata_payload,
             sample_rate=sample_rate,
@@ -1364,6 +1533,10 @@ def main() -> None:
         "background_wham_gain": background_wham_gain,
         "focus_direction_match_window_deg": target_zone_width_deg,
         "focus_target_hold_frames": 8,
+        "multi_target_max_speakers": 2,
+        "multi_target_hold_frames": 12,
+        "multi_target_min_confidence": 0.2,
+        "multi_target_min_activity": 0.15,
     }
     jobs = [
         {
@@ -1387,6 +1560,7 @@ def main() -> None:
                         "mvdr_fd_silero_pf_mild",
                         "mvdr_fd_silero_pf_medium",
                         "mvdr_fd_zone_target_estimated_activity",
+                        "lcmv_top2_tracked_estimated",
                     }
                     else {}
                 ),
@@ -1398,7 +1572,7 @@ def main() -> None:
                 **detector_overrides,
                 "target_activity_detector_backend": (
                     "silero_fused"
-                    if str(method) in {"mvdr_fd_bootstrap_estimated_activity_silero", "mvdr_fd_zone_target_estimated_activity"} or str(method).startswith("mvdr_fd_bootstrap_oracle_noise_")
+                    if str(method) in {"mvdr_fd_bootstrap_estimated_activity_silero", "mvdr_fd_zone_target_estimated_activity", "lcmv_top2_tracked_estimated"} or str(method).startswith("mvdr_fd_bootstrap_oracle_noise_")
                     else str(params["target_activity_detector_backend"])
                 ),
                 "fd_noise_covariance_mode": (
