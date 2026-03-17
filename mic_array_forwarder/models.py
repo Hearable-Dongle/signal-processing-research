@@ -29,7 +29,7 @@ class FastPathConfig(BaseModel):
         "capon_mvdr_refine_1src",
         "music_1src",
     ] = "srp_phat_localization"
-    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
+    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "lcmv_top2_tracked"] = "mvdr_fd"
     mvdr_hop_ms: int | None = None
     fd_analysis_window_ms: float = 20.0
     # Defaults track the sensitivity-tuned Silero preset from
@@ -93,6 +93,12 @@ class FastPathConfig(BaseModel):
     suppressed_user_null_off_frames: int = 10
     suppressed_user_gate_attenuation_db: float = 18.0
     suppressed_user_target_conflict_deg: float = 30.0
+    focus_direction_match_window_deg: float = 30.0
+    focus_target_hold_frames: int = 8
+    multi_target_max_speakers: int = 2
+    multi_target_hold_frames: int = 12
+    multi_target_min_confidence: float = 0.2
+    multi_target_min_activity: float = 0.15
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
 
@@ -437,6 +443,30 @@ class SessionStartRequest(BaseModel):
     @property
     def suppressed_user_target_conflict_deg(self) -> float:
         return float(self.fast_path.suppressed_user_target_conflict_deg)
+
+    @property
+    def focus_direction_match_window_deg(self) -> float:
+        return float(self.fast_path.focus_direction_match_window_deg)
+
+    @property
+    def focus_target_hold_frames(self) -> int:
+        return int(self.fast_path.focus_target_hold_frames)
+
+    @property
+    def multi_target_max_speakers(self) -> int:
+        return int(self.fast_path.multi_target_max_speakers)
+
+    @property
+    def multi_target_hold_frames(self) -> int:
+        return int(self.fast_path.multi_target_hold_frames)
+
+    @property
+    def multi_target_min_confidence(self) -> float:
+        return float(self.fast_path.multi_target_min_confidence)
+
+    @property
+    def multi_target_min_activity(self) -> float:
+        return float(self.fast_path.multi_target_min_activity)
 
     @property
     def output_normalization_enabled(self) -> bool:

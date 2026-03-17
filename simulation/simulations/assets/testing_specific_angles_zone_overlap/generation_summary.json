@@ -1,0 +1,46 @@
+{
+  "scenes": [
+    {
+      "scene_name": "testing_specific_angles_zone_overlap_k2_scene00",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene00.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene00",
+      "target_zone_center_deg": 0,
+      "target_zone_width_deg": 30.0
+    },
+    {
+      "scene_name": "testing_specific_angles_zone_overlap_k2_scene01",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01",
+      "target_zone_center_deg": 35,
+      "target_zone_width_deg": 30.0
+    },
+    {
+      "scene_name": "testing_specific_angles_zone_overlap_k2_scene02",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene02.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene02",
+      "target_zone_center_deg": 70,
+      "target_zone_width_deg": 30.0
+    },
+    {
+      "scene_name": "testing_specific_angles_zone_overlap_k2_scene03",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene03.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene03",
+      "target_zone_center_deg": 110,
+      "target_zone_width_deg": 30.0
+    },
+    {
+      "scene_name": "testing_specific_angles_zone_overlap_k2_scene04",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene04.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene04",
+      "target_zone_center_deg": 180,
+      "target_zone_width_deg": 30.0
+    },
+    {
+      "scene_name": "testing_specific_angles_zone_overlap_k2_scene05",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene05.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene05",
+      "target_zone_center_deg": 250,
+      "target_zone_width_deg": 30.0
+    }
+  ]
+}

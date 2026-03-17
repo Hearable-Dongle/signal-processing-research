@@ -130,6 +130,12 @@ def build_pipeline_config_from_request(
         suppressed_user_null_off_frames=int(req.suppressed_user_null_off_frames),
         suppressed_user_gate_attenuation_db=float(req.suppressed_user_gate_attenuation_db),
         suppressed_user_target_conflict_deg=float(req.suppressed_user_target_conflict_deg),
+        focus_direction_match_window_deg=float(req.focus_direction_match_window_deg),
+        focus_target_hold_frames=int(req.focus_target_hold_frames),
+        multi_target_max_speakers=int(req.multi_target_max_speakers),
+        multi_target_hold_frames=int(req.multi_target_hold_frames),
+        multi_target_min_confidence=float(req.multi_target_min_confidence),
+        multi_target_min_activity=float(req.multi_target_min_activity),
         speaker_match_window_deg=float(req.speaker_match_window_deg),
         centroid_association_mode=str(req.centroid_association_mode),
         centroid_association_sigma_deg=float(req.centroid_association_sigma_deg),
@@ -205,6 +211,8 @@ def run_offline_session_pipeline(
     srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
     target_activity_override_provider: Callable[[int, float], float | None] | None = None,
     oracle_noise_frame_provider: Callable[[int, float], np.ndarray | None] | None = None,
+    initial_focus_direction_deg: float | None = None,
+    initial_focus_speaker_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     import soundfile as sf
 
@@ -301,6 +309,12 @@ def run_offline_session_pipeline(
         frame_packet_sink=_packet_sink if split_mode == "beamforming_only" else None,
     )
     pipe_holder["pipe"] = pipe
+    if initial_focus_direction_deg is not None or initial_focus_speaker_ids:
+        pipe.set_focus_control(
+            focused_speaker_ids=None if not initial_focus_speaker_ids else [int(v) for v in initial_focus_speaker_ids],
+            focused_direction_deg=None if initial_focus_direction_deg is None else float(initial_focus_direction_deg),
+            user_boost_db=0.0,
+        )
     pipe.run_blocking()
 
     enhanced = (
@@ -435,6 +449,12 @@ def run_offline_session_pipeline(
         "suppressed_user_null_off_frames": int(cfg.suppressed_user_null_off_frames),
         "suppressed_user_gate_attenuation_db": float(cfg.suppressed_user_gate_attenuation_db),
         "suppressed_user_target_conflict_deg": float(cfg.suppressed_user_target_conflict_deg),
+        "focus_direction_match_window_deg": float(cfg.focus_direction_match_window_deg),
+        "focus_target_hold_frames": int(cfg.focus_target_hold_frames),
+        "multi_target_max_speakers": int(cfg.multi_target_max_speakers),
+        "multi_target_hold_frames": int(cfg.multi_target_hold_frames),
+        "multi_target_min_confidence": float(cfg.multi_target_min_confidence),
+        "multi_target_min_activity": float(cfg.multi_target_min_activity),
         "tracking_mode": str(cfg.tracking_mode),
         "control_mode": str(cfg.control_mode),
         "assume_single_speaker": bool(cfg.assume_single_speaker),

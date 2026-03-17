@@ -182,6 +182,7 @@ class _FDBufferedBeamformer:
         self._cached_lcmv_weights: np.ndarray | None = None
         self._cached_steering: np.ndarray | None = None
         self._cached_target_doa_deg: float | None = None
+        self._cached_secondary_target_doa_deg: float | None = None
         self._cached_null_doa_deg: float | None = None
         self._cached_last_target_active: bool | None = None
         self._last_weights_reused: bool = False
@@ -192,6 +193,7 @@ class _FDBufferedBeamformer:
         doa_deg: float,
         target_active: bool,
         null_doa_deg: float | None = None,
+        secondary_doa_deg: float | None = None,
     ) -> bool:
         if null_doa_deg is None:
             if self._cached_mvdr_weights is None:
@@ -205,6 +207,11 @@ class _FDBufferedBeamformer:
             return True
         if self._cached_target_doa_deg is None or _angular_dist_deg(self._cached_target_doa_deg, doa_deg) >= 1.0:
             return True
+        if secondary_doa_deg is not None:
+            if self._cached_secondary_target_doa_deg is None:
+                return True
+            if _angular_dist_deg(self._cached_secondary_target_doa_deg, secondary_doa_deg) >= 1.0:
+                return True
         if self._cached_last_target_active is None or bool(self._cached_last_target_active) != bool(target_active):
             return True
         if null_doa_deg is not None:
@@ -230,25 +237,33 @@ class _FDBufferedBeamformer:
             weights[f, :] = wf.reshape(-1)
         return weights
 
-    def _solve_lcmv_weights(self, a_target: np.ndarray, a_null: np.ndarray) -> np.ndarray:
-        f_bins = a_target.shape[0]
+    def _solve_lcmv_constraint_weights(self, constraints: np.ndarray, response: np.ndarray) -> np.ndarray:
+        f_bins = constraints.shape[0]
         weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
         eye = np.eye(self.n_mics, dtype=np.complex128)
-        response = np.asarray([[1.0 + 0.0j], [0.0 + 0.0j]], dtype=np.complex128)
         for f in range(f_bins):
             r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
-            constraint = np.stack([a_target[f], a_null[f]], axis=1)
             try:
-                r_inv_constraint = np.linalg.solve(r, constraint)
+                r_inv_constraint = np.linalg.solve(r, constraints[f])
             except np.linalg.LinAlgError:
-                r_inv_constraint = np.linalg.pinv(r) @ constraint
-            gram = constraint.conj().T @ r_inv_constraint
+                r_inv_constraint = np.linalg.pinv(r) @ constraints[f]
+            gram = constraints[f].conj().T @ r_inv_constraint
             try:
                 mid = np.linalg.solve(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128), response)
             except np.linalg.LinAlgError:
                 mid = np.linalg.pinv(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128)) @ response
             weights[f, :] = (r_inv_constraint @ mid).reshape(-1)
         return weights
+
+    def _solve_lcmv_weights(self, a_target: np.ndarray, a_null: np.ndarray) -> np.ndarray:
+        constraints = np.stack([a_target, a_null], axis=2)
+        response = np.asarray([[1.0 + 0.0j], [0.0 + 0.0j]], dtype=np.complex128)
+        return self._solve_lcmv_constraint_weights(constraints, response)
+
+    def _solve_lcmv_top2_weights(self, a_primary: np.ndarray, a_secondary: np.ndarray) -> np.ndarray:
+        constraints = np.stack([a_primary, a_secondary], axis=2)
+        response = np.asarray([[1.0 + 0.0j], [1.0 + 0.0j]], dtype=np.complex128)
+        return self._solve_lcmv_constraint_weights(constraints, response)
 
     def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
@@ -306,6 +321,64 @@ class _FDBufferedBeamformer:
 
         target_cov = self.target_psd_mvdr[:, None, None] * np.einsum("fm,fn->fmn", steering, steering.conj())
         residual_cov = np.einsum("fm,fn->fmn", x_fft - (steering * target_ref[:, None]), np.conj(x_fft - (steering * target_ref[:, None])))
+        if rnn_prev is None:
+            smoothed_residual_cov = residual_cov
+        else:
+            smoothed_residual_cov = (1.0 - a) * rnn_prev + a * residual_cov
+        subtractive_rnn = self.rxx_mvdr - target_cov
+        rnn = (0.75 * subtractive_rnn) + (0.25 * smoothed_residual_cov)
+        rnn = 0.5 * (rnn + np.conjugate(np.swapaxes(rnn, 1, 2)))
+        diag = float(max(self.cfg.fd_diag_load, 1e-9))
+        eye = np.eye(mics, dtype=np.complex128)
+        for f in range(f_bins):
+            eigvals, eigvecs = np.linalg.eigh(rnn[f])
+            avg_power = float(np.real(np.trace(self.rxx_mvdr[f]))) / max(mics, 1)
+            floor = max(diag, 1e-4 * avg_power)
+            eigvals = np.maximum(np.real(eigvals), floor)
+            rnn[f] = (eigvecs @ np.diag(eigvals.astype(np.complex128)) @ eigvecs.conj().T) + (diag * eye)
+        return rnn
+
+    def _update_noise_covariance_multi(
+        self,
+        rnn_prev: np.ndarray | None,
+        x_fft: np.ndarray,
+        steerings: list[np.ndarray],
+        cov_alpha: float,
+        *,
+        target_active: bool,
+        oracle_noise_fft: np.ndarray | None = None,
+    ) -> np.ndarray:
+        if not steerings:
+            raise ValueError("multi-target covariance update requires at least one steering vector")
+        if self._noise_covariance_mode() == "oracle_non_target_residual":
+            if oracle_noise_fft is None:
+                raise ValueError("oracle_non_target_residual mode requires oracle noise FFT observations.")
+            return self._update_covariance(rnn_prev, oracle_noise_fft, cov_alpha)
+        if len(steerings) == 1 or not bool(target_active):
+            return self._update_noise_covariance(
+                rnn_prev,
+                x_fft,
+                steerings[0],
+                cov_alpha,
+                target_active=target_active,
+                oracle_noise_fft=oracle_noise_fft,
+            )
+        f_bins, mics = x_fft.shape
+        inst_rxx = np.einsum("fm,fn->fmn", x_fft, x_fft.conj())
+        a = float(np.clip(cov_alpha, 0.0, 1.0))
+        if self.rxx_mvdr is None:
+            self.rxx_mvdr = inst_rxx
+        else:
+            self.rxx_mvdr = (1.0 - a) * self.rxx_mvdr + a * inst_rxx
+        target_cov = np.zeros_like(inst_rxx)
+        residual = np.asarray(x_fft, dtype=np.complex128).copy()
+        for steering in steerings:
+            a_norm_sq = np.sum(np.abs(steering) ** 2, axis=1) + 1e-10
+            target_ref = np.sum(np.conj(steering) * residual, axis=1) / a_norm_sq
+            inst_target_psd = np.abs(target_ref) ** 2
+            target_cov += inst_target_psd[:, None, None] * np.einsum("fm,fn->fmn", steering, steering.conj())
+            residual = residual - (steering * target_ref[:, None])
+        residual_cov = np.einsum("fm,fn->fmn", residual, np.conj(residual))
         if rnn_prev is None:
             smoothed_residual_cov = residual_cov
         else:
@@ -479,6 +552,64 @@ class _FDBufferedBeamformer:
             raise RuntimeError("LCMV weights were not initialized.")
         y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
 
+        y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
+        return y
+
+    def lcmv_top2(
+        self,
+        frame_mc: np.ndarray,
+        primary_doa_deg: float,
+        secondary_doa_deg: float,
+        covariance_alpha: float | None = None,
+        *,
+        target_active: bool = True,
+        oracle_noise_frame: np.ndarray | None = None,
+    ) -> np.ndarray:
+        x = np.asarray(frame_mc, dtype=np.float64)
+        x_fft = self._analysis_block(x)
+        self._mvdr_frame_counter += 1
+        oracle_noise_fft = None
+        if oracle_noise_frame is not None:
+            oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
+            self._prev_noise_mc = next_prev_noise
+        refresh = self._should_refresh_weights(
+            doa_deg=float(primary_doa_deg),
+            target_active=bool(target_active),
+            secondary_doa_deg=float(secondary_doa_deg),
+        )
+        self._last_weights_reused = bool(not refresh)
+        a_primary = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
+            doa_deg=primary_doa_deg,
+            n_fft=self.analysis_n,
+            fs=self.cfg.sample_rate_hz,
+            mic_geometry_xyz=self.mic_geometry_xyz,
+            sound_speed_m_s=self.cfg.sound_speed_m_s,
+        )
+        a_secondary = _steering_vector_f_domain(
+            doa_deg=secondary_doa_deg,
+            n_fft=self.analysis_n,
+            fs=self.cfg.sample_rate_hz,
+            mic_geometry_xyz=self.mic_geometry_xyz,
+            sound_speed_m_s=self.cfg.sound_speed_m_s,
+        )
+        if refresh:
+            self.rnn_mvdr_noise = self._update_noise_covariance_multi(
+                self.rnn_mvdr_noise,
+                x_fft,
+                [a_primary, a_secondary],
+                float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                target_active=bool(target_active),
+                oracle_noise_fft=oracle_noise_fft,
+            )
+            self._cached_lcmv_weights = self._solve_lcmv_top2_weights(a_primary, a_secondary)
+            self._cached_steering = np.asarray(a_primary, dtype=np.complex128)
+            self._cached_target_doa_deg = float(primary_doa_deg)
+            self._cached_secondary_target_doa_deg = float(secondary_doa_deg)
+            self._cached_null_doa_deg = None
+            self._cached_last_target_active = bool(target_active)
+        if self._cached_lcmv_weights is None:
+            raise RuntimeError("LCMV top2 weights were not initialized.")
+        y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
         y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
 
@@ -987,6 +1118,11 @@ class FastPathWorker(threading.Thread):
             int(getattr(config, "target_activity_update_every_n_fast_frames", 1)),
         )
         self._last_target_doa_deg: float | None = None
+        self._last_target_speaker_id: int | None = None
+        self._last_multi_target_speaker_ids: tuple[int, ...] = ()
+        self._last_multi_target_doas_deg: tuple[float, ...] = ()
+        self._multi_target_hold_remaining_frames: int = 0
+        self._focus_hold_remaining_frames: int = 0
         backend = str(getattr(config, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
         if backend == "silero_fused":
             self._target_activity_vad = SileroVADGate(
@@ -1004,12 +1140,12 @@ class FastPathWorker(threading.Thread):
 
         mode = self._target_activity_mode()
         beamforming_mode = str(self._cfg.beamforming_mode).strip().lower()
-        if beamforming_mode == "mvdr_fd" and mode is None:
-            raise ValueError("MVDR requires target_activity_rnn_update_mode to be configured.")
+        if beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked"} and mode is None:
+            raise ValueError("Covariance beamforming requires target_activity_rnn_update_mode to be configured.")
         if mode == "oracle_target_activity" and self._target_activity_override_provider is None:
             raise ValueError("oracle_target_activity mode requires a target activity override provider.")
         if (
-            beamforming_mode == "mvdr_fd"
+            beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked"}
             and str(getattr(self._cfg, "fd_noise_covariance_mode", "estimated_target_subtractive")).strip().lower() == "oracle_non_target_residual"
             and self._oracle_noise_frame_provider is None
         ):
@@ -1183,6 +1319,44 @@ class FastPathWorker(threading.Thread):
         self._target_activity_last_covariance_alpha = covariance_alpha
         return float(score), bool(is_active), covariance_alpha
 
+    def _resolve_multi_target_activity(self, frame_mc: np.ndarray, target_doas_deg: list[float], now_ms: float) -> tuple[float, bool, float]:
+        if not target_doas_deg:
+            return self._resolve_target_activity(frame_mc, None, now_ms)
+        scores: list[float] = []
+        prev_last = self._last_target_doa_deg
+        prev_debug = dict(self._target_activity_last_debug)
+        prev_state = bool(self._target_activity_state)
+        prev_on = int(self._target_activity_on_count)
+        prev_off = int(self._target_activity_off_count)
+        for doa in target_doas_deg:
+            score, _active_unused, _cov_unused = self._resolve_target_activity(frame_mc, float(doa), now_ms)
+            scores.append(float(score))
+            self._target_activity_state = prev_state
+            self._target_activity_on_count = prev_on
+            self._target_activity_off_count = prev_off
+        self._last_target_doa_deg = prev_last
+        best_score = float(max(scores, default=0.0))
+        is_active = self._update_target_activity_hysteresis(best_score)
+        if bool(is_active):
+            self._target_activity_bootstrap_complete = True
+        base_alpha = float(np.clip(self._cfg.fd_cov_ema_alpha, 0.0, 1.0))
+        scale = (
+            float(np.clip(self._cfg.fd_cov_update_scale_target_active, 0.0, 1.0))
+            if is_active
+            else float(np.clip(self._cfg.fd_cov_update_scale_target_inactive, 0.0, 1.0))
+        )
+        covariance_alpha = float(base_alpha * scale)
+        self._target_activity_last_score = best_score
+        self._target_activity_last_covariance_alpha = covariance_alpha
+        self._target_activity_last_debug = {
+            **prev_debug,
+            **dict(self._target_activity_last_debug),
+            "multi_target": True,
+            "candidate_target_count": float(len(target_doas_deg)),
+            "candidate_target_scores": [float(v) for v in scores],
+        }
+        return best_score, bool(is_active), covariance_alpha
+
     def _suppressed_user_doa(self) -> float | None:
         if self._cfg.suppressed_user_voice_doa_deg is None:
             return None
@@ -1270,6 +1444,128 @@ class FastPathWorker(threading.Thread):
         if best_sid is None or best_doa is None:
             return None, 0.0
         return float(best_doa), float(max(best_score, 0.0))
+
+    def _beamforming_mode(self) -> str:
+        return str(self._cfg.beamforming_mode).strip().lower()
+
+    def _select_top_tracked_speakers(self, speaker_map) -> tuple[list[tuple[int, float]], str]:
+        user_doa = self._suppressed_user_doa()
+        min_conf = float(max(0.0, getattr(self._cfg, "multi_target_min_confidence", 0.2)))
+        min_activity = float(max(0.0, getattr(self._cfg, "multi_target_min_activity", 0.15)))
+        max_targets = max(1, int(getattr(self._cfg, "multi_target_max_speakers", 2)))
+        candidates: list[tuple[tuple[float, float, float, float], int, float]] = []
+        for sid, item in speaker_map.items():
+            sid_i = int(sid)
+            angle = float(item.direction_degrees)
+            if user_doa is not None and _angular_dist_deg(angle, user_doa) <= float(self._cfg.suppressed_user_match_window_deg):
+                continue
+            activity = float(getattr(item, "activity_confidence", 0.0))
+            conf = float(getattr(item, "confidence", 0.0))
+            gain = float(getattr(item, "gain_weight", 0.0))
+            if conf < min_conf and activity < min_activity:
+                continue
+            continuity = 1.0 if sid_i in self._last_multi_target_speaker_ids else 0.0
+            candidates.append(((continuity, activity, conf, gain), sid_i, angle))
+        candidates.sort(key=lambda row: row[0], reverse=True)
+        selected = [(sid_i, float(angle)) for _key, sid_i, angle in candidates[:max_targets]]
+        if selected:
+            return selected, "top_tracked"
+        if self._multi_target_hold_remaining_frames > 0 and self._last_multi_target_speaker_ids and self._last_multi_target_doas_deg:
+            self._multi_target_hold_remaining_frames -= 1
+            return list(zip(self._last_multi_target_speaker_ids, self._last_multi_target_doas_deg, strict=True)), "top_tracked_hold"
+        self._multi_target_hold_remaining_frames = 0
+        return [], "top_tracked_miss"
+
+    def _focused_direction_match_window_deg(self) -> float:
+        return float(max(1.0, getattr(self._cfg, "focus_direction_match_window_deg", 30.0)))
+
+    def _focus_control_active(self, focus) -> bool:
+        return bool(
+            getattr(focus, "focused_speaker_ids", None)
+            or getattr(focus, "focused_direction_deg", None) is not None
+        )
+
+    def _pick_focused_peak(
+        self,
+        peaks: list[float],
+        scores: list[float] | None,
+        matched_user_idx: int | None,
+        focus,
+    ) -> tuple[float | None, float, str]:
+        focus_direction = getattr(focus, "focused_direction_deg", None)
+        if focus_direction is None:
+            doa, score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
+            return doa, score, "fallback_peak"
+        window_deg = self._focused_direction_match_window_deg()
+        best_angle = None
+        best_key = None
+        best_score = 0.0
+        for idx, peak in enumerate(peaks):
+            if matched_user_idx is not None and int(idx) == int(matched_user_idx):
+                continue
+            dist = _angular_dist_deg(float(peak), float(focus_direction))
+            if dist > window_deg:
+                continue
+            score = 1.0 if scores is None or idx >= len(scores) else float(scores[idx])
+            continuity = 1.0 if (self._last_target_doa_deg is not None and _angular_dist_deg(float(peak), float(self._last_target_doa_deg)) <= 8.0) else 0.0
+            key = (continuity, -dist, score)
+            if best_key is None or key > best_key:
+                best_key = key
+                best_angle = float(peak)
+                best_score = float(score)
+        if best_angle is not None:
+            return best_angle, best_score, "focus_direction_peak"
+        return None, 0.0, "focus_direction_miss"
+
+    def _pick_focused_speaker(self, speaker_map, focus) -> tuple[float | None, float, int | None, str]:
+        focused_ids = None if getattr(focus, "focused_speaker_ids", None) is None else {int(v) for v in focus.focused_speaker_ids}
+        focus_direction = getattr(focus, "focused_direction_deg", None)
+        user_doa = self._suppressed_user_doa()
+        best_doa = None
+        best_sid = None
+        best_score = 0.0
+        best_key = None
+        for sid, item in speaker_map.items():
+            sid_i = int(sid)
+            angle = float(item.direction_degrees)
+            if user_doa is not None and _angular_dist_deg(angle, user_doa) <= float(self._cfg.suppressed_user_match_window_deg):
+                continue
+            if focused_ids is not None and sid_i not in focused_ids:
+                continue
+            dist = 0.0 if focus_direction is None else _angular_dist_deg(angle, float(focus_direction))
+            if focus_direction is not None and dist > self._focused_direction_match_window_deg():
+                continue
+            activity = float(getattr(item, "activity_confidence", 0.0))
+            conf = float(getattr(item, "confidence", 0.0))
+            gain = float(getattr(item, "gain_weight", 0.0))
+            continuity = 1.0 if (self._last_target_speaker_id is not None and sid_i == int(self._last_target_speaker_id)) else 0.0
+            key = (continuity, activity, conf, gain, -dist)
+            if best_key is None or key > best_key:
+                best_key = key
+                best_sid = sid_i
+                best_doa = angle
+                best_score = float(max(activity, conf, gain))
+        if best_sid is None or best_doa is None:
+            if focused_ids is not None:
+                return None, 0.0, None, "focus_speaker_id_miss"
+            if focus_direction is not None:
+                return None, 0.0, None, "focus_direction_speaker_miss"
+            return None, 0.0, None, "focus_inactive"
+        if focused_ids is not None:
+            return float(best_doa), float(best_score), int(best_sid), "focus_speaker_id"
+        if focus_direction is not None:
+            return float(best_doa), float(best_score), int(best_sid), "focus_direction_speaker"
+        return float(best_doa), float(best_score), int(best_sid), "fallback_speaker"
+
+    def _apply_target_hold(self, *, selected: bool) -> tuple[float | None, int | None, bool]:
+        if selected:
+            self._focus_hold_remaining_frames = max(0, int(getattr(self._cfg, "focus_target_hold_frames", 8)))
+            return self._last_target_doa_deg, self._last_target_speaker_id, False
+        if self._focus_hold_remaining_frames > 0 and self._last_target_doa_deg is not None:
+            self._focus_hold_remaining_frames -= 1
+            return float(self._last_target_doa_deg), self._last_target_speaker_id, True
+        self._focus_hold_remaining_frames = 0
+        return None, None, False
 
     def _suppression_debug(
         self,
@@ -1389,6 +1685,49 @@ class FastPathWorker(threading.Thread):
         return self._fd.mvdr(
             x,
             doa_deg=doa_deg,
+            covariance_alpha=covariance_alpha,
+            target_active=bool(target_active),
+            oracle_noise_frame=oracle_noise_frame,
+        )
+
+    def _beamform_multi_directions(
+        self,
+        x: np.ndarray,
+        target_doas_deg: list[float],
+        speech_activity: float,
+        covariance_alpha: float | None = None,
+        *,
+        target_active: bool = True,
+        oracle_noise_frame: np.ndarray | None = None,
+    ) -> np.ndarray:
+        if not target_doas_deg:
+            return np.mean(x, axis=1).astype(np.float32, copy=False)
+        mode = self._beamforming_mode()
+        if len(target_doas_deg) <= 1 or mode != "lcmv_top2_tracked":
+            return self._beamform_single_direction(
+                x,
+                doa_deg=float(target_doas_deg[0]),
+                speech_activity=speech_activity,
+                covariance_alpha=covariance_alpha,
+                target_active=bool(target_active),
+                oracle_noise_frame=oracle_noise_frame,
+            )
+        if mode == "delay_sum":
+            aligned = [
+                delay_and_sum_frame(
+                    x,
+                    doa_deg=float(doa),
+                    mic_geometry_xyz=self._mic_geometry_xyz,
+                    fs=self._cfg.sample_rate_hz,
+                    sound_speed_m_s=self._cfg.sound_speed_m_s,
+                )
+                for doa in target_doas_deg[:2]
+            ]
+            return np.mean(np.stack(aligned, axis=0), axis=0).astype(np.float32, copy=False)
+        return self._fd.lcmv_top2(
+            x,
+            primary_doa_deg=float(target_doas_deg[0]),
+            secondary_doa_deg=float(target_doas_deg[1]),
             covariance_alpha=covariance_alpha,
             target_active=bool(target_active),
             oracle_noise_frame=oracle_noise_frame,
@@ -1550,8 +1889,15 @@ class FastPathWorker(threading.Thread):
                     t0 = perf_counter()
                     ref_mode = str(self._cfg.fast_path_reference_mode).strip().lower()
                     suppression_mode = self._suppression_mode()
+                    focus = self._state.get_focus_control_snapshot()
+                    focus_active = self._focus_control_active(focus)
+                    beamforming_mode = self._beamforming_mode()
                     user_doa = self._suppressed_user_doa()
                     target_doa = None
+                    selected_target_speaker_id = None
+                    selected_target_speaker_ids: list[int] = []
+                    selected_target_doas: list[float] = []
+                    target_selection_mode = "unfocused"
                     target_activity_score = 0.0
                     target_activity_active = False
                     target_covariance_alpha = float(self._cfg.fd_cov_ema_alpha)
@@ -1559,11 +1905,22 @@ class FastPathWorker(threading.Thread):
                     suppression_strategy = "none"
                     conflict_fallback = False
                     fallback_beam_doa = self._last_target_doa_deg
-                    if ref_mode == "srp_peak" and peaks:
+                    if ref_mode == "srp_peak" and peaks and beamforming_mode != "lcmv_top2_tracked":
                         speech_activity = _frame_speech_activity(x)
-                        target_doa, _target_score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
-                        if target_doa is None and not suppression_active:
-                            target_doa = float(peaks[0])
+                        if focus_active:
+                            target_doa, _target_score, target_selection_mode = self._pick_focused_peak(peaks, scores, matched_user_idx, focus)
+                        else:
+                            target_doa, _target_score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
+                            target_selection_mode = "fallback_peak"
+                            if target_doa is None and not suppression_active:
+                                target_doa = float(peaks[0])
+                                target_selection_mode = "fallback_first_peak"
+                        if focus_active and target_doa is None:
+                            held_doa, held_sid, used_hold = self._apply_target_hold(selected=False)
+                            if used_hold and held_doa is not None:
+                                target_doa = float(held_doa)
+                                selected_target_speaker_id = held_sid
+                                target_selection_mode = "focus_hold"
                         target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
                             x,
                             target_doa_deg=target_doa,
@@ -1618,59 +1975,111 @@ class FastPathWorker(threading.Thread):
                         speech_activity = float(
                             max((float(getattr(v, "activity_confidence", 0.0)) for v in speaker_map.values()), default=0.0)
                         )
-                        target_doa, _target_score = self._pick_non_user_speaker(speaker_map)
-                        if target_doa is None and not suppression_active:
-                            target_doa, _target_score = self._pick_best_smoothed_speaker(speaker_map)
-                        target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
-                            x,
-                            target_doa_deg=target_doa,
-                            now_ms=now_ms,
-                        )
-                        if target_doa is not None:
-                            can_null = (
-                                suppression_mode == "lcmv_null_hysteresis"
-                                and suppression_active
-                                and user_doa is not None
-                                and _angular_dist_deg(target_doa, user_doa) >= float(self._cfg.suppressed_user_target_conflict_deg)
-                                and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd"
+                        if beamforming_mode == "lcmv_top2_tracked":
+                            selected_pairs, target_selection_mode = self._select_top_tracked_speakers(speaker_map)
+                            selected_target_speaker_ids = [int(sid) for sid, _doa in selected_pairs]
+                            selected_target_doas = [float(doa) for _sid, doa in selected_pairs]
+                            if selected_target_doas:
+                                target_doa = float(selected_target_doas[0])
+                                selected_target_speaker_id = int(selected_target_speaker_ids[0])
+                            target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_multi_target_activity(
+                                x,
+                                selected_target_doas,
+                                now_ms=now_ms,
                             )
-                            if can_null:
-                                out = self._fd.lcmv_null(
+                            if len(selected_target_doas) >= 2:
+                                out = self._beamform_multi_directions(
                                     x,
-                                    target_doa_deg=float(target_doa),
-                                    null_doa_deg=float(user_doa),
-                                    covariance_alpha=target_covariance_alpha,
-                                    target_active=bool(target_activity_active),
-                                    oracle_noise_frame=oracle_noise_frame,
-                                )
-                                suppression_applied = True
-                                suppression_strategy = "lcmv_null"
-                            else:
-                                if suppression_active and suppression_mode == "lcmv_null_hysteresis" and user_doa is not None:
-                                    conflict_fallback = bool(
-                                        _angular_dist_deg(float(target_doa), float(user_doa)) < float(self._cfg.suppressed_user_target_conflict_deg)
-                                    )
-                                out = self._beamform_single_direction(
-                                    x,
-                                    doa_deg=float(target_doa),
+                                    target_doas_deg=selected_target_doas[:2],
                                     speech_activity=speech_activity,
                                     covariance_alpha=target_covariance_alpha,
                                     target_active=bool(target_activity_active),
                                     oracle_noise_frame=oracle_noise_frame,
                                 )
-                        elif fallback_beam_doa is not None and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd":
-                            out = self._beamform_single_direction(
-                                x,
-                                doa_deg=float(fallback_beam_doa),
-                                speech_activity=speech_activity,
-                                covariance_alpha=target_covariance_alpha,
-                                target_active=False,
-                                oracle_noise_frame=oracle_noise_frame,
-                            )
+                            elif len(selected_target_doas) == 1:
+                                out = self._beamform_single_direction(
+                                    x,
+                                    doa_deg=float(selected_target_doas[0]),
+                                    speech_activity=speech_activity,
+                                    covariance_alpha=target_covariance_alpha,
+                                    target_active=bool(target_activity_active),
+                                    oracle_noise_frame=oracle_noise_frame,
+                                )
+                            elif fallback_beam_doa is not None:
+                                out = self._beamform_single_direction(
+                                    x,
+                                    doa_deg=float(fallback_beam_doa),
+                                    speech_activity=speech_activity,
+                                    covariance_alpha=target_covariance_alpha,
+                                    target_active=False,
+                                    oracle_noise_frame=oracle_noise_frame,
+                                )
+                            else:
+                                out = np.mean(x, axis=1).astype(np.float32, copy=False)
+                        elif focus_active:
+                            target_doa, _target_score, selected_target_speaker_id, target_selection_mode = self._pick_focused_speaker(speaker_map, focus)
                         else:
-                            out = np.mean(x, axis=1).astype(np.float32, copy=False)
-                            if suppression_active:
-                                conflict_fallback = True
+                            target_doa, _target_score = self._pick_non_user_speaker(speaker_map)
+                            target_selection_mode = "fallback_speaker"
+                            if target_doa is None and not suppression_active:
+                                target_doa, _target_score = self._pick_best_smoothed_speaker(speaker_map)
+                                target_selection_mode = "fallback_smoothed_speaker"
+                        if focus_active and target_doa is None:
+                            held_doa, held_sid, used_hold = self._apply_target_hold(selected=False)
+                            if used_hold and held_doa is not None:
+                                target_doa = float(held_doa)
+                                selected_target_speaker_id = held_sid
+                                target_selection_mode = "focus_hold"
+                            target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
+                                x,
+                                target_doa_deg=target_doa,
+                                now_ms=now_ms,
+                            )
+                            if target_doa is not None:
+                                can_null = (
+                                    suppression_mode == "lcmv_null_hysteresis"
+                                    and suppression_active
+                                    and user_doa is not None
+                                    and _angular_dist_deg(target_doa, user_doa) >= float(self._cfg.suppressed_user_target_conflict_deg)
+                                    and beamforming_mode == "mvdr_fd"
+                                )
+                                if can_null:
+                                    out = self._fd.lcmv_null(
+                                        x,
+                                        target_doa_deg=float(target_doa),
+                                        null_doa_deg=float(user_doa),
+                                        covariance_alpha=target_covariance_alpha,
+                                        target_active=bool(target_activity_active),
+                                        oracle_noise_frame=oracle_noise_frame,
+                                    )
+                                    suppression_applied = True
+                                    suppression_strategy = "lcmv_null"
+                                else:
+                                    if suppression_active and suppression_mode == "lcmv_null_hysteresis" and user_doa is not None:
+                                        conflict_fallback = bool(
+                                            _angular_dist_deg(float(target_doa), float(user_doa)) < float(self._cfg.suppressed_user_target_conflict_deg)
+                                        )
+                                    out = self._beamform_single_direction(
+                                        x,
+                                        doa_deg=float(target_doa),
+                                        speech_activity=speech_activity,
+                                        covariance_alpha=target_covariance_alpha,
+                                        target_active=bool(target_activity_active),
+                                        oracle_noise_frame=oracle_noise_frame,
+                                    )
+                            elif fallback_beam_doa is not None and beamforming_mode == "mvdr_fd":
+                                out = self._beamform_single_direction(
+                                    x,
+                                    doa_deg=float(fallback_beam_doa),
+                                    speech_activity=speech_activity,
+                                    covariance_alpha=target_covariance_alpha,
+                                    target_active=False,
+                                    oracle_noise_frame=oracle_noise_frame,
+                                )
+                            else:
+                                out = np.mean(x, axis=1).astype(np.float32, copy=False)
+                                if suppression_active:
+                                    conflict_fallback = True
                     else:
                         speech_activity = _frame_speech_activity(x)
                         target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
@@ -1696,6 +2105,15 @@ class FastPathWorker(threading.Thread):
                         out = self._apply_soft_gate(out)
                         suppression_applied = True
                         suppression_strategy = "soft_gate"
+                    if target_doa is not None:
+                        self._last_target_doa_deg = float(target_doa)
+                        self._last_target_speaker_id = None if selected_target_speaker_id is None else int(selected_target_speaker_id)
+                        if selected_target_speaker_ids:
+                            self._last_multi_target_speaker_ids = tuple(int(v) for v in selected_target_speaker_ids)
+                            self._last_multi_target_doas_deg = tuple(float(v) for v in selected_target_doas)
+                            self._multi_target_hold_remaining_frames = max(0, int(getattr(self._cfg, "multi_target_hold_frames", 12)))
+                        if focus_active:
+                            self._focus_hold_remaining_frames = max(0, int(getattr(self._cfg, "focus_target_hold_frames", 8)))
                     target_activity_debug = {
                         "mode": self._target_activity_mode(),
                         "score": float(target_activity_score),
@@ -1724,6 +2142,18 @@ class FastPathWorker(threading.Thread):
                                 **(dict(snapshot.debug or {})),
                                 "own_voice_suppression": suppression_info,
                                 "target_activity": target_activity_debug,
+                                "target_selection": {
+                                    "focus_active": bool(focus_active),
+                                    "focused_direction_deg": None if focus.focused_direction_deg is None else float(focus.focused_direction_deg),
+                                    "focused_speaker_ids": None if focus.focused_speaker_ids is None else [int(v) for v in focus.focused_speaker_ids],
+                                    "selected_target_speaker_id": None if selected_target_speaker_id is None else int(selected_target_speaker_id),
+                                    "selected_target_speaker_ids": [int(v) for v in selected_target_speaker_ids],
+                                    "selected_target_doa_deg": None if target_doa is None else float(target_doa),
+                                    "selected_target_doas_deg": [float(v) for v in selected_target_doas],
+                                    "selection_mode": str(target_selection_mode),
+                                    "focus_hold_remaining_frames": int(self._focus_hold_remaining_frames),
+                                    "multi_target_hold_remaining_frames": int(self._multi_target_hold_remaining_frames),
+                                },
                             },
                         )
                         self._state.publish_srp_snapshot(snapshot)
