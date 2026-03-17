@@ -44,6 +44,17 @@ from simulation.create_testing_specific_angles_babble_bootstrap import (
     DEFAULT_WHAM_GAIN,
     generate_testing_specific_angles_babble_bootstrap_dataset,
 )
+from simulation.create_testing_specific_angles_near_target_far_diffuse import (
+    DEFAULT_ASSET_ROOT as DEFAULT_NEAR_DIFFUSE_ASSET_ROOT,
+    DEFAULT_BABBLE_COUNT as DEFAULT_NEAR_DIFFUSE_BABBLE_COUNT,
+    DEFAULT_BABBLE_GAIN_MAX as DEFAULT_NEAR_DIFFUSE_BABBLE_GAIN_MAX,
+    DEFAULT_BABBLE_GAIN_MIN as DEFAULT_NEAR_DIFFUSE_BABBLE_GAIN_MIN,
+    DEFAULT_BOOTSTRAP_SEC as DEFAULT_NEAR_DIFFUSE_BOOTSTRAP_SEC,
+    DEFAULT_CONFIG_ROOT as DEFAULT_NEAR_DIFFUSE_CONFIG_ROOT,
+    DEFAULT_DURATION_SEC as DEFAULT_NEAR_DIFFUSE_DURATION_SEC,
+    DEFAULT_WHAM_GAIN as DEFAULT_NEAR_DIFFUSE_WHAM_GAIN,
+    generate_testing_specific_angles_near_target_far_diffuse_dataset,
+)
 from simulation.mic_array_profiles import SUPPORTED_MIC_ARRAY_PROFILES
 from simulation.simulation_config import SimulationConfig
 
@@ -52,9 +63,11 @@ DEFAULT_SCENES_ROOT = Path("simulation/simulations/configs/testing_specific_angl
 DEFAULT_ASSETS_ROOT = Path("simulation/simulations/assets/testing_specific_angles_babble_bootstrap")
 DEFAULT_OUT_ROOT = Path("beamforming/benchmark/oracle_babble_bootstrap_mvdr")
 DEFAULT_METHODS = [
-    "delay_sum",
+    "mvdr_fd_bootstrap_estimated_activity_silero",
     "mvdr_fd_bootstrap_oracle_activity",
-    "mvdr_fd_bootstrap_estimated_activity",
+    "mvdr_fd_bootstrap_oracle_noise_mild",
+    "mvdr_fd_bootstrap_oracle_noise_medium",
+    "mvdr_fd_bootstrap_oracle_noise_hard",
 ]
 FAST_FRAME_MS = 40
 DEFAULT_FD_ANALYSIS_WINDOW_MS = 80.0
@@ -62,6 +75,30 @@ DEFAULT_FD_COV_EMA_ALPHA = 0.08
 DEFAULT_FD_DIAG_LOAD = 1e-3
 DEFAULT_ACTIVE_UPDATE_SCALE = 0.20
 DEFAULT_INACTIVE_UPDATE_SCALE = 1.0
+SCENE_FAMILY_DEFAULTS: dict[str, dict[str, object]] = {
+    "babble_bootstrap": {
+        "scenes_root": DEFAULT_SCENES_ROOT,
+        "assets_root": DEFAULT_ASSETS_ROOT,
+        "duration_sec": DEFAULT_DURATION_SEC,
+        "bootstrap_noise_only_sec": DEFAULT_BOOTSTRAP_SEC,
+        "background_babble_count": DEFAULT_BABBLE_COUNT,
+        "background_babble_gain_min": DEFAULT_BABBLE_GAIN_MIN,
+        "background_babble_gain_max": DEFAULT_BABBLE_GAIN_MAX,
+        "background_wham_gain": DEFAULT_WHAM_GAIN,
+        "generator": generate_testing_specific_angles_babble_bootstrap_dataset,
+    },
+    "near_target_far_diffuse": {
+        "scenes_root": DEFAULT_NEAR_DIFFUSE_CONFIG_ROOT,
+        "assets_root": DEFAULT_NEAR_DIFFUSE_ASSET_ROOT,
+        "duration_sec": DEFAULT_NEAR_DIFFUSE_DURATION_SEC,
+        "bootstrap_noise_only_sec": DEFAULT_NEAR_DIFFUSE_BOOTSTRAP_SEC,
+        "background_babble_count": DEFAULT_NEAR_DIFFUSE_BABBLE_COUNT,
+        "background_babble_gain_min": DEFAULT_NEAR_DIFFUSE_BABBLE_GAIN_MIN,
+        "background_babble_gain_max": DEFAULT_NEAR_DIFFUSE_BABBLE_GAIN_MAX,
+        "background_wham_gain": DEFAULT_NEAR_DIFFUSE_WHAM_GAIN,
+        "generator": generate_testing_specific_angles_near_target_far_diffuse_dataset,
+    },
+}
 
 # Sensitivity-tuned detector presets from
 # `beamforming/benchmark/run_optuna_babble_bootstrap_mvdr.py`.
@@ -127,12 +164,41 @@ DEFAULT_TARGET_ACTIVITY_PRESETS: dict[str, dict[str, object]] = {
     },
 }
 
+DEFAULT_ORACLE_NOISE_PRESETS: dict[str, dict[str, object]] = {
+    "oracle_noise_mild": {
+        "fd_noise_covariance_mode": "oracle_non_target_residual",
+        "fd_cov_ema_alpha": 0.18,
+        "fd_diag_load": 0.006,
+        "fd_cov_update_scale_target_active": 1.0,
+        "fd_cov_update_scale_target_inactive": 1.0,
+        "target_activity_detector_backend": "silero_fused",
+    },
+    "oracle_noise_medium": {
+        "fd_noise_covariance_mode": "oracle_non_target_residual",
+        "fd_cov_ema_alpha": 0.28,
+        "fd_diag_load": 0.003,
+        "fd_cov_update_scale_target_active": 1.0,
+        "fd_cov_update_scale_target_inactive": 1.0,
+        "target_activity_detector_backend": "silero_fused",
+    },
+    "oracle_noise_hard": {
+        "fd_noise_covariance_mode": "oracle_non_target_residual",
+        "fd_cov_ema_alpha": 0.42,
+        "fd_diag_load": 0.0012,
+        "fd_cov_update_scale_target_active": 1.0,
+        "fd_cov_update_scale_target_inactive": 1.0,
+        "target_activity_detector_backend": "silero_fused",
+    },
+}
+
 
 @dataclass(frozen=True)
 class MethodSpec:
     method_key: str
     beamforming_mode: str
     target_activity_mode: str | None
+    noise_covariance_mode: str = "estimated_target_subtractive"
+    aggression_level: str = "baseline"
 
 
 @dataclass(frozen=True)
@@ -146,6 +212,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "mvdr_fd_bootstrap_oracle_activity": MethodSpec("mvdr_fd_bootstrap_oracle_activity", "mvdr_fd", "oracle_target_activity"),
     "mvdr_fd_bootstrap_estimated_activity": MethodSpec("mvdr_fd_bootstrap_estimated_activity", "mvdr_fd", "estimated_target_activity"),
     "mvdr_fd_bootstrap_estimated_activity_silero": MethodSpec("mvdr_fd_bootstrap_estimated_activity_silero", "mvdr_fd", "estimated_target_activity"),
+    "mvdr_fd_bootstrap_oracle_noise_mild": MethodSpec("mvdr_fd_bootstrap_oracle_noise_mild", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "mild"),
+    "mvdr_fd_bootstrap_oracle_noise_medium": MethodSpec("mvdr_fd_bootstrap_oracle_noise_medium", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "medium"),
+    "mvdr_fd_bootstrap_oracle_noise_hard": MethodSpec("mvdr_fd_bootstrap_oracle_noise_hard", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "hard"),
 }
 
 
@@ -159,6 +228,7 @@ def _detector_param_overrides(args: argparse.Namespace) -> dict[str, object]:
     detector_fields = [
         "fd_cov_ema_alpha",
         "fd_diag_load",
+        "fd_noise_covariance_mode",
         "target_activity_low_threshold",
         "target_activity_high_threshold",
         "target_activity_enter_frames",
@@ -372,6 +442,7 @@ def _build_session_request(
             "fd_analysis_window_ms": float(params["fd_analysis_window_ms"]),
             "fd_cov_ema_alpha": float(params["fd_cov_ema_alpha"]),
             "fd_diag_load": float(params["fd_diag_load"]),
+            "fd_noise_covariance_mode": str(params["fd_noise_covariance_mode"]),
             "target_activity_rnn_update_mode": method_spec.target_activity_mode,
             "target_activity_low_threshold": float(params["target_activity_low_threshold"]),
             "target_activity_high_threshold": float(params["target_activity_high_threshold"]),
@@ -464,6 +535,62 @@ def _bootstrap_mask(n_samples: int, sample_rate: int, window_sec: tuple[float, f
     return mask
 
 
+def _build_oracle_non_target_mic_audio(
+    *,
+    mic_audio: np.ndarray,
+    source_mic_audio: list[np.ndarray],
+    speaker_to_source_idx: dict[int, int],
+    active_speaker_ids: np.ndarray,
+) -> np.ndarray:
+    oracle_target = np.zeros_like(np.asarray(mic_audio, dtype=np.float32))
+    n_samples = int(active_speaker_ids.shape[0])
+    for speaker_id, source_idx in speaker_to_source_idx.items():
+        mask = np.asarray(active_speaker_ids == int(speaker_id), dtype=bool).reshape(-1)
+        if not np.any(mask):
+            continue
+        source_mic = np.asarray(source_mic_audio[int(source_idx)], dtype=np.float32)
+        if source_mic.shape[0] < n_samples:
+            source_mic = np.pad(source_mic, ((0, n_samples - source_mic.shape[0]), (0, 0)))
+        oracle_target[mask, :] += source_mic[:n_samples][mask, :]
+    return (np.asarray(mic_audio, dtype=np.float32) - oracle_target).astype(np.float32, copy=False)
+
+
+def _build_oracle_target_mic_audio(
+    *,
+    source_mic_audio: list[np.ndarray],
+    speaker_to_source_idx: dict[int, int],
+    active_speaker_ids: np.ndarray,
+    n_samples: int,
+    n_mics: int,
+) -> np.ndarray:
+    oracle_target = np.zeros((int(n_samples), int(n_mics)), dtype=np.float32)
+    for speaker_id, source_idx in speaker_to_source_idx.items():
+        mask = np.asarray(active_speaker_ids == int(speaker_id), dtype=bool).reshape(-1)
+        if not np.any(mask):
+            continue
+        source_mic = np.asarray(source_mic_audio[int(source_idx)], dtype=np.float32)
+        if source_mic.shape[0] < n_samples:
+            source_mic = np.pad(source_mic, ((0, n_samples - source_mic.shape[0]), (0, 0)))
+        oracle_target[mask, :] += source_mic[:n_samples][mask, :]
+    return oracle_target.astype(np.float32, copy=False)
+
+
+def _oracle_noise_frame_provider(oracle_noise_audio: np.ndarray, frame_samples: int):
+    audio = np.asarray(oracle_noise_audio, dtype=np.float32)
+
+    def _provider(frame_index: int, _timestamp_ms: float) -> np.ndarray | None:
+        start = int(frame_index) * int(frame_samples)
+        if start >= audio.shape[0]:
+            return None
+        end = min(audio.shape[0], start + int(frame_samples))
+        frame = audio[start:end, :]
+        if frame.shape[0] < int(frame_samples):
+            frame = np.pad(frame, ((0, int(frame_samples) - frame.shape[0]), (0, 0)))
+        return frame.astype(np.float32, copy=False)
+
+    return _provider
+
+
 def _run_job(
     *,
     scene_path: str,
@@ -489,9 +616,9 @@ def _run_job(
     scene_meta = _load_scene_metadata(scene_id, staged_metadata)
     sim_cfg = SimulationConfig.from_file(staged_scene)
 
-    from simulation.simulator import run_simulation
+    from simulation.simulator import run_simulation_with_source_contributions
 
-    mic_audio, mic_pos, source_signals = run_simulation(sim_cfg)
+    mic_audio, mic_pos, source_signals, source_mic_audio = run_simulation_with_source_contributions(sim_cfg)
     sample_rate = int(sim_cfg.audio.fs)
     n_samples = int(mic_audio.shape[0])
     speech_rows = list(metadata_payload.get("assets", {}).get("speech", []))
@@ -516,8 +643,23 @@ def _run_job(
     bootstrap_mask = _bootstrap_mask(n_samples, sample_rate, bootstrap_window)
     background_only_mask = np.logical_not(speech_mask)
     speaker_to_source_idx = _speaker_source_index_map(sim_cfg, metadata_payload)
-    clean_ref = _build_clean_reference(source_signals, speaker_to_source_idx, active_speaker_ids)
+    clean_ref_dry = _build_clean_reference(source_signals, speaker_to_source_idx, active_speaker_ids)
     raw_mix = np.mean(np.asarray(mic_audio, dtype=np.float64), axis=1).astype(np.float32, copy=False)
+    oracle_target_mic_audio = _build_oracle_target_mic_audio(
+        source_mic_audio=source_mic_audio,
+        speaker_to_source_idx=speaker_to_source_idx,
+        active_speaker_ids=active_speaker_ids,
+        n_samples=n_samples,
+        n_mics=int(mic_audio.shape[1]),
+    )
+    oracle_noise_audio = None
+    if method_spec.noise_covariance_mode == "oracle_non_target_residual":
+        oracle_noise_audio = _build_oracle_non_target_mic_audio(
+            mic_audio=np.asarray(mic_audio, dtype=np.float32),
+            source_mic_audio=source_mic_audio,
+            speaker_to_source_idx=speaker_to_source_idx,
+            active_speaker_ids=active_speaker_ids,
+        )
 
     frame_states = _build_babble_bootstrap_frame_states(
         active_speaker_ids=active_speaker_ids,
@@ -538,7 +680,14 @@ def _run_job(
     run_dir = root / "runs" / scene_id / method_spec.method_key
     run_dir.mkdir(parents=True, exist_ok=True)
     sf.write(run_dir / "raw_mix_mean.wav", raw_mix, sample_rate)
-    sf.write(run_dir / "clean_active_target.wav", clean_ref.astype(np.float32), sample_rate)
+    sf.write(run_dir / "clean_active_target_dry.wav", clean_ref_dry.astype(np.float32), sample_rate)
+    sf.write(run_dir / "oracle_target_mic_mean.wav", np.mean(np.asarray(oracle_target_mic_audio, dtype=np.float64), axis=1).astype(np.float32, copy=False), sample_rate)
+    if oracle_noise_audio is not None:
+        sf.write(
+            run_dir / "oracle_non_target_noise.wav",
+            np.mean(np.asarray(oracle_noise_audio, dtype=np.float64), axis=1).astype(np.float32, copy=False),
+            sample_rate,
+        )
 
     t0 = perf_counter()
     runtime_summary = run_offline_session_pipeline(
@@ -553,22 +702,51 @@ def _run_job(
             if method_spec.target_activity_mode == "oracle_target_activity"
             else None
         ),
+        oracle_noise_frame_provider=(
+            None
+            if oracle_noise_audio is None
+            else _oracle_noise_frame_provider(oracle_noise_audio, max(1, int(round(sample_rate * (FAST_FRAME_MS / 1000.0)))))
+        ),
+    )
+    reference_dir = run_dir / "_oracle_target_reference"
+    reference_runtime_summary = run_offline_session_pipeline(
+        req=req,
+        mic_audio=np.asarray(oracle_target_mic_audio, dtype=np.float32),
+        mic_geometry_xyz=np.asarray(mic_pos, dtype=np.float64),
+        out_dir=reference_dir,
+        capture_trace=False,
+        srp_override_provider=_oracle_srp_override_provider(frame_states),
+        target_activity_override_provider=(
+            _oracle_target_activity_override_provider(frame_states)
+            if method_spec.target_activity_mode == "oracle_target_activity"
+            else None
+        ),
+        oracle_noise_frame_provider=(
+            None
+            if oracle_noise_audio is None
+            else _oracle_noise_frame_provider(oracle_noise_audio, max(1, int(round(sample_rate * (FAST_FRAME_MS / 1000.0)))))
+        ),
     )
     elapsed_s = max(perf_counter() - t0, 1e-9)
     processed, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
     processed_audio = np.asarray(processed, dtype=np.float32).reshape(-1)
+    oracle_ref_audio, oracle_ref_sr = sf.read(reference_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
+    oracle_ref_audio = np.asarray(oracle_ref_audio, dtype=np.float32).reshape(-1)
     if int(proc_sr) != int(sample_rate):
         raise ValueError(f"Unexpected sample rate {proc_sr}, expected {sample_rate}")
+    if int(oracle_ref_sr) != int(sample_rate):
+        raise ValueError(f"Unexpected oracle reference sample rate {oracle_ref_sr}, expected {sample_rate}")
     sf.write(run_dir / "enhanced.wav", processed_audio, sample_rate)
+    sf.write(run_dir / "clean_active_target.wav", oracle_ref_audio, sample_rate)
 
     overall = compute_metric_bundle(
-        clean_ref=np.asarray(clean_ref, dtype=np.float64),
+        clean_ref=np.asarray(oracle_ref_audio, dtype=np.float64),
         raw_audio=np.asarray(raw_mix, dtype=np.float64),
         processed_audio=np.asarray(processed_audio, dtype=np.float64),
         sample_rate=sample_rate,
     )
     speech_metrics = _masked_metric_dict(
-        clean_ref=clean_ref,
+        clean_ref=oracle_ref_audio,
         raw_audio=raw_mix,
         processed_audio=processed_audio,
         sample_rate=sample_rate,
@@ -585,6 +763,8 @@ def _run_job(
         "method": method_spec.method_key,
         "beamforming_mode_runtime": str(runtime_summary.get("beamforming_mode", "")),
         "target_activity_mode": "" if method_spec.target_activity_mode is None else str(method_spec.target_activity_mode),
+        "fd_noise_covariance_mode": str(params["fd_noise_covariance_mode"]),
+        "aggression_level": str(method_spec.aggression_level),
         "target_activity_detector_backend": str(params["target_activity_detector_backend"]),
         "main_angle_deg": scene_meta["main_angle_deg"],
         "secondary_angle_deg": scene_meta["secondary_angle_deg"],
@@ -618,6 +798,9 @@ def _run_job(
         "run_dir": str(run_dir.resolve()),
         "runtime_summary": runtime_summary,
         "benchmark_params": dict(params),
+        "noise_covariance_mode": str(method_spec.noise_covariance_mode),
+        "aggression_level": str(method_spec.aggression_level),
+        "reference_runtime_summary": reference_runtime_summary,
         "metrics": {
             "overall": _metric_dict(overall),
             "speech_only": speech_metrics,
@@ -633,24 +816,26 @@ def _run_job(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark GT-DOA MVDR on babble-bootstrap scenes with aggressive Rnn tuning.")
-    parser.add_argument("--scenes-root", default=str(DEFAULT_SCENES_ROOT))
-    parser.add_argument("--assets-root", default=str(DEFAULT_ASSETS_ROOT))
+    parser.add_argument("--scene-family", default="babble_bootstrap", choices=sorted(SCENE_FAMILY_DEFAULTS.keys()))
+    parser.add_argument("--scenes-root", default=None)
+    parser.add_argument("--assets-root", default=None)
     parser.add_argument("--out-root", default=str(DEFAULT_OUT_ROOT))
     parser.add_argument("--profile", default=DEFAULT_PROFILE, choices=list(SUPPORTED_MIC_ARRAY_PROFILES))
     parser.add_argument("--methods", nargs="+", default=list(DEFAULT_METHODS))
     parser.add_argument("--max-scenes", type=int, default=None)
     parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 1) - 1))
     parser.add_argument("--regenerate-scenes", action="store_true")
-    parser.add_argument("--duration-sec", type=float, default=DEFAULT_DURATION_SEC)
-    parser.add_argument("--bootstrap-noise-only-sec", type=float, default=DEFAULT_BOOTSTRAP_SEC)
-    parser.add_argument("--background-babble-count", type=int, default=DEFAULT_BABBLE_COUNT)
-    parser.add_argument("--background-babble-gain-min", type=float, default=DEFAULT_BABBLE_GAIN_MIN)
-    parser.add_argument("--background-babble-gain-max", type=float, default=DEFAULT_BABBLE_GAIN_MAX)
-    parser.add_argument("--background-wham-gain", type=float, default=DEFAULT_WHAM_GAIN)
+    parser.add_argument("--duration-sec", type=float, default=None)
+    parser.add_argument("--bootstrap-noise-only-sec", type=float, default=None)
+    parser.add_argument("--background-babble-count", type=int, default=None)
+    parser.add_argument("--background-babble-gain-min", type=float, default=None)
+    parser.add_argument("--background-babble-gain-max", type=float, default=None)
+    parser.add_argument("--background-wham-gain", type=float, default=None)
     parser.add_argument("--manifest-path", default=None)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=DEFAULT_FD_ANALYSIS_WINDOW_MS)
     parser.add_argument("--fd-cov-ema-alpha", type=float, default=None)
     parser.add_argument("--fd-diag-load", type=float, default=None)
+    parser.add_argument("--fd-noise-covariance-mode", default=None, choices=["estimated_target_subtractive", "oracle_non_target_residual"])
     parser.add_argument("--target-activity-low-threshold", type=float, default=None)
     parser.add_argument("--target-activity-high-threshold", type=float, default=None)
     parser.add_argument("--target-activity-enter-frames", type=int, default=None)
@@ -680,18 +865,45 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    scenes_root = Path(args.scenes_root)
-    assets_root = Path(args.assets_root)
+    family_defaults = SCENE_FAMILY_DEFAULTS[str(args.scene_family)]
+    scenes_root = Path(str(args.scenes_root) if args.scenes_root is not None else family_defaults["scenes_root"])
+    assets_root = Path(str(args.assets_root) if args.assets_root is not None else family_defaults["assets_root"])
+    duration_sec = float(args.duration_sec) if args.duration_sec is not None else float(family_defaults["duration_sec"])
+    bootstrap_noise_only_sec = (
+        float(args.bootstrap_noise_only_sec)
+        if args.bootstrap_noise_only_sec is not None
+        else float(family_defaults["bootstrap_noise_only_sec"])
+    )
+    background_babble_count = (
+        int(args.background_babble_count)
+        if args.background_babble_count is not None
+        else int(family_defaults["background_babble_count"])
+    )
+    background_babble_gain_min = (
+        float(args.background_babble_gain_min)
+        if args.background_babble_gain_min is not None
+        else float(family_defaults["background_babble_gain_min"])
+    )
+    background_babble_gain_max = (
+        float(args.background_babble_gain_max)
+        if args.background_babble_gain_max is not None
+        else float(family_defaults["background_babble_gain_max"])
+    )
+    background_wham_gain = (
+        float(args.background_wham_gain)
+        if args.background_wham_gain is not None
+        else float(family_defaults["background_wham_gain"])
+    )
     if args.regenerate_scenes or not list(scenes_root.glob("*.json")):
-        generate_testing_specific_angles_babble_bootstrap_dataset(
+        family_defaults["generator"](
             config_root=scenes_root,
             asset_root=assets_root,
-            duration_sec=float(args.duration_sec),
-            bootstrap_noise_only_sec=float(args.bootstrap_noise_only_sec),
-            background_babble_count=int(args.background_babble_count),
-            background_babble_gain_min=float(args.background_babble_gain_min),
-            background_babble_gain_max=float(args.background_babble_gain_max),
-            background_wham_gain=float(args.background_wham_gain),
+            duration_sec=duration_sec,
+            bootstrap_noise_only_sec=bootstrap_noise_only_sec,
+            background_babble_count=background_babble_count,
+            background_babble_gain_min=background_babble_gain_min,
+            background_babble_gain_max=background_babble_gain_max,
+            background_wham_gain=background_wham_gain,
             manifest_path=args.manifest_path,
         )
 
@@ -711,13 +923,15 @@ def main() -> None:
     base_detector_params = dict(DEFAULT_TARGET_ACTIVITY_PRESETS[detector_backend])
     params = {
         "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
+        "fd_noise_covariance_mode": "estimated_target_subtractive",
         **base_detector_params,
         **detector_overrides,
-        "bootstrap_noise_only_sec": float(args.bootstrap_noise_only_sec),
-        "background_babble_count": int(args.background_babble_count),
-        "background_babble_gain_min": float(args.background_babble_gain_min),
-        "background_babble_gain_max": float(args.background_babble_gain_max),
-        "background_wham_gain": float(args.background_wham_gain),
+        "scene_family": str(args.scene_family),
+        "bootstrap_noise_only_sec": bootstrap_noise_only_sec,
+        "background_babble_count": background_babble_count,
+        "background_babble_gain_min": background_babble_gain_min,
+        "background_babble_gain_max": background_babble_gain_max,
+        "background_wham_gain": background_wham_gain,
     }
     jobs = [
         {
@@ -733,9 +947,21 @@ def main() -> None:
                     if str(method) == "mvdr_fd_bootstrap_estimated_activity_silero"
                     else {}
                 ),
+                **(
+                    DEFAULT_ORACLE_NOISE_PRESETS[str(method).replace("mvdr_fd_bootstrap_", "")]
+                    if str(method).startswith("mvdr_fd_bootstrap_oracle_noise_")
+                    else {}
+                ),
                 **detector_overrides,
                 "target_activity_detector_backend": (
-                    "silero_fused" if str(method) == "mvdr_fd_bootstrap_estimated_activity_silero" else str(params["target_activity_detector_backend"])
+                    "silero_fused"
+                    if str(method) == "mvdr_fd_bootstrap_estimated_activity_silero" or str(method).startswith("mvdr_fd_bootstrap_oracle_noise_")
+                    else str(params["target_activity_detector_backend"])
+                ),
+                "fd_noise_covariance_mode": (
+                    "oracle_non_target_residual"
+                    if str(method).startswith("mvdr_fd_bootstrap_oracle_noise_")
+                    else str(params["fd_noise_covariance_mode"])
                 ),
             },
         }

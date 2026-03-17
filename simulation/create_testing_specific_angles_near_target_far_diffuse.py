@@ -30,38 +30,39 @@ from simulation.create_testing_specific_angles_scene import (
 from simulation.simulation_config import MicrophoneArray, Room, SimulationAudio, SimulationConfig, SimulationSource
 
 
-DEFAULT_CONFIG_ROOT = Path("simulation/simulations/configs/testing_specific_angles_babble_bootstrap")
-DEFAULT_ASSET_ROOT = Path("simulation/simulations/assets/testing_specific_angles_babble_bootstrap")
+DEFAULT_CONFIG_ROOT = Path("simulation/simulations/configs/testing_specific_angles_near_target_far_diffuse")
+DEFAULT_ASSET_ROOT = Path("simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse")
 DEFAULT_DURATION_SEC = 12.0
 DEFAULT_BOOTSTRAP_SEC = 4.0
-DEFAULT_SOURCE_RADIUS_SCALE = 0.28
-DEFAULT_BABBLE_COUNT = 8
-DEFAULT_BABBLE_GAIN_MIN = 0.045
-DEFAULT_BABBLE_GAIN_MAX = 0.10
-DEFAULT_WHAM_GAIN = 0.16
+DEFAULT_TARGET_RADIUS_SCALE = 0.14
+DEFAULT_BACKGROUND_RADIUS_SCALE = 0.46
+DEFAULT_BABBLE_COUNT = 10
+DEFAULT_BABBLE_GAIN_MIN = 0.02
+DEFAULT_BABBLE_GAIN_MAX = 0.055
+DEFAULT_WHAM_GAIN = 0.08
 FRAME_MS = 20
 
 
 @dataclass(frozen=True)
-class BabbleBootstrapSceneSpec:
+class NearTargetFarDiffuseSceneSpec:
     scene_idx: int
     target_angles_deg: tuple[int, int]
     wham_angle_deg: int
     babble_rotation_deg: int = 0
 
 
-SCENE_SPECS: tuple[BabbleBootstrapSceneSpec, ...] = (
-    BabbleBootstrapSceneSpec(0, (0, 45), 180, 0),
-    BabbleBootstrapSceneSpec(1, (45, 90), 225, 15),
-    BabbleBootstrapSceneSpec(2, (90, 135), 270, 30),
-    BabbleBootstrapSceneSpec(3, (135, 180), 315, 45),
-    BabbleBootstrapSceneSpec(4, (180, 225), 0, 60),
-    BabbleBootstrapSceneSpec(5, (270, 315), 90, 75),
+SCENE_SPECS: tuple[NearTargetFarDiffuseSceneSpec, ...] = (
+    NearTargetFarDiffuseSceneSpec(0, (0, 35), 180, 0),
+    NearTargetFarDiffuseSceneSpec(1, (35, 70), 225, 18),
+    NearTargetFarDiffuseSceneSpec(2, (70, 110), 270, 36),
+    NearTargetFarDiffuseSceneSpec(3, (110, 150), 315, 54),
+    NearTargetFarDiffuseSceneSpec(4, (180, 220), 0, 72),
+    NearTargetFarDiffuseSceneSpec(5, (250, 300), 90, 90),
 )
 
 
 def _scene_id(scene_idx: int) -> str:
-    return f"testing_specific_angles_babble_bootstrap_k2_scene{scene_idx:02d}"
+    return f"testing_specific_angles_near_target_far_diffuse_k2_scene{scene_idx:02d}"
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -116,7 +117,7 @@ def _smooth_envelope(
 ) -> tuple[np.ndarray, list[dict[str, float]]]:
     if total_samples <= 0:
         return np.zeros(0, dtype=np.float32), []
-    min_segment = max(0.35, float(segment_sec_range[0]))
+    min_segment = max(0.4, float(segment_sec_range[0]))
     max_segment = max(min_segment, float(segment_sec_range[1]))
     anchors_t = [0.0]
     anchors_v = [float(base_gain * rng.uniform(min_scale, max_scale))]
@@ -175,7 +176,7 @@ def _background_centroid_deg(angles_deg: list[float], weights: list[float]) -> f
     return float(np.mod(np.degrees(np.arctan2(vec[1], vec[0])), 360.0))
 
 
-def _babble_angles(count: int, rotation_deg: int) -> list[int]:
+def _diffuse_babble_angles(count: int, rotation_deg: int) -> list[int]:
     base_angles = np.linspace(0.0, 360.0, max(count, 1), endpoint=False)
     return [int(round((float(angle) + float(rotation_deg)) % 360.0)) for angle in base_angles[:count]]
 
@@ -221,7 +222,7 @@ def _build_frame_rows(
     return rows
 
 
-def generate_testing_specific_angles_babble_bootstrap_dataset(
+def generate_testing_specific_angles_near_target_far_diffuse_dataset(
     *,
     config_root: str | Path = DEFAULT_CONFIG_ROOT,
     asset_root: str | Path = DEFAULT_ASSET_ROOT,
@@ -268,8 +269,8 @@ def generate_testing_specific_angles_babble_bootstrap_dataset(
         wham_path = library.choose_noise_path(rng)
 
         target_positions = {
-            0: _room_position(center, room_dims, float(spec.target_angles_deg[0]), DEFAULT_SOURCE_RADIUS_SCALE, 1.45),
-            1: _room_position(center, room_dims, float(spec.target_angles_deg[1]), DEFAULT_SOURCE_RADIUS_SCALE, 1.45),
+            0: _room_position(center, room_dims, float(spec.target_angles_deg[0]), DEFAULT_TARGET_RADIUS_SCALE, 1.45),
+            1: _room_position(center, room_dims, float(spec.target_angles_deg[1]), DEFAULT_TARGET_RADIUS_SCALE, 1.45),
         }
         target_windows = {
             0: (bootstrap_sec, bootstrap_sec + target_turn_sec),
@@ -287,7 +288,7 @@ def generate_testing_specific_angles_babble_bootstrap_dataset(
             )
             _render_sparse_asset(track, asset_path, sample_rate)
 
-        chatter_angles = _babble_angles(babble_count, spec.babble_rotation_deg)
+        chatter_angles = _diffuse_babble_angles(babble_count, spec.babble_rotation_deg)
         chatter_gains = [float(rng.uniform(babble_gain_min, babble_gain_max)) for _ in range(babble_count)]
         chatter_positions: list[list[float]] = []
         chatter_asset_paths: list[Path] = []
@@ -301,15 +302,15 @@ def generate_testing_specific_angles_babble_bootstrap_dataset(
                 sr=sample_rate,
                 base_gain=float(chatter_gains[idx]),
                 rng=rng,
-                min_scale=0.7,
-                max_scale=1.35,
-                segment_sec_range=(1.5, 3.5),
+                min_scale=0.85,
+                max_scale=1.20,
+                segment_sec_range=(2.0, 4.5),
             )
             track = (track * envelope).astype(np.float32, copy=False)
             noise_mix_track += track
             _render_sparse_asset(track, asset_path, sample_rate)
             chatter_asset_paths.append(asset_path)
-            chatter_positions.append(_room_position(center, room_dims, float(angle_deg), DEFAULT_SOURCE_RADIUS_SCALE * 1.25, 1.3))
+            chatter_positions.append(_room_position(center, room_dims, float(angle_deg), DEFAULT_BACKGROUND_RADIUS_SCALE, 1.3))
             chatter_envelope_segments.append(segments)
 
         wham_asset_path = render_assets / "background_wham_0.wav"
@@ -319,14 +320,14 @@ def generate_testing_specific_angles_babble_bootstrap_dataset(
             sr=sample_rate,
             base_gain=float(wham_gain),
             rng=rng,
-            min_scale=0.8,
-            max_scale=1.25,
-            segment_sec_range=(2.0, 4.0),
+            min_scale=0.9,
+            max_scale=1.15,
+            segment_sec_range=(2.5, 5.0),
         )
         wham_track = (wham_track * wham_envelope).astype(np.float32, copy=False)
         noise_mix_track += wham_track
         _render_sparse_asset(wham_track, wham_asset_path, sample_rate)
-        wham_position = _room_position(center, room_dims, float(spec.wham_angle_deg), DEFAULT_SOURCE_RADIUS_SCALE * 1.35, 1.2)
+        wham_position = _room_position(center, room_dims, float(spec.wham_angle_deg), DEFAULT_BACKGROUND_RADIUS_SCALE * 1.05, 1.2)
 
         source_rows: list[SimulationSource] = [
             SimulationSource(
@@ -398,14 +399,18 @@ def generate_testing_specific_angles_babble_bootstrap_dataset(
         )
         metadata = {
             "scene_name": scene_name,
-            "scene_type": "testing_specific_angles_babble_bootstrap",
-            "scene_prefix": "testing_specific_angles_babble_bootstrap",
+            "scene_type": "testing_specific_angles_near_target_far_diffuse",
+            "scene_prefix": "testing_specific_angles_near_target_far_diffuse",
             "seed": int(seed),
             "speaker_count": 2,
             "main_angle_deg": int(spec.target_angles_deg[0]),
             "secondary_angle_deg": int(spec.target_angles_deg[1]),
             "bootstrap_noise_only_window_sec": [0.0, float(bootstrap_sec)],
             "bootstrap_reference_doa_deg": int(spec.target_angles_deg[0]),
+            "target_radius_scale": float(DEFAULT_TARGET_RADIUS_SCALE),
+            "background_radius_scale": float(DEFAULT_BACKGROUND_RADIUS_SCALE),
+            "target_distance_regime": "near_field_relative",
+            "background_distance_regime": "far_field_relative",
             "background_noise_centroid_deg": chatter_centroid_deg,
             "background_noise_all_centroid_deg": all_noise_centroid_deg,
             "background_babble_count": int(babble_count),
@@ -529,6 +534,8 @@ def generate_testing_specific_angles_babble_bootstrap_dataset(
                 "main_angle_deg": int(spec.target_angles_deg[0]),
                 "secondary_angle_deg": int(spec.target_angles_deg[1]),
                 "bootstrap_noise_only_window_sec": [0.0, float(bootstrap_sec)],
+                "target_radius_scale": float(DEFAULT_TARGET_RADIUS_SCALE),
+                "background_radius_scale": float(DEFAULT_BACKGROUND_RADIUS_SCALE),
                 "background_babble_count": int(babble_count),
                 "background_wham_gain": float(wham_gain),
             }
@@ -539,7 +546,7 @@ def generate_testing_specific_angles_babble_bootstrap_dataset(
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create deterministic babble-bootstrap scenes for aggressive MVDR covariance tuning.")
+    parser = argparse.ArgumentParser(description="Create near-target, far-diffuse background scenes with bootstrap noise-only startup.")
     parser.add_argument("--config-root", default=str(DEFAULT_CONFIG_ROOT))
     parser.add_argument("--asset-root", default=str(DEFAULT_ASSET_ROOT))
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -556,7 +563,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    rows = generate_testing_specific_angles_babble_bootstrap_dataset(
+    rows = generate_testing_specific_angles_near_target_far_diffuse_dataset(
         config_root=args.config_root,
         asset_root=args.asset_root,
         seed=int(args.seed),

@@ -162,6 +162,7 @@ class _FDBufferedBeamformer:
         self.rnn_gsc: np.ndarray | None = None
         self._win = np.sqrt(np.hanning(max(4, self.analysis_n))).astype(np.float64)
         self._prev_mc = np.zeros((max(0, self.analysis_n - self.hop), self.n_mics), dtype=np.float64)
+        self._prev_noise_mc = np.zeros((max(0, self.analysis_n - self.hop), self.n_mics), dtype=np.float64)
         self._ola_tail_mvdr = np.zeros(self.analysis_n, dtype=np.float64)
         self._ola_tail_gsc = np.zeros(self.analysis_n, dtype=np.float64)
         self._ola_norm_mvdr = np.zeros(self.analysis_n, dtype=np.float64)
@@ -180,6 +181,9 @@ class _FDBufferedBeamformer:
         rnn += diag * np.eye(mics, dtype=np.complex128)[None, :, :]
         return rnn
 
+    def _noise_covariance_mode(self) -> str:
+        return str(getattr(self.cfg, "fd_noise_covariance_mode", "estimated_target_subtractive")).strip().lower()
+
     def _update_noise_covariance(
         self,
         rnn_prev: np.ndarray | None,
@@ -188,7 +192,12 @@ class _FDBufferedBeamformer:
         cov_alpha: float,
         *,
         target_active: bool,
+        oracle_noise_fft: np.ndarray | None = None,
     ) -> np.ndarray:
+        if self._noise_covariance_mode() == "oracle_non_target_residual":
+            if oracle_noise_fft is None:
+                raise ValueError("oracle_non_target_residual mode requires oracle noise FFT observations.")
+            return self._update_covariance(rnn_prev, oracle_noise_fft, cov_alpha)
         # When the target is inactive, the mixture is a direct observation of the noise field and can
         # refresh Rnn without any target subtraction. Otherwise estimate interference/noise covariance
         # by subtracting the steered target covariance from the full mixture covariance.
@@ -232,15 +241,25 @@ class _FDBufferedBeamformer:
             rnn[f] = (eigvecs @ np.diag(eigvals.astype(np.complex128)) @ eigvecs.conj().T) + (diag * eye)
         return rnn
 
-    def _analysis_block(self, frame_mc: np.ndarray) -> np.ndarray:
+    def _analysis_block_with_state(
+        self,
+        frame_mc: np.ndarray,
+        prev_mc: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
         x = np.asarray(frame_mc, dtype=np.float64)
-        block = np.concatenate([self._prev_mc, x], axis=0)
+        block = np.concatenate([np.asarray(prev_mc, dtype=np.float64), x], axis=0)
         if block.shape[0] != self.analysis_n:
             raise ValueError(f"analysis block size mismatch: got {block.shape[0]}, expected {self.analysis_n}")
+        next_prev = np.zeros((max(0, self.analysis_n - self.hop), self.n_mics), dtype=np.float64)
         if self.analysis_n > self.hop:
-            self._prev_mc = block[-(self.analysis_n - self.hop) :].copy()
+            next_prev = block[-(self.analysis_n - self.hop) :].copy()
         xw = block * self._win[:, None]
-        return np.fft.rfft(xw, axis=0)  # (F, M)
+        return np.fft.rfft(xw, axis=0), next_prev  # (F, M)
+
+    def _analysis_block(self, frame_mc: np.ndarray) -> np.ndarray:
+        x_fft, next_prev = self._analysis_block_with_state(frame_mc, self._prev_mc)
+        self._prev_mc = next_prev
+        return x_fft
 
     def _synthesis_block(
         self,
@@ -276,9 +295,14 @@ class _FDBufferedBeamformer:
         covariance_alpha: float | None = None,
         *,
         target_active: bool = True,
+        oracle_noise_frame: np.ndarray | None = None,
     ) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)  # (F, M)
+        oracle_noise_fft = None
+        if oracle_noise_frame is not None:
+            oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
+            self._prev_noise_mc = next_prev_noise
         a = _steering_vector_f_domain(
             doa_deg=doa_deg,
             n_fft=self.analysis_n,
@@ -292,6 +316,7 @@ class _FDBufferedBeamformer:
             a,
             float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
             target_active=bool(target_active),
+            oracle_noise_fft=oracle_noise_fft,
         )
 
         f_bins = x_fft.shape[0]
@@ -316,9 +341,14 @@ class _FDBufferedBeamformer:
         covariance_alpha: float | None = None,
         *,
         target_active: bool = True,
+        oracle_noise_frame: np.ndarray | None = None,
     ) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)
+        oracle_noise_fft = None
+        if oracle_noise_frame is not None:
+            oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
+            self._prev_noise_mc = next_prev_noise
         a_target = _steering_vector_f_domain(
             doa_deg=target_doa_deg,
             n_fft=self.analysis_n,
@@ -339,6 +369,7 @@ class _FDBufferedBeamformer:
             a_target,
             float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
             target_active=bool(target_active),
+            oracle_noise_fft=oracle_noise_fft,
         )
 
         f_bins = x_fft.shape[0]
@@ -512,6 +543,7 @@ class FastPathWorker(threading.Thread):
         stop_event: threading.Event,
         srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
         target_activity_override_provider: Callable[[int, float], float | None] | None = None,
+        oracle_noise_frame_provider: Callable[[int, float], np.ndarray | None] | None = None,
     ):
         super().__init__(name="FastPathWorker", daemon=True)
         self._cfg = config
@@ -605,6 +637,7 @@ class FastPathWorker(threading.Thread):
         self._postfilter = _PostFilterState(frame_samples=frame_samples, cfg=config)
         self._srp_override_provider = srp_override_provider
         self._target_activity_override_provider = target_activity_override_provider
+        self._oracle_noise_frame_provider = oracle_noise_frame_provider
         self._own_voice_active = False
         self._own_voice_on_count = 0
         self._own_voice_off_count = 0
@@ -640,6 +673,12 @@ class FastPathWorker(threading.Thread):
             raise ValueError("MVDR requires target_activity_rnn_update_mode to be configured.")
         if mode == "oracle_target_activity" and self._target_activity_override_provider is None:
             raise ValueError("oracle_target_activity mode requires a target activity override provider.")
+        if (
+            beamforming_mode == "mvdr_fd"
+            and str(getattr(self._cfg, "fd_noise_covariance_mode", "estimated_target_subtractive")).strip().lower() == "oracle_non_target_residual"
+            and self._oracle_noise_frame_provider is None
+        ):
+            raise ValueError("oracle_non_target_residual mode requires an oracle noise frame provider.")
 
     def _suppression_mode(self) -> str:
         return str(self._cfg.own_voice_suppression_mode).strip().lower()
@@ -981,6 +1020,7 @@ class FastPathWorker(threading.Thread):
         covariance_alpha: float | None = None,
         *,
         target_active: bool = True,
+        oracle_noise_frame: np.ndarray | None = None,
     ) -> np.ndarray:
         mode = str(self._cfg.beamforming_mode).strip().lower()
         if mode == "delay_sum":
@@ -998,7 +1038,19 @@ class FastPathWorker(threading.Thread):
             doa_deg=doa_deg,
             covariance_alpha=covariance_alpha,
             target_active=bool(target_active),
+            oracle_noise_frame=oracle_noise_frame,
         )
+
+    def _oracle_noise_frame(self, now_ms: float) -> np.ndarray | None:
+        if self._oracle_noise_frame_provider is None:
+            return None
+        frame = self._oracle_noise_frame_provider(self._frame_idx, now_ms)
+        if frame is None:
+            return None
+        out = np.asarray(frame, dtype=np.float32)
+        if out.ndim != 2:
+            raise ValueError("oracle noise frame provider must yield shape (samples, n_mics)")
+        return out
 
     def _apply_soft_gate(self, out: np.ndarray) -> np.ndarray:
         attenuation_db = float(max(0.0, self._cfg.suppressed_user_gate_attenuation_db))
@@ -1030,6 +1082,7 @@ class FastPathWorker(threading.Thread):
                             x = np.pad(x, ((0, frame_samples - x.shape[0]), (0, 0)))
 
                     now_ms = 1000.0 * (self._frame_idx * frame_samples) / self._cfg.sample_rate_hz
+                    oracle_noise_frame = self._oracle_noise_frame(now_ms)
                     t0 = perf_counter()
                     override = None if self._srp_override_provider is None else self._srp_override_provider(self._frame_idx, now_ms)
                     if override is None:
@@ -1114,6 +1167,7 @@ class FastPathWorker(threading.Thread):
                                     null_doa_deg=float(user_doa),
                                     covariance_alpha=target_covariance_alpha,
                                     target_active=bool(target_activity_active),
+                                    oracle_noise_frame=oracle_noise_frame,
                                 )
                                 suppression_applied = True
                                 suppression_strategy = "lcmv_null"
@@ -1128,6 +1182,7 @@ class FastPathWorker(threading.Thread):
                                     speech_activity=speech_activity,
                                     covariance_alpha=target_covariance_alpha,
                                     target_active=bool(target_activity_active),
+                                    oracle_noise_frame=oracle_noise_frame,
                                 )
                         elif fallback_beam_doa is not None and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd":
                             out = self._beamform_single_direction(
@@ -1136,6 +1191,7 @@ class FastPathWorker(threading.Thread):
                                 speech_activity=speech_activity,
                                 covariance_alpha=target_covariance_alpha,
                                 target_active=False,
+                                oracle_noise_frame=oracle_noise_frame,
                             )
                         else:
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
@@ -1170,6 +1226,7 @@ class FastPathWorker(threading.Thread):
                                     null_doa_deg=float(user_doa),
                                     covariance_alpha=target_covariance_alpha,
                                     target_active=bool(target_activity_active),
+                                    oracle_noise_frame=oracle_noise_frame,
                                 )
                                 suppression_applied = True
                                 suppression_strategy = "lcmv_null"
@@ -1184,6 +1241,7 @@ class FastPathWorker(threading.Thread):
                                     speech_activity=speech_activity,
                                     covariance_alpha=target_covariance_alpha,
                                     target_active=bool(target_activity_active),
+                                    oracle_noise_frame=oracle_noise_frame,
                                 )
                         elif fallback_beam_doa is not None and str(self._cfg.beamforming_mode).strip().lower() == "mvdr_fd":
                             out = self._beamform_single_direction(
@@ -1192,6 +1250,7 @@ class FastPathWorker(threading.Thread):
                                 speech_activity=speech_activity,
                                 covariance_alpha=target_covariance_alpha,
                                 target_active=False,
+                                oracle_noise_frame=oracle_noise_frame,
                             )
                         else:
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
@@ -1214,6 +1273,7 @@ class FastPathWorker(threading.Thread):
                                 speech_activity=speech_activity,
                                 covariance_alpha=target_covariance_alpha,
                                 target_active=False,
+                                oracle_noise_frame=oracle_noise_frame,
                             )
                         else:
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)

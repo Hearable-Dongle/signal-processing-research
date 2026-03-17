@@ -55,6 +55,7 @@ def build_pipeline_config_from_request(
         fd_analysis_window_ms=float(req.fd_analysis_window_ms),
         fd_cov_ema_alpha=float(req.fd_cov_ema_alpha),
         fd_diag_load=float(req.fd_diag_load),
+        fd_noise_covariance_mode=str(req.fd_noise_covariance_mode),
         target_activity_rnn_update_mode=target_activity_mode,
         target_activity_low_threshold=float(req.target_activity_low_threshold),
         target_activity_high_threshold=float(req.target_activity_high_threshold),
@@ -183,6 +184,7 @@ def run_offline_session_pipeline(
     capture_trace: bool = False,
     srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
     target_activity_override_provider: Callable[[int, float], float | None] | None = None,
+    oracle_noise_frame_provider: Callable[[int, float], np.ndarray | None] | None = None,
 ) -> dict[str, Any]:
     import soundfile as sf
 
@@ -250,6 +252,7 @@ def run_offline_session_pipeline(
         separation_backend=build_separation_backend_for_request(req, cfg),
         srp_override_provider=srp_override_provider,
         target_activity_override_provider=target_activity_override_provider,
+        oracle_noise_frame_provider=oracle_noise_frame_provider,
     )
     pipe_holder["pipe"] = pipe
     pipe.run_blocking()
@@ -303,6 +306,7 @@ def run_offline_session_pipeline(
         "fd_analysis_window_ms": float(cfg.fd_analysis_window_ms),
         "fd_cov_ema_alpha": float(cfg.fd_cov_ema_alpha),
         "fd_diag_load": float(cfg.fd_diag_load),
+        "fd_noise_covariance_mode": str(cfg.fd_noise_covariance_mode),
         "target_activity_rnn_update_mode": None if cfg.target_activity_rnn_update_mode is None else str(cfg.target_activity_rnn_update_mode),
         "target_activity_low_threshold": float(cfg.target_activity_low_threshold),
         "target_activity_high_threshold": float(cfg.target_activity_high_threshold),

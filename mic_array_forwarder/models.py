@@ -33,6 +33,7 @@ class FastPathConfig(BaseModel):
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
     fd_cov_ema_alpha: float = 0.2965906035161345
     fd_diag_load: float = 0.012141307774357374
+    fd_noise_covariance_mode: Literal["estimated_target_subtractive", "oracle_non_target_residual"] = "estimated_target_subtractive"
     target_activity_rnn_update_mode: Literal["oracle_target_activity", "estimated_target_activity"] | None = None
     target_activity_low_threshold: float = 0.10544774305969414
     target_activity_high_threshold: float = 0.6508335197763335
@@ -175,6 +176,10 @@ class SessionStartRequest(BaseModel):
     @property
     def fd_diag_load(self) -> float:
         return float(self.fast_path.fd_diag_load)
+
+    @property
+    def fd_noise_covariance_mode(self) -> str:
+        return str(self.fast_path.fd_noise_covariance_mode)
 
     @property
     def target_activity_rnn_update_mode(self) -> str | None:

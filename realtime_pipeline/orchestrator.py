@@ -51,6 +51,7 @@ class RealtimeSpeakerPipeline:
         separation_backend: SeparationBackend | None = None,
         srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
         target_activity_override_provider: Callable[[int, float], float | None] | None = None,
+        oracle_noise_frame_provider: Callable[[int, float], np.ndarray | None] | None = None,
     ):
         self.config = config
         self._state = SharedPipelineState()
@@ -70,6 +71,7 @@ class RealtimeSpeakerPipeline:
             stop_event=self._stop,
             srp_override_provider=srp_override_provider,
             target_activity_override_provider=target_activity_override_provider,
+            oracle_noise_frame_provider=oracle_noise_frame_provider,
         )
         self._slow = None
         if bool(config.slow_path_enabled):
