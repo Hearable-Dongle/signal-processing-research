@@ -11,6 +11,7 @@ test("mode picker reveals explicit fast and slow path controls", async () => {
   render(
     <SceneLauncher
       status="idle"
+      hasActiveSession={false}
       defaultScenePath="x.json"
       defaultBackgroundNoisePath="noise.wav"
       defaultBackgroundNoiseGain={0.15}
@@ -60,6 +61,7 @@ test("simulation start emits nested fast_path and slow_path config", async () =>
   render(
     <SceneLauncher
       status="idle"
+      hasActiveSession={false}
       defaultScenePath="x.json"
       defaultBackgroundNoisePath="noise.wav"
       defaultBackgroundNoiseGain={0.15}
@@ -124,6 +126,7 @@ test("live mode reveals ReSpeaker-specific settings and accepts backend JSON ove
   render(
     <SceneLauncher
       status="idle"
+      hasActiveSession={false}
       defaultScenePath="x.json"
       defaultBackgroundNoisePath="noise.wav"
       defaultBackgroundNoiseGain={0.15}

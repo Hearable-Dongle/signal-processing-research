@@ -64,6 +64,7 @@ export type SessionLaunchConfig = {
 
 type Props = {
   status: string;
+  hasActiveSession: boolean;
   defaultScenePath: string;
   defaultBackgroundNoisePath: string;
   defaultBackgroundNoiseGain: number;
@@ -137,6 +138,7 @@ function CollapsibleSection({ title, expanded, onToggle, children }: Collapsible
 
 export function SceneLauncher({
   status,
+  hasActiveSession,
   defaultScenePath,
   defaultBackgroundNoisePath,
   defaultBackgroundNoiseGain,
@@ -193,10 +195,11 @@ export function SceneLauncher({
   const [postProcExpanded, setPostProcExpanded] = useState(true);
   const [slowPathExpanded, setSlowPathExpanded] = useState(false);
   const [advancedOverridesExpanded, setAdvancedOverridesExpanded] = useState(false);
-  const isBusy = status === "running" || status === "starting";
+  const isBusy = hasActiveSession || status === "running" || status === "starting" || status === "stopping";
   const showSimulationSettings = inputSource === "simulation";
   const showLiveSettings = inputSource === "respeaker_live";
   const canStart = inputSource !== null && !isBusy;
+  const canStop = isBusy;
 
   function applyLatency(v: number): void {
     const clamped = Math.max(80, Math.min(2000, Math.round(v)));
@@ -784,65 +787,69 @@ export function SceneLauncher({
           />
 
           <div className="actions">
-            <button
-              onClick={() => {
-                try {
-                  const sessionOverrides = parseOverrideObject("Session overrides JSON", sessionOverridesText);
-                  const fastPathOverrides = parseOverrideObject("Fast path overrides JSON", fastPathOverridesText);
-                  const slowPathOverrides = parseOverrideObject("Slow path overrides JSON", slowPathOverridesText);
-                  setOverrideError("");
-                  onStart({
-                    inputSource,
-                    scenePath,
-                    backgroundNoisePath,
-                    backgroundNoiseGain,
-                    useGroundTruthLocation,
-                    useGroundTruthSpeakerSources,
-                    audioDeviceQuery,
-                    monitorSource,
-                    livePlaybackEnabled,
-                    sampleRateHz,
-                    micArrayProfile,
-                    fastPath: {
-                      localizationBackend,
-                      localizationHopMs,
-                      localizationWindowMs,
-                      localizationOverlap,
-                      localizationFreqLowHz,
-                      localizationFreqHighHz,
-                      localizationVadEnabled,
-                      assumeSingleSpeaker,
-                      beamformingMode,
-                      ownVoiceSuppressionMode,
-                      outputEnhancerMode,
-                      postfilterEnabled,
-                    },
-                    slowPath: {
-                      enabled: slowPathEnabled,
-                      trackingMode: "doa_centroid_v1",
-                      singleActive,
-                      speakerHistorySize,
-                      speakerActivationMinPredictions,
-                      speakerMatchWindowDeg,
-                      centroidAssociationMode,
-                      centroidAssociationSigmaDeg,
-                      centroidAssociationMinScore,
-                      longMemoryEnabled,
-                      longMemoryWindowMs,
-                    },
-                    sessionOverrides,
-                    fastPathOverrides,
-                    slowPathOverrides,
-                  });
-                } catch (error) {
-                  setOverrideError(error instanceof Error ? error.message : "Invalid JSON override");
-                }
-              }}
-              disabled={!canStart}
-            >
-              Start
-            </button>
-            <button onClick={onStop} disabled={!isBusy}>
+            {showLiveSettings && isBusy ? (
+              <span className="status-chip">Recording mode</span>
+            ) : (
+              <button
+                onClick={() => {
+                  try {
+                    const sessionOverrides = parseOverrideObject("Session overrides JSON", sessionOverridesText);
+                    const fastPathOverrides = parseOverrideObject("Fast path overrides JSON", fastPathOverridesText);
+                    const slowPathOverrides = parseOverrideObject("Slow path overrides JSON", slowPathOverridesText);
+                    setOverrideError("");
+                    onStart({
+                      inputSource,
+                      scenePath,
+                      backgroundNoisePath,
+                      backgroundNoiseGain,
+                      useGroundTruthLocation,
+                      useGroundTruthSpeakerSources,
+                      audioDeviceQuery,
+                      monitorSource,
+                      livePlaybackEnabled,
+                      sampleRateHz,
+                      micArrayProfile,
+                      fastPath: {
+                        localizationBackend,
+                        localizationHopMs,
+                        localizationWindowMs,
+                        localizationOverlap,
+                        localizationFreqLowHz,
+                        localizationFreqHighHz,
+                        localizationVadEnabled,
+                        assumeSingleSpeaker,
+                        beamformingMode,
+                        ownVoiceSuppressionMode,
+                        outputEnhancerMode,
+                        postfilterEnabled,
+                      },
+                      slowPath: {
+                        enabled: slowPathEnabled,
+                        trackingMode: "doa_centroid_v1",
+                        singleActive,
+                        speakerHistorySize,
+                        speakerActivationMinPredictions,
+                        speakerMatchWindowDeg,
+                        centroidAssociationMode,
+                        centroidAssociationSigmaDeg,
+                        centroidAssociationMinScore,
+                        longMemoryEnabled,
+                        longMemoryWindowMs,
+                      },
+                      sessionOverrides,
+                      fastPathOverrides,
+                      slowPathOverrides,
+                    });
+                  } catch (error) {
+                    setOverrideError(error instanceof Error ? error.message : "Invalid JSON override");
+                  }
+                }}
+                disabled={!canStart}
+              >
+                Start
+              </button>
+            )}
+            <button onClick={onStop} disabled={!canStop}>
               Stop
             </button>
             <button onClick={onDownloadWav} disabled={!canDownloadWav}>

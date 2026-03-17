@@ -198,6 +198,7 @@ export function RealtimeDemoPage({
     ws.close();
     audioRef.current.stop();
     stopOutputPlayback();
+    setSessionId(null);
     setPlaybackStats(DEFAULT_PLAYBACK_STATS);
     setSelectedSpeakerId(null);
     setGroundTruth([]);
@@ -572,6 +573,7 @@ export function RealtimeDemoPage({
       <div className={`layout ${metricsExpanded ? "" : "metrics-collapsed"}`.trim()}>
         <SceneLauncher
           status={status}
+          hasActiveSession={Boolean(sessionId)}
           defaultScenePath={defaultScenePath}
           defaultBackgroundNoisePath={defaultBackgroundNoisePath}
           defaultBackgroundNoiseGain={defaultBackgroundNoiseGain}
