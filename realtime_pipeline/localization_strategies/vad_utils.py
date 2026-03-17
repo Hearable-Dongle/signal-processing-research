@@ -12,11 +12,10 @@ except ImportError:  # pragma: no cover - exercised via fallback behavior
 try:  # pragma: no cover - optional dependency
     import torch
     from scipy.signal import resample_poly
-    from silero_vad import get_speech_timestamps, load_silero_vad  # type: ignore
+    from silero_vad import load_silero_vad  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
     torch = None
     resample_poly = None
-    get_speech_timestamps = None
     load_silero_vad = None
 
 
@@ -121,13 +120,15 @@ class SileroVADGate:
         frame_ms: int = DEFAULT_WEBRTC_FRAME_MS,
         hangover_frames: int = DEFAULT_WEBRTC_HANGOVER_FRAMES,
     ) -> None:
-        if load_silero_vad is None or get_speech_timestamps is None or torch is None or resample_poly is None:
+        if load_silero_vad is None or torch is None or resample_poly is None:
             raise RuntimeError("silero_fused target activity backend requested but silero_vad/torch/scipy is unavailable.")
         self.sample_rate_hz = int(sample_rate_hz)
         self.frame_ms = int(frame_ms)
         self.hangover_frames = int(hangover_frames)
         self._hangover_remaining = 0
         self._model = load_silero_vad()
+        self._model.reset_states()
+        self._threshold = 0.35
 
     def process(self, mono_audio: np.ndarray) -> VADDecision:
         mono = np.asarray(mono_audio, dtype=np.float32).reshape(-1)
@@ -143,13 +144,19 @@ class SileroVADGate:
         target_sr = 16000
         if int(self.sample_rate_hz) != target_sr:
             mono = resample_poly(mono, target_sr, int(self.sample_rate_hz)).astype(np.float32, copy=False)
-        audio = torch.from_numpy(np.clip(mono, -1.0, 1.0))
-        speech_segments = get_speech_timestamps(audio, self._model, sampling_rate=target_sr)
-        voiced = 0
-        for seg in speech_segments:
-            voiced += max(0, int(seg.get("end", 0)) - int(seg.get("start", 0)))
-        score = float(np.clip(voiced / max(len(mono), 1), 0.0, 1.0))
-        raw_active = bool(speech_segments)
+        audio = np.clip(mono, -1.0, 1.0).astype(np.float32, copy=False)
+        chunk_samples = 512
+        probs: list[float] = []
+        for start in range(0, len(audio), chunk_samples):
+            chunk = audio[start : start + chunk_samples]
+            if len(chunk) < chunk_samples:
+                chunk = np.pad(chunk, (0, chunk_samples - len(chunk)))
+            prob = float(self._model(torch.from_numpy(chunk), target_sr).item())
+            probs.append(prob)
+        max_prob = max(probs) if probs else 0.0
+        mean_prob = float(np.mean(probs)) if probs else 0.0
+        score = float(np.clip(0.75 * max_prob + 0.25 * mean_prob, 0.0, 1.0))
+        raw_active = bool(max_prob >= self._threshold)
         if raw_active:
             self._hangover_remaining = int(self.hangover_frames)
         else:
@@ -161,5 +168,5 @@ class SileroVADGate:
             raw_active=raw_active,
             hangover_remaining=int(self._hangover_remaining),
             frame_ms=self.frame_ms,
-            source="silero_vad",
+            source="silero_stream",
         )
