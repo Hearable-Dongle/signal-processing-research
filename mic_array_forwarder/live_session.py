@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import queue
 import threading
@@ -31,6 +32,8 @@ from mic_array_forwarder.session import _wav_bytes_from_mono_float32
 from mic_array_forwarder.tools.channel_plot_utils import default_channel_labels, render_multichannel_plot_png_bytes
 from mic_array_forwarder.ws_codec import encode_audio_chunk
 from simulation.mic_array_profiles import mic_positions_xyz
+
+logger = logging.getLogger(__name__)
 
 def _mic_geometry_from_profile(profile: str) -> np.ndarray:
     return mic_positions_xyz(profile)
@@ -65,6 +68,22 @@ def _device_debug_string(sd: Any) -> str:
     for idx, dev in enumerate(sd.query_devices()):
         parts.append(f"{idx}: {dev.get('name', 'unknown')} (inputs={dev.get('max_input_channels', 0)})")
     return "; ".join(parts)
+
+
+def _pick_live_sample_rate_hz(sd: Any, device_idx: int, channels: int, requested_sample_rate_hz: int) -> int:
+    requested = int(requested_sample_rate_hz)
+    try:
+        sd.check_input_settings(device=device_idx, channels=channels, samplerate=requested, dtype="float32")
+        return requested
+    except Exception:
+        pass
+
+    device_info = sd.query_devices(device_idx)
+    fallback = int(round(float(device_info.get("default_samplerate", requested))))
+    if fallback > 0 and fallback != requested:
+        sd.check_input_settings(device=device_idx, channels=channels, samplerate=fallback, dtype="float32")
+        return fallback
+    raise
 
 
 class LiveDemoSession:
@@ -466,10 +485,8 @@ class LiveDemoSession:
 
             audio_q: queue.Queue[np.ndarray | None] = queue.Queue(maxsize=64)
             self._audio_q = audio_q
-            sample_rate_hz = int(self.req.sample_rate_hz)
             capture_channel_count = int(self._capture_channel_count)
             output_channel_count = int(len(self._channel_map)) if self._channel_map is not None else int(self.req.channel_count)
-            frame_samples = max(1, int(sample_rate_hz * max(10, int(self.req.localization_hop_ms)) / 1000))
 
             device_idx = _find_input_device(sd, self.req.audio_device_query, capture_channel_count)
             if device_idx is None:
@@ -480,6 +497,20 @@ class LiveDemoSession:
 
             device_info = sd.query_devices(device_idx)
             self._last_device_name = str(device_info.get("name", f"device-{device_idx}"))
+            requested_sample_rate_hz = int(self.req.sample_rate_hz)
+            sample_rate_hz = _pick_live_sample_rate_hz(sd, device_idx, capture_channel_count, requested_sample_rate_hz)
+            frame_samples = max(1, int(sample_rate_hz * max(10, int(self.req.localization_hop_ms)) / 1000))
+            connection_detail = (
+                f"ReSpeaker connected: {self._last_device_name}"
+                if "respeaker" in self._last_device_name.lower()
+                else f"Input device connected: {self._last_device_name}"
+            )
+            if sample_rate_hz != requested_sample_rate_hz:
+                connection_detail = (
+                    f"{connection_detail} (using {sample_rate_hz} Hz; requested {requested_sample_rate_hz} Hz unsupported)"
+                )
+            logger.info(connection_detail)
+            self._publish_event("device_connected", detail=connection_detail)
 
             def callback(indata: np.ndarray, _frames: int, _time_info: Any, status: Any) -> None:
                 frame = np.asarray(indata, dtype=np.float32)
@@ -558,6 +589,7 @@ class LiveDemoSession:
                     self._status = "stopped"
                 self._publish_event("stopped")
         except Exception as exc:  # pragma: no cover - defensive reporting path
+            logger.exception("LiveDemoSession failed: %s", exc)
             with self._lock:
                 self._status = "error"
             self._publish_event("error", detail=str(exc))

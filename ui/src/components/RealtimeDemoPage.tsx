@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DemoWsClient } from "../api/ws";
 import { RealtimeAudioPlayer, type PlaybackStats } from "../audio/player";
@@ -148,12 +148,15 @@ export function RealtimeDemoPage({
   const livePlaybackEnabledRef = useRef(true);
 
   const audioRef = useRef(new RealtimeAudioPlayer());
+  const wsRef = useRef<DemoWsClient | null>(null);
   const capturedAudioRef = useRef<Float32Array[]>([]);
   const totalSamplesRef = useRef(0);
   const rawMixedTotalSamplesRef = useRef(0);
   const lastNoiseModelUpdateRef = useRef<{ timestampMs: number | null; active: boolean }>({ timestampMs: null, active: false });
   const outputPlaybackRef = useRef<HTMLAudioElement | null>(null);
   const outputPlaybackUrlRef = useRef<string | null>(null);
+  const activeInputSourceRef = useRef<SessionLaunchConfig["inputSource"]>("simulation");
+  const activeMicArrayProfileRef = useRef<SessionLaunchConfig["micArrayProfile"]>("respeaker_xvf3800_0650");
 
   async function refreshStoredWaveforms(nextSessionId: string, inputSource: SessionLaunchConfig["inputSource"]): Promise<void> {
     const processedBlob = await fetchSessionWav(`/api/session/${nextSessionId}/processed-wav`);
@@ -195,7 +198,7 @@ export function RealtimeDemoPage({
   }
 
   function resetLocalSessionState(nextStatus: string): void {
-    ws.close();
+    wsRef.current?.close();
     audioRef.current.stop();
     stopOutputPlayback();
     setSessionId(null);
@@ -228,16 +231,19 @@ export function RealtimeDemoPage({
     lastNoiseModelUpdateRef.current = { timestampMs, active };
   }
 
-  const ws = useMemo(
-    () =>
-      new DemoWsClient({
+  const ws = useMemo(() => {
+    if (wsRef.current === null) {
+      wsRef.current = new DemoWsClient({
         onServerMessage: (msg: ServerMessage) => {
           if (msg.type === "speaker_state") {
             const displaySpeakers =
-              activeInputSource === "respeaker_live"
+              activeInputSourceRef.current === "respeaker_live"
                 ? msg.speakers.map((speaker) => ({
                     ...speaker,
-                    direction_degrees: backendArrivalToUiSourceBearingDeg(speaker.direction_degrees, activeMicArrayProfile),
+                    direction_degrees: backendArrivalToUiSourceBearingDeg(
+                      speaker.direction_degrees,
+                      activeMicArrayProfileRef.current
+                    ),
                   }))
                 : msg.speakers;
             setSpeakers(displaySpeakers);
@@ -283,9 +289,20 @@ export function RealtimeDemoPage({
           }
         },
         onClose: () => setStatus((s) => (s === "running" ? "disconnected" : s)),
-      }),
-    [activeInputSource, activeMicArrayProfile]
-  );
+      });
+    }
+    return wsRef.current;
+  }, []);
+
+  useEffect(() => {
+    activeInputSourceRef.current = activeInputSource;
+  }, [activeInputSource]);
+
+  useEffect(() => {
+    activeMicArrayProfileRef.current = activeMicArrayProfile;
+  }, [activeMicArrayProfile]);
+
+  useEffect(() => () => wsRef.current?.close(), []);
 
   async function startSession(config: SessionLaunchConfig): Promise<void> {
     const {
@@ -319,12 +336,20 @@ export function RealtimeDemoPage({
     setWaveformBins([]);
     setRawWaveformBins([]);
     setPlayheadMs(0);
+    if (livePlaybackEnabled) {
+      audioRef.current.setTargetLatencyMs(latencyMs);
+      await audioRef.current.start(playbackSampleRateHz);
+      setPlaybackStats(audioRef.current.getStats());
+    } else {
+      audioRef.current.stop();
+      setPlaybackStats(DEFAULT_PLAYBACK_STATS);
+    }
     let resp: Response;
     const requestBody = {
       input_source: inputSource,
       scene_config_path: scenePath,
       processing_mode: "localize_and_beamform",
-      separation_mode: "single_dominant_no_separator",
+      separation_mode: inputSource === "respeaker_live" ? "mock" : "single_dominant_no_separator",
       monitor_source: nextMonitorSource,
       sample_rate_hz: inputSource === "respeaker_live" ? sampleRateHz : undefined,
       mic_array_profile: inputSource === "respeaker_live" ? micArrayProfile : undefined,
@@ -389,14 +414,6 @@ export function RealtimeDemoPage({
         await new Promise((r) => setTimeout(r, 100));
       }
     })();
-    audioRef.current.setTargetLatencyMs(latencyMs);
-    if (livePlaybackEnabled) {
-      await audioRef.current.start(playbackSampleRateHz);
-      setPlaybackStats(audioRef.current.getStats());
-    } else {
-      audioRef.current.stop();
-      setPlaybackStats(DEFAULT_PLAYBACK_STATS);
-    }
     ws.connect(payload.session_id);
     setStatus("running");
   }
