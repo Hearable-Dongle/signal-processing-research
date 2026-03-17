@@ -7,10 +7,14 @@ import json
 import math
 import os
 import re
+import sys
 import tempfile
 import zipfile
 from collections import defaultdict
 from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 try:
     import numpy as np
@@ -43,6 +47,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
     ) from exc
 
 from mic_array_forwarder.models import SessionStartRequest
+from realtime_pipeline.contracts import SRPPeakSnapshot
 from realtime_pipeline.session_runtime import run_offline_session_pipeline
 from realtime_pipeline.tracking_modes import TRACKING_MODE_CHOICES, validate_tracking_mode
 from simulation.mic_array_profiles import mic_positions_xyz
@@ -83,6 +88,13 @@ def _backend_prediction_to_display_angle_deg(angle_deg: float, *, mic_array_prof
         # Backend localization emits incoming-wave direction. Manual annotations
         # from Data Collection are source bearing, so flip by 180 deg before
         # rotating into the UI convention.
+        return _normalize_angle_deg(270.0 - angle)
+    return angle
+
+
+def _display_angle_to_backend_prediction_deg(angle_deg: float, *, mic_array_profile: str) -> float:
+    angle = _normalize_angle_deg(float(angle_deg))
+    if str(mic_array_profile) == "respeaker_xvf3800_0650":
         return _normalize_angle_deg(270.0 - angle)
     return angle
 
@@ -269,6 +281,8 @@ def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float, mic_arr
                         continue
                     start_sec = max(0.0, start_sec)
                     end_sec = max(start_sec, end_sec)
+                    if start_sec == 0.0 and end_sec == 0.0:
+                        end_sec = float(max(duration_s, 0.0))
                     tracks.append(
                         {
                             "speaker_id": int(idx + 1),
@@ -378,6 +392,37 @@ def _filter_tracks_by_speaker_name(ground_truth_tracks: list[dict], speaker_name
     if not expected:
         return []
     return [item for item in ground_truth_tracks if str(item.get("speaker_name", "")).strip().lower() == expected]
+
+
+def _ground_truth_srp_override_provider(
+    ground_truth_tracks: list[dict],
+    *,
+    mic_array_profile: str,
+):
+    def _provider(frame_index: int, timestamp_ms: float) -> SRPPeakSnapshot | None:
+        timestamp_s = float(timestamp_ms) / 1000.0
+        active_tracks = _active_ground_truth_tracks_at_time(ground_truth_tracks, timestamp_s)
+        if not active_tracks:
+            return None
+        backend_angles = tuple(
+            _display_angle_to_backend_prediction_deg(float(item["angle_deg"]), mic_array_profile=mic_array_profile)
+            for item in active_tracks
+        )
+        scores = tuple(1.0 for _ in backend_angles)
+        return SRPPeakSnapshot(
+            timestamp_ms=float(timestamp_ms),
+            peaks_deg=backend_angles,
+            peak_scores=scores,
+            raw_peaks_deg=backend_angles,
+            raw_peak_scores=scores,
+            debug={
+                "source": "ground_truth_override",
+                "frame_index": int(frame_index),
+                "active_speaker_names": [str(item.get("speaker_name", "")) for item in active_tracks],
+            },
+        )
+
+    return _provider
 
 
 def _match_angle_sets(gt_angles: list[float], pred_angles: list[float]) -> tuple[list[float], int, int, int]:
@@ -782,6 +827,7 @@ def _run_recording_method_job(
     enhancement_tier: str,
     output_enhancer_mode: str,
     postfilter_enabled: bool,
+    postfilter_method: str,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -795,6 +841,22 @@ def _run_recording_method_job(
     identity_speaker_embedding_model: str,
     max_speakers_hint: int,
     assume_single_speaker: bool,
+    use_ground_truth_doa_override: bool,
+    mvdr_hop_ms: int | None,
+    fd_analysis_window_ms: float,
+    fd_noise_covariance_mode: str,
+    target_activity_rnn_update_mode: str,
+    target_activity_detector_mode: str,
+    target_activity_detector_backend: str,
+    target_activity_update_every_n_fast_frames: int,
+    fd_cov_ema_alpha: float,
+    fd_diag_load: float,
+    target_activity_low_threshold: float,
+    target_activity_high_threshold: float,
+    target_activity_enter_frames: int,
+    target_activity_exit_frames: int,
+    fd_cov_update_scale_target_active: float,
+    fd_cov_update_scale_target_inactive: float,
 ) -> dict:
     raw_dir = recording_dir / "raw" if (recording_dir / "raw").is_dir() else recording_dir
     mic_audio, sample_rate_hz, channel_filenames = _load_multichannel_wavs(raw_dir)
@@ -802,6 +864,12 @@ def _run_recording_method_job(
 
     method_slug = _slug(method)
     run_dir = out_dir / "runs" / _slug(recording_id) / method_slug
+    is_mvdr = str(method).strip().lower() == "mvdr_fd"
+    if str(fd_noise_covariance_mode) == "oracle_non_target_residual":
+        raise ValueError(
+            "fd_noise_covariance_mode=oracle_non_target_residual is not supported for real-data benchmarks "
+            "because there is no oracle non-target noise provider."
+        )
     req = SessionStartRequest(
         input_source="respeaker_live",
         channel_count=int(mic_audio.shape[1]),
@@ -821,6 +889,7 @@ def _run_recording_method_job(
             "enhancement_tier": str(enhancement_tier),
             "output_enhancer_mode": str(output_enhancer_mode),
             "postfilter_enabled": bool(postfilter_enabled),
+            "postfilter_method": str(postfilter_method),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
             "suppressed_user_voice_doa_deg": (
                 None if suppressed_user_voice_doa_deg is None else float(suppressed_user_voice_doa_deg)
@@ -833,8 +902,21 @@ def _run_recording_method_job(
             "assume_single_speaker": bool(assume_single_speaker),
             "localization_backend": str(localization_backend),
             "beamforming_mode": str(method),
-            "fd_analysis_window_ms": float(20.0),
-            "target_activity_rnn_update_mode": "estimated_target_activity" if str(method).strip().lower() == "mvdr_fd" else None,
+            "mvdr_hop_ms": (None if mvdr_hop_ms is None else int(mvdr_hop_ms)),
+            "fd_analysis_window_ms": float(fd_analysis_window_ms),
+            "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
+            "target_activity_rnn_update_mode": (str(target_activity_rnn_update_mode) if is_mvdr else None),
+            "target_activity_detector_mode": str(target_activity_detector_mode),
+            "target_activity_detector_backend": str(target_activity_detector_backend),
+            "target_activity_update_every_n_fast_frames": int(target_activity_update_every_n_fast_frames),
+            "fd_cov_ema_alpha": float(fd_cov_ema_alpha),
+            "fd_diag_load": float(fd_diag_load),
+            "target_activity_low_threshold": float(target_activity_low_threshold),
+            "target_activity_high_threshold": float(target_activity_high_threshold),
+            "target_activity_enter_frames": int(target_activity_enter_frames),
+            "target_activity_exit_frames": int(target_activity_exit_frames),
+            "fd_cov_update_scale_target_active": float(fd_cov_update_scale_target_active),
+            "fd_cov_update_scale_target_inactive": float(fd_cov_update_scale_target_inactive),
             "output_normalization_enabled": bool(output_normalization_enabled),
             "output_allow_amplification": bool(output_allow_amplification),
         },
@@ -856,6 +938,20 @@ def _run_recording_method_job(
         separation_mode=str(separation_mode),
         processing_mode="specific_speaker_enhancement",
     )
+    duration_s_guess = float(raw_mix.size / max(int(sample_rate_hz), 1))
+    ground_truth_tracks = _load_ground_truth_tracks(
+        recording_dir,
+        duration_s=duration_s_guess,
+        mic_array_profile=str(mic_array_profile),
+    )
+    srp_override_provider = None
+    initial_focus_direction_deg = None
+    if bool(use_ground_truth_doa_override) and ground_truth_tracks:
+        srp_override_provider = _ground_truth_srp_override_provider(
+            ground_truth_tracks,
+            mic_array_profile=str(mic_array_profile),
+        )
+        initial_focus_direction_deg = float(ground_truth_tracks[0]["angle_deg"])
     summary = run_offline_session_pipeline(
         req=req,
         mic_audio=mic_audio,
@@ -863,6 +959,8 @@ def _run_recording_method_job(
         out_dir=run_dir,
         input_recording_path=recording_dir,
         capture_trace=True,
+        srp_override_provider=srp_override_provider,
+        initial_focus_direction_deg=initial_focus_direction_deg,
     )
     proc, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
     proc = np.asarray(proc, dtype=np.float32).reshape(-1)
@@ -870,11 +968,6 @@ def _run_recording_method_job(
     n = min(raw_mix.size, proc.size)
     trace_metrics = _trace_metrics(summary)
     duration_s = float(n / max(fs, 1))
-    ground_truth_tracks = _load_ground_truth_tracks(
-        recording_dir,
-        duration_s=duration_s,
-        mic_array_profile=str(mic_array_profile),
-    )
     suppressed_user_tracks = _filter_tracks_by_speaker_name(ground_truth_tracks, suppressed_user_speaker_name)
     gt_metrics = _ground_truth_metrics(
         summary,
@@ -891,13 +984,27 @@ def _run_recording_method_job(
         "recording": recording_id,
         "requested_method": method,
         "method": str(summary.get("beamforming_mode", method)),
+        "method_variant": (
+            f"{method}__cov_{fd_noise_covariance_mode}__det_{target_activity_detector_backend}"
+            if is_mvdr
+            else str(summary.get("beamforming_mode", method))
+        ),
         "sample_rate_hz": fs,
         "duration_s": duration_s,
         "channel_count": int(mic_audio.shape[1]),
         "raw_channel_filenames": ",".join(channel_filenames),
         "separation_mode": str(summary.get("separation_mode", "realtime_pipeline")),
+        "use_ground_truth_doa_override": bool(use_ground_truth_doa_override),
         "enhancement_tier": str(summary.get("enhancement_tier", enhancement_tier)),
         "output_enhancer_mode": str(summary.get("output_enhancer_mode", output_enhancer_mode)),
+        "postfilter_method": str(postfilter_method),
+        "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
+        "fd_analysis_window_ms": float(fd_analysis_window_ms),
+        "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
+        "target_activity_rnn_update_mode": str(target_activity_rnn_update_mode) if is_mvdr else "",
+        "target_activity_detector_mode": str(target_activity_detector_mode) if is_mvdr else "",
+        "target_activity_detector_backend": str(target_activity_detector_backend) if is_mvdr else "",
+        "target_activity_update_every_n_fast_frames": int(target_activity_update_every_n_fast_frames) if is_mvdr else 0,
         "fast_rtf": float(summary["fast_rtf"]),
         "slow_rtf": float(summary["slow_rtf"]),
         "fast_avg_ms": float(summary["fast_avg_ms"]),
@@ -980,6 +1087,38 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enhancement-tier", choices=["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"], default="custom")
     parser.add_argument("--output-enhancer-mode", choices=["off", "wiener"], default="off")
     parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise"], default="off")
+    parser.add_argument("--mvdr-hop-ms", type=int, default=60)
+    parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
+    parser.add_argument(
+        "--fd-noise-covariance-mode",
+        choices=["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"],
+        default="estimated_target_subtractive",
+    )
+    parser.add_argument(
+        "--target-activity-rnn-update-mode",
+        choices=["off", "estimated_target_activity", "oracle_target_activity"],
+        default="estimated_target_activity",
+    )
+    parser.add_argument(
+        "--target-activity-detector-mode",
+        choices=["target_blocker_calibrated", "localization_peak_confidence"],
+        default="target_blocker_calibrated",
+    )
+    parser.add_argument(
+        "--target-activity-detector-backend",
+        choices=["webrtc_fused", "silero_fused"],
+        default="silero_fused",
+    )
+    parser.add_argument("--target-activity-update-every-n-fast-frames", type=int, default=2)
+    parser.add_argument("--fd-cov-ema-alpha", type=float, default=0.6)
+    parser.add_argument("--fd-diag-load", type=float, default=0.01)
+    parser.add_argument("--target-activity-low-threshold", type=float, default=0.35)
+    parser.add_argument("--target-activity-high-threshold", type=float, default=0.55)
+    parser.add_argument("--target-activity-enter-frames", type=int, default=2)
+    parser.add_argument("--target-activity-exit-frames", type=int, default=3)
+    parser.add_argument("--fd-cov-update-scale-target-active", type=float, default=0.15)
+    parser.add_argument("--fd-cov-update-scale-target-inactive", type=float, default=1.0)
     parser.add_argument(
         "--speaker-centroid-history-size",
         "--speaker-history-size",
@@ -1003,6 +1142,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-speakers-hint", type=int, default=4)
     parser.add_argument("--assume-single-speaker", action="store_true")
     parser.add_argument("--localization-backend", choices=["srp_phat_localization", "srp_phat_legacy", "capon_1src", "capon_multisrc", "capon_mvdr_refine_1src", "music_1src"], default="srp_phat_localization")
+    parser.add_argument("--use-ground-truth-doa-override", action="store_true", help="Use annotated speaker DOAs as localization peaks.")
     parser.add_argument("--tracking-mode", choices=TRACKING_MODE_CHOICES, default="doa_centroid_v1")
     parser.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     parser.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")
@@ -1095,6 +1235,7 @@ def main() -> None:
                 enhancement_tier=str(args.enhancement_tier),
                 output_enhancer_mode=str(args.output_enhancer_mode),
                 postfilter_enabled=bool(args.postfilter_enabled),
+                postfilter_method=str(args.postfilter_method),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -1108,20 +1249,36 @@ def main() -> None:
                 identity_speaker_embedding_model=str(args.identity_speaker_embedding_model),
                 max_speakers_hint=int(args.max_speakers_hint),
                 assume_single_speaker=bool(args.assume_single_speaker),
+                use_ground_truth_doa_override=bool(args.use_ground_truth_doa_override),
+                mvdr_hop_ms=(None if args.mvdr_hop_ms is None else int(args.mvdr_hop_ms)),
+                fd_analysis_window_ms=float(args.fd_analysis_window_ms),
+                fd_noise_covariance_mode=str(args.fd_noise_covariance_mode),
+                target_activity_rnn_update_mode=str(args.target_activity_rnn_update_mode),
+                target_activity_detector_mode=str(args.target_activity_detector_mode),
+                target_activity_detector_backend=str(args.target_activity_detector_backend),
+                target_activity_update_every_n_fast_frames=int(args.target_activity_update_every_n_fast_frames),
+                fd_cov_ema_alpha=float(args.fd_cov_ema_alpha),
+                fd_diag_load=float(args.fd_diag_load),
+                target_activity_low_threshold=float(args.target_activity_low_threshold),
+                target_activity_high_threshold=float(args.target_activity_high_threshold),
+                target_activity_enter_frames=int(args.target_activity_enter_frames),
+                target_activity_exit_frames=int(args.target_activity_exit_frames),
+                fd_cov_update_scale_target_active=float(args.fd_cov_update_scale_target_active),
+                fd_cov_update_scale_target_inactive=float(args.fd_cov_update_scale_target_inactive),
             )
 
         if int(args.workers) <= 1:
             for job in jobs:
                 row = _submit_job(job)
                 scene_rows.append(row)
-                summary_by_method[str(row["method"])].append(row)
+                summary_by_method[str(row.get("method_variant", row["method"]))].append(row)
         else:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as pool:
                 futures = [pool.submit(_submit_job, job) for job in jobs]
                 for fut in concurrent.futures.as_completed(futures):
                     row = fut.result()
                     scene_rows.append(row)
-                    summary_by_method[str(row["method"])].append(row)
+                    summary_by_method[str(row.get("method_variant", row["method"]))].append(row)
 
         scene_rows.sort(key=lambda row: (str(row["recording"]), str(row["method"])))
 
@@ -1144,6 +1301,12 @@ def main() -> None:
                     "dominant_direction_step_p95_deg_mean": _mean_numeric(rows, "dominant_direction_step_p95_deg"),
                     "enhancement_tier": str(rows[0].get("enhancement_tier", "")) if rows else "",
                     "output_enhancer_mode": str(rows[0].get("output_enhancer_mode", "")) if rows else "",
+                    "postfilter_method": str(rows[0].get("postfilter_method", "")) if rows else "",
+                    "fd_noise_covariance_mode": str(rows[0].get("fd_noise_covariance_mode", "")) if rows else "",
+                    "target_activity_detector_mode": str(rows[0].get("target_activity_detector_mode", "")) if rows else "",
+                    "target_activity_detector_backend": str(rows[0].get("target_activity_detector_backend", "")) if rows else "",
+                    "mvdr_hop_ms": _mean_numeric(rows, "mvdr_hop_ms"),
+                    "fd_analysis_window_ms": _mean_numeric(rows, "fd_analysis_window_ms"),
                     "suppression_user_recall_mean": _mean_numeric(rows, "suppression_user_recall"),
                     "suppression_false_positive_rate_mean": _mean_numeric(rows, "suppression_false_positive_rate"),
                     "suppression_precision_mean": _mean_numeric(rows, "suppression_precision"),
@@ -1194,10 +1357,27 @@ def main() -> None:
             "enhancement_tier": str(args.enhancement_tier),
             "output_enhancer_mode": str(args.output_enhancer_mode),
             "postfilter_enabled": bool(args.postfilter_enabled),
+            "postfilter_method": str(args.postfilter_method),
+            "mvdr_hop_ms": int(args.mvdr_hop_ms),
+            "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
+            "fd_noise_covariance_mode": str(args.fd_noise_covariance_mode),
+            "target_activity_rnn_update_mode": str(args.target_activity_rnn_update_mode),
+            "target_activity_detector_mode": str(args.target_activity_detector_mode),
+            "target_activity_detector_backend": str(args.target_activity_detector_backend),
+            "target_activity_update_every_n_fast_frames": int(args.target_activity_update_every_n_fast_frames),
+            "fd_cov_ema_alpha": float(args.fd_cov_ema_alpha),
+            "fd_diag_load": float(args.fd_diag_load),
+            "target_activity_low_threshold": float(args.target_activity_low_threshold),
+            "target_activity_high_threshold": float(args.target_activity_high_threshold),
+            "target_activity_enter_frames": int(args.target_activity_enter_frames),
+            "target_activity_exit_frames": int(args.target_activity_exit_frames),
+            "fd_cov_update_scale_target_active": float(args.fd_cov_update_scale_target_active),
+            "fd_cov_update_scale_target_inactive": float(args.fd_cov_update_scale_target_inactive),
             "speaker_history_size": int(args.speaker_history_size),
             "speaker_activation_min_predictions": int(args.speaker_activation_min_predictions),
             "speaker_match_window_deg": float(args.speaker_match_window_deg),
             "localization_backend": str(args.localization_backend),
+            "use_ground_truth_doa_override": bool(args.use_ground_truth_doa_override),
             "slow_chunk_ms": int(args.slow_chunk_ms),
             "slow_chunk_hop_ms": int(args.slow_chunk_hop_ms),
             "mic_array_profile": str(args.mic_array_profile),
