@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
+
+import numpy as np
 
 from .tracking_modes import SUPPORTED_TRACKING_MODE
 
@@ -40,6 +43,77 @@ class FocusControlSnapshot:
     focused_speaker_ids: tuple[int, ...] | None = None
     focused_direction_deg: float | None = None
     user_boost_db: float = 0.0
+
+
+@dataclass(slots=True)
+class FastPathAudioPacket:
+    frame_index: int
+    start_sample: int
+    end_sample: int
+    sample_rate_hz: int
+    frame_samples: int
+    beamformed_audio: np.ndarray
+    frame_mc: np.ndarray | None = None
+    target_doa_deg: float | None = None
+    target_activity_score: float = 0.0
+    target_activity_state: bool = False
+    speech_activity: float = 0.0
+    beamforming_mode: str = "mvdr_fd"
+    postfilter_method: str = "off"
+    capture_t_monotonic: float = 0.0
+    beamform_start_t: float = 0.0
+    beamform_end_t: float = 0.0
+    postfilter_start_t: float = 0.0
+    postfilter_end_t: float = 0.0
+    queue_enqueue_t: float | None = None
+    queue_wait_ms: float = 0.0
+    weights_reused: bool = False
+    queue_overflow_dropped: bool = False
+    target_doa_missing: bool = False
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        frame_index: int,
+        start_sample: int,
+        end_sample: int,
+        sample_rate_hz: int,
+        frame_samples: int,
+        beamformed_audio: np.ndarray,
+        frame_mc: np.ndarray | None,
+        target_doa_deg: float | None,
+        target_activity_score: float,
+        target_activity_state: bool,
+        speech_activity: float,
+        beamforming_mode: str,
+        postfilter_method: str,
+        beamform_start_t: float,
+        beamform_end_t: float,
+        capture_t_monotonic: float | None = None,
+        weights_reused: bool = False,
+    ) -> "FastPathAudioPacket":
+        capture_ts = perf_counter() if capture_t_monotonic is None else float(capture_t_monotonic)
+        return cls(
+            frame_index=int(frame_index),
+            start_sample=int(start_sample),
+            end_sample=int(end_sample),
+            sample_rate_hz=int(sample_rate_hz),
+            frame_samples=int(frame_samples),
+            beamformed_audio=np.asarray(beamformed_audio, dtype=np.float32).reshape(-1).copy(),
+            frame_mc=None if frame_mc is None else np.asarray(frame_mc, dtype=np.float32).copy(),
+            target_doa_deg=None if target_doa_deg is None else float(target_doa_deg),
+            target_activity_score=float(target_activity_score),
+            target_activity_state=bool(target_activity_state),
+            speech_activity=float(speech_activity),
+            beamforming_mode=str(beamforming_mode),
+            postfilter_method=str(postfilter_method),
+            capture_t_monotonic=float(capture_ts),
+            beamform_start_t=float(beamform_start_t),
+            beamform_end_t=float(beamform_end_t),
+            weights_reused=bool(weights_reused),
+            target_doa_missing=bool(target_doa_deg is None),
+        )
 
 
 @dataclass(slots=True)
@@ -122,6 +196,9 @@ class PipelineConfig:
     srp_peak_max_step_deg: float = 12.0
     srp_peak_score_decay: float = 0.9
     slow_queue_max_frames: int = 256
+    split_runtime_mode: str = "monolithic"  # one of: monolithic, pipelined, beamforming_only, postfilter_only
+    postfilter_queue_max_frames: int = 4
+    postfilter_queue_drop_oldest: bool = False
     sound_speed_m_s: float = 343.0
     process_partial_chunk: bool = True
     max_speakers_hint: int = 8

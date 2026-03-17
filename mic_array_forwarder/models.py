@@ -10,6 +10,9 @@ SCHEMA_VERSION = "v1"
 
 
 class FastPathConfig(BaseModel):
+    split_runtime_mode: Literal["monolithic", "pipelined", "beamforming_only", "postfilter_only"] = "monolithic"
+    postfilter_queue_max_frames: int = 4
+    postfilter_queue_drop_oldest: bool = False
     localization_hop_ms: int = 10
     localization_window_ms: int = 160
     overlap: float = 0.2
@@ -148,6 +151,18 @@ class SessionStartRequest(BaseModel):
     @property
     def localization_hop_ms(self) -> int:
         return int(self.fast_path.localization_hop_ms)
+
+    @property
+    def split_runtime_mode(self) -> str:
+        return str(self.fast_path.split_runtime_mode)
+
+    @property
+    def postfilter_queue_max_frames(self) -> int:
+        return int(self.fast_path.postfilter_queue_max_frames)
+
+    @property
+    def postfilter_queue_drop_oldest(self) -> bool:
+        return bool(self.fast_path.postfilter_queue_drop_oldest)
 
     @property
     def localization_window_ms(self) -> int:

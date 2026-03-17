@@ -375,6 +375,9 @@ def _detector_param_overrides(args: argparse.Namespace) -> dict[str, object]:
         "coherence_wiener_gain_floor",
         "coherence_wiener_coherence_exponent",
         "coherence_wiener_temporal_alpha",
+        "split_runtime_mode",
+        "postfilter_queue_max_frames",
+        "postfilter_queue_drop_oldest",
     ]
     for field in detector_fields:
         value = getattr(args, field, None)
@@ -525,6 +528,11 @@ def _aggregate(rows: list[dict[str, object]], group_fields: list[str]) -> list[d
         "rtf",
         "fast_rtf",
         "slow_rtf",
+        "beamforming_rtf",
+        "postfilter_rtf",
+        "pipeline_rtf",
+        "interstage_queue_wait_p95_ms",
+        "interstage_queue_depth_max",
         "trace_cov_alpha_active_mean",
         "trace_cov_alpha_inactive_mean",
     ]
@@ -592,6 +600,9 @@ def _build_session_request(
             "target_activity_noise_floor_margin_scale": float(params["target_activity_noise_floor_margin_scale"]),
             "target_activity_rms_scale": float(params["target_activity_rms_scale"]),
             "target_activity_score_exponent": float(params["target_activity_score_exponent"]),
+            "split_runtime_mode": str(params["split_runtime_mode"]),
+            "postfilter_queue_max_frames": int(params["postfilter_queue_max_frames"]),
+            "postfilter_queue_drop_oldest": bool(params["postfilter_queue_drop_oldest"]),
             "postfilter_enabled": bool(params["postfilter_enabled"]),
             "postfilter_method": str(params["postfilter_method"]),
             "postfilter_noise_ema_alpha": float(params["postfilter_noise_ema_alpha"]),
@@ -907,6 +918,7 @@ def _run_job(
         "postfilter_enabled": bool(params["postfilter_enabled"]),
         "postfilter_method": str(params["postfilter_method"]),
         "target_activity_detector_backend": str(params["target_activity_detector_backend"]),
+        "split_runtime_mode": str(params["split_runtime_mode"]),
         "mvdr_hop_ms": int(params["mvdr_hop_ms"]),
         "target_activity_update_every_n_fast_frames": int(params["target_activity_update_every_n_fast_frames"]),
         "main_angle_deg": scene_meta["main_angle_deg"],
@@ -921,6 +933,11 @@ def _run_job(
         "rtf": float(elapsed_s / max(duration_s, 1e-9)),
         "fast_rtf": float(runtime_summary.get("fast_rtf", float("nan"))),
         "slow_rtf": float(runtime_summary.get("slow_rtf", float("nan"))),
+        "beamforming_rtf": float(runtime_summary.get("beamforming_rtf", float("nan"))),
+        "postfilter_rtf": float(runtime_summary.get("postfilter_rtf", float("nan"))),
+        "pipeline_rtf": float(runtime_summary.get("pipeline_rtf", float("nan"))),
+        "interstage_queue_wait_p95_ms": float(runtime_summary.get("interstage_queue_wait_p95_ms", float("nan"))),
+        "interstage_queue_depth_max": float(runtime_summary.get("interstage_queue_depth_max", float("nan"))),
         **_metric_dict(overall),
         "speech_delta_snr_db": float(speech_metrics["delta_snr_db"]),
         "speech_delta_sii": float(speech_metrics["delta_sii"]),
@@ -977,6 +994,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest-path", default=None)
     parser.add_argument("--mvdr-hop-ms", type=int, default=DEFAULT_MVDR_HOP_MS)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=DEFAULT_FD_ANALYSIS_WINDOW_MS)
+    parser.add_argument("--split-runtime-mode", default="monolithic", choices=["monolithic", "pipelined", "beamforming_only", "postfilter_only"])
+    parser.add_argument("--postfilter-queue-max-frames", type=int, default=4)
+    parser.add_argument("--postfilter-queue-drop-oldest", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--fd-cov-ema-alpha", type=float, default=None)
     parser.add_argument("--fd-diag-load", type=float, default=None)
     parser.add_argument("--fd-noise-covariance-mode", default=None, choices=["estimated_target_subtractive", "oracle_non_target_residual"])
@@ -1083,6 +1103,9 @@ def main() -> None:
     params = {
         "mvdr_hop_ms": int(args.mvdr_hop_ms),
         "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
+        "split_runtime_mode": str(args.split_runtime_mode),
+        "postfilter_queue_max_frames": int(args.postfilter_queue_max_frames),
+        "postfilter_queue_drop_oldest": bool(args.postfilter_queue_drop_oldest),
         "fd_noise_covariance_mode": "estimated_target_subtractive",
         **base_detector_params,
         **DEFAULT_POSTFILTER_PRESETS["no_pf"],

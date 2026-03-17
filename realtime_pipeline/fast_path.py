@@ -12,7 +12,7 @@ try:
 except ImportError:  # pragma: no cover
     PyRNNoise = None
 
-from .contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
+from .contracts import FastPathAudioPacket, PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
 from .localization_strategies.vad_utils import SileroVADGate, WebRTCVADGate
 from .shared_state import SharedPipelineState, Timer
 from .srp_tracker import SRPPeakTracker
@@ -184,6 +184,7 @@ class _FDBufferedBeamformer:
         self._cached_target_doa_deg: float | None = None
         self._cached_null_doa_deg: float | None = None
         self._cached_last_target_active: bool | None = None
+        self._last_weights_reused: bool = False
 
     def _should_refresh_weights(
         self,
@@ -386,6 +387,7 @@ class _FDBufferedBeamformer:
             oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
             self._prev_noise_mc = next_prev_noise
         refresh = self._should_refresh_weights(doa_deg=float(doa_deg), target_active=bool(target_active))
+        self._last_weights_reused = bool(not refresh)
         a = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
             doa_deg=doa_deg,
             n_fft=self.analysis_n,
@@ -436,6 +438,7 @@ class _FDBufferedBeamformer:
             target_active=bool(target_active),
             null_doa_deg=float(null_doa_deg),
         )
+        self._last_weights_reused = bool(not refresh)
         a_target = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
             doa_deg=target_doa_deg,
             n_fft=self.analysis_n,
@@ -710,6 +713,46 @@ class _PostFilterRouter:
         return np.asarray(beamformed, dtype=np.float32)
 
 
+class _PostFilterStageCore:
+    def __init__(
+        self,
+        *,
+        cfg: PipelineConfig,
+        frame_samples: int,
+        mic_geometry_xyz: np.ndarray,
+        frame_sink: FrameSink,
+    ):
+        self._cfg = cfg
+        self._sink = frame_sink
+        self._rms_gain_ema = 1.0
+        self._postfilter = _PostFilterRouter(
+            frame_samples=frame_samples,
+            cfg=cfg,
+            mic_geometry_xyz=mic_geometry_xyz,
+        )
+
+    def process_packet(self, packet: FastPathAudioPacket) -> tuple[float, float, float]:
+        t0 = perf_counter()
+        out = np.asarray(packet.beamformed_audio, dtype=np.float32).reshape(-1)
+        if bool(self._cfg.postfilter_enabled):
+            out = self._postfilter.process(
+                out,
+                speech_activity=float(packet.speech_activity),
+                frame_mc=None if packet.frame_mc is None else np.asarray(packet.frame_mc, dtype=np.float32),
+                doa_deg=None if packet.target_doa_deg is None else float(packet.target_doa_deg),
+            )
+        postfilter_ms = (perf_counter() - t0) * 1000.0
+
+        t0 = perf_counter()
+        out, self._rms_gain_ema = _apply_output_safety(out, self._cfg, self._rms_gain_ema)
+        safety_ms = (perf_counter() - t0) * 1000.0
+
+        t0 = perf_counter()
+        self._sink(out)
+        sink_ms = (perf_counter() - t0) * 1000.0
+        return float(postfilter_ms), float(safety_ms), float(sink_ms)
+
+
 def _soft_clip(x: np.ndarray, drive: float) -> np.ndarray:
     d = max(float(drive), 1e-6)
     y = np.tanh(d * np.asarray(x, dtype=np.float64))
@@ -738,6 +781,74 @@ def _apply_output_safety(out: np.ndarray, cfg: PipelineConfig, rms_gain_ema: flo
     return y, next_rms_gain
 
 
+class PostFilterWorker(threading.Thread):
+    def __init__(
+        self,
+        *,
+        config: PipelineConfig,
+        shared_state: SharedPipelineState,
+        frame_sink: FrameSink,
+        stop_event: threading.Event,
+        mic_geometry_xyz: np.ndarray,
+        packet_queue: "queue.Queue[FastPathAudioPacket | None] | None" = None,
+        packet_source: Callable[[], FastPathAudioPacket | None] | None = None,
+    ):
+        super().__init__(name="PostFilterWorker", daemon=True)
+        self._cfg = config
+        self._state = shared_state
+        self._stop = stop_event
+        self._packet_queue = packet_queue
+        self._packet_source = packet_source
+        frame_samples = max(1, int(config.sample_rate_hz * config.fast_frame_ms / 1000))
+        self._core = _PostFilterStageCore(
+            cfg=config,
+            frame_samples=frame_samples,
+            mic_geometry_xyz=_center_mic_geometry_xyz(mic_geometry_xyz),
+            frame_sink=frame_sink,
+        )
+
+    def _next_packet(self) -> FastPathAudioPacket | None:
+        if self._packet_source is not None:
+            return self._packet_source()
+        if self._packet_queue is None:
+            return None
+        while not self._stop.is_set():
+            try:
+                return self._packet_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+        return None
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            packet = self._next_packet()
+            if packet is None:
+                break
+            queue_wait_ms = 0.0
+            if packet.queue_enqueue_t is not None:
+                queue_wait_ms = max(0.0, (perf_counter() - float(packet.queue_enqueue_t)) * 1000.0)
+            packet.queue_wait_ms = float(queue_wait_ms)
+            packet.postfilter_start_t = perf_counter()
+            with Timer() as t:
+                _postfilter_ms, safety_ms, sink_ms = self._core.process_packet(packet)
+            packet.postfilter_end_t = perf_counter()
+            self._state.record_postfilter_stage(t.elapsed_ms)
+            queue_depth = 0 if self._packet_queue is None else int(self._packet_queue.qsize())
+            end_to_end_latency_ms = max(0.0, (packet.postfilter_end_t - float(packet.capture_t_monotonic)) * 1000.0)
+            self._state.record_pipeline_latency(
+                queue_wait_ms=float(queue_wait_ms),
+                end_to_end_latency_ms=float(end_to_end_latency_ms),
+                queue_depth=int(queue_depth),
+            )
+            self._state.incr_fast_stage_times(
+                srp_ms=0.0,
+                beamform_ms=0.0,
+                safety_ms=float(safety_ms),
+                sink_ms=float(sink_ms),
+                enqueue_ms=0.0,
+            )
+
+
 class FastPathWorker(threading.Thread):
     def __init__(
         self,
@@ -752,6 +863,8 @@ class FastPathWorker(threading.Thread):
         srp_override_provider: Callable[[int, float], SRPPeakSnapshot | None] | None = None,
         target_activity_override_provider: Callable[[int, float], float | None] | None = None,
         oracle_noise_frame_provider: Callable[[int, float], np.ndarray | None] | None = None,
+        postfilter_queue: "queue.Queue[FastPathAudioPacket | None] | None" = None,
+        frame_packet_sink: Callable[[FastPathAudioPacket], None] | None = None,
     ):
         super().__init__(name="FastPathWorker", daemon=True)
         self._cfg = config
@@ -759,8 +872,11 @@ class FastPathWorker(threading.Thread):
         self._source = frame_source
         self._sink = frame_sink
         self._slow_queue = slow_queue
+        self._postfilter_queue = postfilter_queue
+        self._frame_packet_sink = frame_packet_sink
         self._mic_geometry_xyz = _center_mic_geometry_xyz(mic_geometry_xyz)
         self._stop = stop_event
+        self._split_runtime_mode = str(getattr(config, "split_runtime_mode", "monolithic")).strip().lower()
         dominant_lock_mode = str(config.tracking_mode).strip().lower() == "dominant_lock_v1"
         single_source_backend = (
             config.localization_backend in {
@@ -842,7 +958,12 @@ class FastPathWorker(threading.Thread):
             cfg=config,
             mic_geometry_xyz=self._mic_geometry_xyz,
         )
-        self._postfilter = _PostFilterRouter(frame_samples=frame_samples, cfg=config, mic_geometry_xyz=self._mic_geometry_xyz)
+        self._postfilter_stage = _PostFilterStageCore(
+            cfg=config,
+            frame_samples=frame_samples,
+            mic_geometry_xyz=self._mic_geometry_xyz,
+            frame_sink=self._sink,
+        )
         self._srp_override_provider = srp_override_provider
         self._target_activity_override_provider = target_activity_override_provider
         self._oracle_noise_frame_provider = oracle_noise_frame_provider
@@ -1289,6 +1410,69 @@ class FastPathWorker(threading.Thread):
         gain = float(10.0 ** (-attenuation_db / 20.0))
         return (np.asarray(out, dtype=np.float32) * gain).astype(np.float32, copy=False)
 
+    def _build_packet(
+        self,
+        *,
+        out: np.ndarray,
+        x: np.ndarray,
+        target_doa: float | None,
+        target_activity_score: float,
+        target_activity_active: bool,
+        speech_activity: float,
+        frame_samples: int,
+        capture_t_monotonic: float,
+        beamform_start_t: float,
+        beamform_end_t: float,
+    ) -> FastPathAudioPacket:
+        start_sample = int(self._frame_idx * frame_samples)
+        end_sample = int(start_sample + frame_samples)
+        method = "off"
+        if bool(self._cfg.postfilter_enabled):
+            method = str(getattr(self._cfg, "postfilter_method", "off"))
+        return FastPathAudioPacket.create(
+            frame_index=int(self._frame_idx),
+            start_sample=start_sample,
+            end_sample=end_sample,
+            sample_rate_hz=int(self._cfg.sample_rate_hz),
+            frame_samples=int(frame_samples),
+            beamformed_audio=np.asarray(out, dtype=np.float32),
+            frame_mc=np.asarray(x, dtype=np.float32),
+            target_doa_deg=None if target_doa is None else float(target_doa),
+            target_activity_score=float(target_activity_score),
+            target_activity_state=bool(target_activity_active),
+            speech_activity=float(speech_activity),
+            beamforming_mode=str(self._cfg.beamforming_mode),
+            postfilter_method=method,
+            capture_t_monotonic=float(capture_t_monotonic),
+            beamform_start_t=float(beamform_start_t),
+            beamform_end_t=float(beamform_end_t),
+            weights_reused=bool(getattr(self._fd, "_last_weights_reused", False)),
+        )
+
+    def _emit_postfilter_packet(self, packet: FastPathAudioPacket) -> float:
+        if self._postfilter_queue is None:
+            return 0.0
+        t0 = perf_counter()
+        packet.queue_enqueue_t = perf_counter()
+        if not bool(getattr(self._cfg, "postfilter_queue_drop_oldest", False)):
+            self._postfilter_queue.put(packet)
+            return float((perf_counter() - t0) * 1000.0)
+        try:
+            self._postfilter_queue.put_nowait(packet)
+        except queue.Full:
+            try:
+                _ = self._postfilter_queue.get_nowait()
+            except queue.Empty:
+                pass
+            else:
+                self._state.incr_dropped_interstage(1)
+            packet.queue_overflow_dropped = True
+            try:
+                self._postfilter_queue.put_nowait(packet)
+            except queue.Full:
+                self._state.incr_dropped_interstage(1)
+        return float((perf_counter() - t0) * 1000.0)
+
     def run(self) -> None:
         frame_samples = max(1, int(self._cfg.sample_rate_hz * self._cfg.fast_frame_ms / 1000))
         try:
@@ -1296,6 +1480,7 @@ class FastPathWorker(threading.Thread):
                 frame = self._source()
                 if frame is None:
                     break
+                capture_t_monotonic = perf_counter()
 
                 with Timer() as t:
                     srp_ms = 0.0
@@ -1429,8 +1614,6 @@ class FastPathWorker(threading.Thread):
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
                             if suppression_active:
                                 conflict_fallback = True
-                        if self._cfg.postfilter_enabled:
-                            out = self._postfilter.process(out, speech_activity=speech_activity, frame_mc=x, doa_deg=float(target_doa) if target_doa is not None else None)
                     elif speaker_map:
                         speech_activity = float(
                             max((float(getattr(v, "activity_confidence", 0.0)) for v in speaker_map.values()), default=0.0)
@@ -1488,8 +1671,6 @@ class FastPathWorker(threading.Thread):
                             out = np.mean(x, axis=1).astype(np.float32, copy=False)
                             if suppression_active:
                                 conflict_fallback = True
-                        if self._cfg.postfilter_enabled:
-                            out = self._postfilter.process(out, speech_activity=speech_activity, frame_mc=x, doa_deg=float(target_doa) if target_doa is not None else None)
                     else:
                         speech_activity = _frame_speech_activity(x)
                         target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
@@ -1548,18 +1729,47 @@ class FastPathWorker(threading.Thread):
                         self._state.publish_srp_snapshot(snapshot)
                     beamform_ms += (perf_counter() - t0) * 1000.0
 
-                    t0 = perf_counter()
-                    out, self._rms_gain_ema = _apply_output_safety(out, self._cfg, self._rms_gain_ema)
-                    safety_ms += (perf_counter() - t0) * 1000.0
+                    packet = self._build_packet(
+                        out=out,
+                        x=x,
+                        target_doa=target_doa,
+                        target_activity_score=target_activity_score,
+                        target_activity_active=target_activity_active,
+                        speech_activity=speech_activity,
+                        frame_samples=frame_samples,
+                        capture_t_monotonic=capture_t_monotonic,
+                        beamform_start_t=capture_t_monotonic,
+                        beamform_end_t=perf_counter(),
+                    )
 
-                    t0 = perf_counter()
-                    self._sink(out)
-                    sink_ms += (perf_counter() - t0) * 1000.0
                     t0 = perf_counter()
                     self._enqueue_slow(x)
                     enqueue_ms += (perf_counter() - t0) * 1000.0
 
+                    if self._split_runtime_mode == "pipelined":
+                        enqueue_ms += self._emit_postfilter_packet(packet)
+                    elif self._split_runtime_mode == "beamforming_only":
+                        t0 = perf_counter()
+                        if self._frame_packet_sink is not None:
+                            self._frame_packet_sink(packet)
+                        self._sink(packet.beamformed_audio)
+                        sink_ms += (perf_counter() - t0) * 1000.0
+                    else:
+                        packet.postfilter_start_t = perf_counter()
+                        postfilter_ms, safety_ms_local, sink_ms_local = self._postfilter_stage.process_packet(packet)
+                        packet.postfilter_end_t = perf_counter()
+                        safety_ms += float(safety_ms_local)
+                        sink_ms += float(sink_ms_local)
+                        self._state.record_postfilter_stage(float(postfilter_ms + safety_ms_local + sink_ms_local))
+                        self._state.record_pipeline_latency(
+                            queue_wait_ms=0.0,
+                            end_to_end_latency_ms=max(0.0, (packet.postfilter_end_t - float(packet.capture_t_monotonic)) * 1000.0),
+                            queue_depth=0,
+                        )
+
                 self._state.incr_fast_frame(t.elapsed_ms)
+                beamforming_stage_ms = float(srp_ms + beamform_ms + enqueue_ms)
+                self._state.record_beamforming_stage(beamforming_stage_ms)
                 self._state.incr_fast_stage_times(
                     srp_ms=srp_ms,
                     beamform_ms=beamform_ms,
@@ -1569,6 +1779,19 @@ class FastPathWorker(threading.Thread):
                 )
                 self._frame_idx += 1
         finally:
+            if self._postfilter_queue is not None:
+                try:
+                    self._postfilter_queue.put_nowait(None)
+                except queue.Full:
+                    try:
+                        _ = self._postfilter_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    else:
+                        try:
+                            self._postfilter_queue.put_nowait(None)
+                        except queue.Full:
+                            pass
             if bool(self._cfg.slow_path_enabled):
                 try:
                     self._slow_queue.put_nowait(None)
