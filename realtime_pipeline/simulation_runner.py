@@ -416,6 +416,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=[
             "srp_phat_legacy",
             "srp_phat_localization",
+            "capon_1src",
+            "capon_multisrc",
+            "capon_mvdr_refine_1src",
             "music_1src",
         ],
         default="srp_phat_localization",
