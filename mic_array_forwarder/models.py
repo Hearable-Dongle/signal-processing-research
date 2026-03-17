@@ -37,7 +37,7 @@ class FastPathConfig(BaseModel):
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
     fd_cov_ema_alpha: float = 0.2965906035161345
     fd_diag_load: float = 0.012141307774357374
-    fd_noise_covariance_mode: Literal["estimated_target_subtractive", "oracle_non_target_residual"] = "estimated_target_subtractive"
+    fd_noise_covariance_mode: Literal["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"] = "estimated_target_subtractive"
     target_activity_rnn_update_mode: Literal["oracle_target_activity", "estimated_target_activity"] | None = None
     target_activity_low_threshold: float = 0.10544774305969414
     target_activity_high_threshold: float = 0.6508335197763335
@@ -45,7 +45,7 @@ class FastPathConfig(BaseModel):
     target_activity_exit_frames: int = 7
     fd_cov_update_scale_target_active: float = 0.4241144063085703
     fd_cov_update_scale_target_inactive: float = 1.2561064512368887
-    target_activity_detector_mode: Literal["target_blocker_calibrated"] = "target_blocker_calibrated"
+    target_activity_detector_mode: Literal["target_blocker_calibrated", "localization_peak_confidence"] = "target_blocker_calibrated"
     target_activity_detector_backend: Literal["webrtc_fused", "silero_fused"] = "silero_fused"
     target_activity_update_every_n_fast_frames: int = 1
     target_activity_blocker_offset_deg: float = 120.0
