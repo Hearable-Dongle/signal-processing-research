@@ -596,8 +596,8 @@ def _build_session_request(
             "freq_low_hz": 200,
             "freq_high_hz": 3000,
             "localization_pair_selection_mode": "all",
-            "localization_vad_enabled": True,
-            "localization_backend": "srp_phat_localization",
+            "localization_vad_enabled": False,
+            "localization_backend": str(params["localization_backend"]),
             "beamforming_mode": str(method_spec.beamforming_mode),
             "mvdr_hop_ms": None if method_spec.beamforming_mode != "mvdr_fd" else int(params["mvdr_hop_ms"]),
             "fd_analysis_window_ms": float(params["fd_analysis_window_ms"]),
@@ -1237,7 +1237,11 @@ def _run_job(
         mic_geometry_xyz=np.asarray(mic_pos, dtype=np.float64),
         out_dir=run_dir,
         capture_trace=True,
-        srp_override_provider=_oracle_srp_override_provider(frame_states),
+        srp_override_provider=(
+            None
+            if (method_spec.multi_target_tracked and method_spec.target_activity_mode == "estimated_target_activity")
+            else _oracle_srp_override_provider(frame_states)
+        ),
         initial_focus_direction_deg=(
             float(metadata_payload.get("target_zone_center_deg"))
             if method_spec.focus_zone_target and metadata_payload.get("target_zone_center_deg") is not None
@@ -1401,6 +1405,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest-path", default=None)
     parser.add_argument("--mvdr-hop-ms", type=int, default=DEFAULT_MVDR_HOP_MS)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=DEFAULT_FD_ANALYSIS_WINDOW_MS)
+    parser.add_argument("--localization-backend", default="srp_phat_localization", choices=["srp_phat_localization", "capon_1src", "capon_mvdr_refine_1src", "music_1src"])
     parser.add_argument("--split-runtime-mode", default="monolithic", choices=["monolithic", "pipelined", "beamforming_only", "postfilter_only"])
     parser.add_argument("--postfilter-queue-max-frames", type=int, default=4)
     parser.add_argument("--postfilter-queue-drop-oldest", action=argparse.BooleanOptionalAction, default=False)
@@ -1518,6 +1523,7 @@ def main() -> None:
     params = {
         "mvdr_hop_ms": int(args.mvdr_hop_ms),
         "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
+        "localization_backend": str(args.localization_backend),
         "split_runtime_mode": str(args.split_runtime_mode),
         "postfilter_queue_max_frames": int(args.postfilter_queue_max_frames),
         "postfilter_queue_drop_oldest": bool(args.postfilter_queue_drop_oldest),
