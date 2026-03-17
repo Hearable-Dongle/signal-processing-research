@@ -63,6 +63,70 @@ DEFAULT_FD_DIAG_LOAD = 1e-3
 DEFAULT_ACTIVE_UPDATE_SCALE = 0.20
 DEFAULT_INACTIVE_UPDATE_SCALE = 1.0
 
+# Sensitivity-tuned detector presets from
+# `beamforming/benchmark/run_optuna_babble_bootstrap_mvdr.py`.
+# Artifacts:
+# - `beamforming/benchmark/_sens_tune_webrtc/best_params.json`
+# - `beamforming/benchmark/_sens_tune_silero/best_params.json`
+DEFAULT_TARGET_ACTIVITY_PRESETS: dict[str, dict[str, object]] = {
+    "webrtc_fused": {
+        "fd_cov_ema_alpha": 0.12104487978324685,
+        "fd_diag_load": 0.0025330746540014474,
+        "target_activity_low_threshold": 0.25508542011761026,
+        "target_activity_high_threshold": 0.3457091527983343,
+        "target_activity_enter_frames": 1,
+        "target_activity_exit_frames": 8,
+        "fd_cov_update_scale_target_active": 0.4650796940166687,
+        "fd_cov_update_scale_target_inactive": 1.4455490474077703,
+        "target_activity_detector_mode": "target_blocker_calibrated",
+        "target_activity_detector_backend": "webrtc_fused",
+        "target_activity_blocker_offset_deg": 120.0,
+        "target_activity_bootstrap_only_calibration": True,
+        "target_activity_ratio_floor_db": 1.587399872866511,
+        "target_activity_ratio_active_db": 7.414056762673376,
+        "target_activity_target_rms_floor_scale": 1.2654775061557584,
+        "target_activity_blocker_rms_floor_scale": 1.0743760073868034,
+        "target_activity_speech_weight": 0.22939773779184974,
+        "target_activity_ratio_weight": 0.2614647149961218,
+        "target_activity_blocker_weight": 0.1360370513913187,
+        "target_activity_vad_mode": 1,
+        "target_activity_vad_hangover_frames": 5,
+        "target_activity_noise_floor_rise_alpha": 0.0047745636119070406,
+        "target_activity_noise_floor_fall_alpha": 0.07742428232497138,
+        "target_activity_noise_floor_margin_scale": 1.8140441247373726,
+        "target_activity_rms_scale": 1.9864695748233385,
+        "target_activity_score_exponent": 0.7719772826786356,
+    },
+    "silero_fused": {
+        "fd_cov_ema_alpha": 0.2965906035161345,
+        "fd_diag_load": 0.012141307774357374,
+        "target_activity_low_threshold": 0.10544774305969414,
+        "target_activity_high_threshold": 0.6508335197763335,
+        "target_activity_enter_frames": 1,
+        "target_activity_exit_frames": 7,
+        "fd_cov_update_scale_target_active": 0.4241144063085703,
+        "fd_cov_update_scale_target_inactive": 1.2561064512368887,
+        "target_activity_detector_mode": "target_blocker_calibrated",
+        "target_activity_detector_backend": "silero_fused",
+        "target_activity_blocker_offset_deg": 120.0,
+        "target_activity_bootstrap_only_calibration": True,
+        "target_activity_ratio_floor_db": -1.5557320895954578,
+        "target_activity_ratio_active_db": 3.1884929640820445,
+        "target_activity_target_rms_floor_scale": 1.3476071785753891,
+        "target_activity_blocker_rms_floor_scale": 2.008344796225831,
+        "target_activity_speech_weight": 0.6051437824379127,
+        "target_activity_ratio_weight": 0.26508371615422194,
+        "target_activity_blocker_weight": 0.02224542260010827,
+        "target_activity_vad_mode": 1,
+        "target_activity_vad_hangover_frames": 2,
+        "target_activity_noise_floor_rise_alpha": 0.024462802690520202,
+        "target_activity_noise_floor_fall_alpha": 0.16301379312525116,
+        "target_activity_noise_floor_margin_scale": 2.33081911386449,
+        "target_activity_rms_scale": 4.305504476133645,
+        "target_activity_score_exponent": 0.15763482134447154,
+    },
+}
+
 
 @dataclass(frozen=True)
 class MethodSpec:
@@ -88,6 +152,43 @@ METHOD_SPECS: dict[str, MethodSpec] = {
 def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _detector_param_overrides(args: argparse.Namespace) -> dict[str, object]:
+    out: dict[str, object] = {}
+    detector_fields = [
+        "fd_cov_ema_alpha",
+        "fd_diag_load",
+        "target_activity_low_threshold",
+        "target_activity_high_threshold",
+        "target_activity_enter_frames",
+        "target_activity_exit_frames",
+        "fd_cov_update_scale_target_active",
+        "fd_cov_update_scale_target_inactive",
+        "target_activity_detector_mode",
+        "target_activity_detector_backend",
+        "target_activity_blocker_offset_deg",
+        "target_activity_bootstrap_only_calibration",
+        "target_activity_ratio_floor_db",
+        "target_activity_ratio_active_db",
+        "target_activity_target_rms_floor_scale",
+        "target_activity_blocker_rms_floor_scale",
+        "target_activity_speech_weight",
+        "target_activity_ratio_weight",
+        "target_activity_blocker_weight",
+        "target_activity_vad_mode",
+        "target_activity_vad_hangover_frames",
+        "target_activity_noise_floor_rise_alpha",
+        "target_activity_noise_floor_fall_alpha",
+        "target_activity_noise_floor_margin_scale",
+        "target_activity_rms_scale",
+        "target_activity_score_exponent",
+    ]
+    for field in detector_fields:
+        value = getattr(args, field)
+        if value is not None:
+            out[field] = value
+    return out
 
 
 def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
@@ -548,32 +649,32 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--background-wham-gain", type=float, default=DEFAULT_WHAM_GAIN)
     parser.add_argument("--manifest-path", default=None)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=DEFAULT_FD_ANALYSIS_WINDOW_MS)
-    parser.add_argument("--fd-cov-ema-alpha", type=float, default=DEFAULT_FD_COV_EMA_ALPHA)
-    parser.add_argument("--fd-diag-load", type=float, default=DEFAULT_FD_DIAG_LOAD)
-    parser.add_argument("--target-activity-low-threshold", type=float, default=0.22)
-    parser.add_argument("--target-activity-high-threshold", type=float, default=0.40)
-    parser.add_argument("--target-activity-enter-frames", type=int, default=2)
-    parser.add_argument("--target-activity-exit-frames", type=int, default=3)
-    parser.add_argument("--fd-cov-update-scale-target-active", type=float, default=DEFAULT_ACTIVE_UPDATE_SCALE)
-    parser.add_argument("--fd-cov-update-scale-target-inactive", type=float, default=DEFAULT_INACTIVE_UPDATE_SCALE)
-    parser.add_argument("--target-activity-detector-mode", default="target_blocker_calibrated")
+    parser.add_argument("--fd-cov-ema-alpha", type=float, default=None)
+    parser.add_argument("--fd-diag-load", type=float, default=None)
+    parser.add_argument("--target-activity-low-threshold", type=float, default=None)
+    parser.add_argument("--target-activity-high-threshold", type=float, default=None)
+    parser.add_argument("--target-activity-enter-frames", type=int, default=None)
+    parser.add_argument("--target-activity-exit-frames", type=int, default=None)
+    parser.add_argument("--fd-cov-update-scale-target-active", type=float, default=None)
+    parser.add_argument("--fd-cov-update-scale-target-inactive", type=float, default=None)
+    parser.add_argument("--target-activity-detector-mode", default=None)
     parser.add_argument("--target-activity-detector-backend", default="webrtc_fused", choices=["webrtc_fused", "silero_fused"])
-    parser.add_argument("--target-activity-blocker-offset-deg", type=float, default=90.0)
-    parser.add_argument("--target-activity-bootstrap-only-calibration", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--target-activity-ratio-floor-db", type=float, default=0.0)
-    parser.add_argument("--target-activity-ratio-active-db", type=float, default=3.0)
-    parser.add_argument("--target-activity-target-rms-floor-scale", type=float, default=1.6)
-    parser.add_argument("--target-activity-blocker-rms-floor-scale", type=float, default=1.1)
-    parser.add_argument("--target-activity-speech-weight", type=float, default=0.55)
-    parser.add_argument("--target-activity-ratio-weight", type=float, default=0.30)
-    parser.add_argument("--target-activity-blocker-weight", type=float, default=0.15)
-    parser.add_argument("--target-activity-vad-mode", type=int, default=2)
-    parser.add_argument("--target-activity-vad-hangover-frames", type=int, default=2)
-    parser.add_argument("--target-activity-noise-floor-rise-alpha", type=float, default=0.01)
-    parser.add_argument("--target-activity-noise-floor-fall-alpha", type=float, default=0.10)
-    parser.add_argument("--target-activity-noise-floor-margin-scale", type=float, default=1.25)
-    parser.add_argument("--target-activity-rms-scale", type=float, default=4.0)
-    parser.add_argument("--target-activity-score-exponent", type=float, default=0.5)
+    parser.add_argument("--target-activity-blocker-offset-deg", type=float, default=None)
+    parser.add_argument("--target-activity-bootstrap-only-calibration", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--target-activity-ratio-floor-db", type=float, default=None)
+    parser.add_argument("--target-activity-ratio-active-db", type=float, default=None)
+    parser.add_argument("--target-activity-target-rms-floor-scale", type=float, default=None)
+    parser.add_argument("--target-activity-blocker-rms-floor-scale", type=float, default=None)
+    parser.add_argument("--target-activity-speech-weight", type=float, default=None)
+    parser.add_argument("--target-activity-ratio-weight", type=float, default=None)
+    parser.add_argument("--target-activity-blocker-weight", type=float, default=None)
+    parser.add_argument("--target-activity-vad-mode", type=int, default=None)
+    parser.add_argument("--target-activity-vad-hangover-frames", type=int, default=None)
+    parser.add_argument("--target-activity-noise-floor-rise-alpha", type=float, default=None)
+    parser.add_argument("--target-activity-noise-floor-fall-alpha", type=float, default=None)
+    parser.add_argument("--target-activity-noise-floor-margin-scale", type=float, default=None)
+    parser.add_argument("--target-activity-rms-scale", type=float, default=None)
+    parser.add_argument("--target-activity-score-exponent", type=float, default=None)
     return parser.parse_args()
 
 
@@ -603,34 +704,15 @@ def main() -> None:
     if not scenes:
         raise FileNotFoundError(f"No scenes found under {args.scenes_root}")
 
+    detector_overrides = _detector_param_overrides(args)
+    detector_backend = str(args.target_activity_detector_backend)
+    if detector_backend not in DEFAULT_TARGET_ACTIVITY_PRESETS:
+        raise ValueError(f"Unsupported detector backend for defaults: {detector_backend}")
+    base_detector_params = dict(DEFAULT_TARGET_ACTIVITY_PRESETS[detector_backend])
     params = {
         "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
-        "fd_cov_ema_alpha": float(args.fd_cov_ema_alpha),
-        "fd_diag_load": float(args.fd_diag_load),
-        "target_activity_low_threshold": float(args.target_activity_low_threshold),
-        "target_activity_high_threshold": float(args.target_activity_high_threshold),
-        "target_activity_enter_frames": int(args.target_activity_enter_frames),
-        "target_activity_exit_frames": int(args.target_activity_exit_frames),
-        "fd_cov_update_scale_target_active": float(args.fd_cov_update_scale_target_active),
-        "fd_cov_update_scale_target_inactive": float(args.fd_cov_update_scale_target_inactive),
-        "target_activity_detector_mode": str(args.target_activity_detector_mode),
-        "target_activity_detector_backend": str(args.target_activity_detector_backend),
-        "target_activity_blocker_offset_deg": float(args.target_activity_blocker_offset_deg),
-        "target_activity_bootstrap_only_calibration": bool(args.target_activity_bootstrap_only_calibration),
-        "target_activity_ratio_floor_db": float(args.target_activity_ratio_floor_db),
-        "target_activity_ratio_active_db": float(args.target_activity_ratio_active_db),
-        "target_activity_target_rms_floor_scale": float(args.target_activity_target_rms_floor_scale),
-        "target_activity_blocker_rms_floor_scale": float(args.target_activity_blocker_rms_floor_scale),
-        "target_activity_speech_weight": float(args.target_activity_speech_weight),
-        "target_activity_ratio_weight": float(args.target_activity_ratio_weight),
-        "target_activity_blocker_weight": float(args.target_activity_blocker_weight),
-        "target_activity_vad_mode": int(args.target_activity_vad_mode),
-        "target_activity_vad_hangover_frames": int(args.target_activity_vad_hangover_frames),
-        "target_activity_noise_floor_rise_alpha": float(args.target_activity_noise_floor_rise_alpha),
-        "target_activity_noise_floor_fall_alpha": float(args.target_activity_noise_floor_fall_alpha),
-        "target_activity_noise_floor_margin_scale": float(args.target_activity_noise_floor_margin_scale),
-        "target_activity_rms_scale": float(args.target_activity_rms_scale),
-        "target_activity_score_exponent": float(args.target_activity_score_exponent),
+        **base_detector_params,
+        **detector_overrides,
         "bootstrap_noise_only_sec": float(args.bootstrap_noise_only_sec),
         "background_babble_count": int(args.background_babble_count),
         "background_babble_gain_min": float(args.background_babble_gain_min),
@@ -646,10 +728,14 @@ def main() -> None:
             "method": str(method),
             "params": {
                 **params,
-                "target_activity_detector_backend": (
-                    "silero_fused"
+                **(
+                    DEFAULT_TARGET_ACTIVITY_PRESETS["silero_fused"]
                     if str(method) == "mvdr_fd_bootstrap_estimated_activity_silero"
-                    else str(params["target_activity_detector_backend"])
+                    else {}
+                ),
+                **detector_overrides,
+                "target_activity_detector_backend": (
+                    "silero_fused" if str(method) == "mvdr_fd_bootstrap_estimated_activity_silero" else str(params["target_activity_detector_backend"])
                 ),
             },
         }
