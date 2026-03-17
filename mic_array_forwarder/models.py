@@ -27,6 +27,7 @@ class FastPathConfig(BaseModel):
         "music_1src",
     ] = "srp_phat_localization"
     beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
+    mvdr_hop_ms: int | None = None
     fd_analysis_window_ms: float = 20.0
     # Defaults track the sensitivity-tuned Silero preset from
     # `beamforming/benchmark/run_optuna_babble_bootstrap_mvdr.py`
@@ -43,6 +44,7 @@ class FastPathConfig(BaseModel):
     fd_cov_update_scale_target_inactive: float = 1.2561064512368887
     target_activity_detector_mode: Literal["target_blocker_calibrated"] = "target_blocker_calibrated"
     target_activity_detector_backend: Literal["webrtc_fused", "silero_fused"] = "silero_fused"
+    target_activity_update_every_n_fast_frames: int = 1
     target_activity_blocker_offset_deg: float = 120.0
     target_activity_bootstrap_only_calibration: bool = True
     target_activity_ratio_floor_db: float = -1.5557320895954578
@@ -170,6 +172,11 @@ class SessionStartRequest(BaseModel):
         return float(self.fast_path.fd_analysis_window_ms)
 
     @property
+    def mvdr_hop_ms(self) -> int | None:
+        value = self.fast_path.mvdr_hop_ms
+        return None if value is None else int(value)
+
+    @property
     def fd_cov_ema_alpha(self) -> float:
         return float(self.fast_path.fd_cov_ema_alpha)
 
@@ -217,6 +224,10 @@ class SessionStartRequest(BaseModel):
     @property
     def target_activity_detector_backend(self) -> str:
         return str(self.fast_path.target_activity_detector_backend)
+
+    @property
+    def target_activity_update_every_n_fast_frames(self) -> int:
+        return int(self.fast_path.target_activity_update_every_n_fast_frames)
 
     @property
     def target_activity_blocker_offset_deg(self) -> float:

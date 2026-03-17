@@ -70,7 +70,9 @@ DEFAULT_METHODS = [
     "mvdr_fd_bootstrap_oracle_noise_hard",
 ]
 FAST_FRAME_MS = 40
+DEFAULT_MVDR_HOP_MS = 40
 DEFAULT_FD_ANALYSIS_WINDOW_MS = 80.0
+DEFAULT_TARGET_ACTIVITY_UPDATE_EVERY_N_FAST_FRAMES = 1
 DEFAULT_FD_COV_EMA_ALPHA = 0.08
 DEFAULT_FD_DIAG_LOAD = 1e-3
 DEFAULT_ACTIVE_UPDATE_SCALE = 0.20
@@ -229,6 +231,7 @@ def _detector_param_overrides(args: argparse.Namespace) -> dict[str, object]:
         "fd_cov_ema_alpha",
         "fd_diag_load",
         "fd_noise_covariance_mode",
+        "mvdr_hop_ms",
         "target_activity_low_threshold",
         "target_activity_high_threshold",
         "target_activity_enter_frames",
@@ -237,6 +240,7 @@ def _detector_param_overrides(args: argparse.Namespace) -> dict[str, object]:
         "fd_cov_update_scale_target_inactive",
         "target_activity_detector_mode",
         "target_activity_detector_backend",
+        "target_activity_update_every_n_fast_frames",
         "target_activity_blocker_offset_deg",
         "target_activity_bootstrap_only_calibration",
         "target_activity_ratio_floor_db",
@@ -439,6 +443,7 @@ def _build_session_request(
             "localization_vad_enabled": True,
             "localization_backend": "srp_phat_localization",
             "beamforming_mode": str(method_spec.beamforming_mode),
+            "mvdr_hop_ms": None if method_spec.beamforming_mode != "mvdr_fd" else int(params["mvdr_hop_ms"]),
             "fd_analysis_window_ms": float(params["fd_analysis_window_ms"]),
             "fd_cov_ema_alpha": float(params["fd_cov_ema_alpha"]),
             "fd_diag_load": float(params["fd_diag_load"]),
@@ -452,6 +457,7 @@ def _build_session_request(
             "fd_cov_update_scale_target_inactive": float(params["fd_cov_update_scale_target_inactive"]),
             "target_activity_detector_mode": str(params["target_activity_detector_mode"]),
             "target_activity_detector_backend": str(params["target_activity_detector_backend"]),
+            "target_activity_update_every_n_fast_frames": int(params["target_activity_update_every_n_fast_frames"]),
             "target_activity_blocker_offset_deg": float(params["target_activity_blocker_offset_deg"]),
             "target_activity_bootstrap_only_calibration": bool(params["target_activity_bootstrap_only_calibration"]),
             "target_activity_ratio_floor_db": float(params["target_activity_ratio_floor_db"]),
@@ -766,6 +772,8 @@ def _run_job(
         "fd_noise_covariance_mode": str(params["fd_noise_covariance_mode"]),
         "aggression_level": str(method_spec.aggression_level),
         "target_activity_detector_backend": str(params["target_activity_detector_backend"]),
+        "mvdr_hop_ms": int(params["mvdr_hop_ms"]),
+        "target_activity_update_every_n_fast_frames": int(params["target_activity_update_every_n_fast_frames"]),
         "main_angle_deg": scene_meta["main_angle_deg"],
         "secondary_angle_deg": scene_meta["secondary_angle_deg"],
         "scene_layout_family": scene_meta["scene_layout_family"],
@@ -832,6 +840,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--background-babble-gain-max", type=float, default=None)
     parser.add_argument("--background-wham-gain", type=float, default=None)
     parser.add_argument("--manifest-path", default=None)
+    parser.add_argument("--mvdr-hop-ms", type=int, default=DEFAULT_MVDR_HOP_MS)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=DEFAULT_FD_ANALYSIS_WINDOW_MS)
     parser.add_argument("--fd-cov-ema-alpha", type=float, default=None)
     parser.add_argument("--fd-diag-load", type=float, default=None)
@@ -844,6 +853,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--fd-cov-update-scale-target-inactive", type=float, default=None)
     parser.add_argument("--target-activity-detector-mode", default=None)
     parser.add_argument("--target-activity-detector-backend", default="webrtc_fused", choices=["webrtc_fused", "silero_fused"])
+    parser.add_argument("--target-activity-update-every-n-fast-frames", type=int, default=DEFAULT_TARGET_ACTIVITY_UPDATE_EVERY_N_FAST_FRAMES)
     parser.add_argument("--target-activity-blocker-offset-deg", type=float, default=None)
     parser.add_argument("--target-activity-bootstrap-only-calibration", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--target-activity-ratio-floor-db", type=float, default=None)
@@ -922,6 +932,7 @@ def main() -> None:
         raise ValueError(f"Unsupported detector backend for defaults: {detector_backend}")
     base_detector_params = dict(DEFAULT_TARGET_ACTIVITY_PRESETS[detector_backend])
     params = {
+        "mvdr_hop_ms": int(args.mvdr_hop_ms),
         "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
         "fd_noise_covariance_mode": "estimated_target_subtractive",
         **base_detector_params,
