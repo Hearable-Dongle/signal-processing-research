@@ -1687,6 +1687,55 @@ class FastPathWorker(threading.Thread):
             return None, 0.0
         return float(best_doa), float(max(best_score, 0.0))
 
+    def _collapse_to_single_active_speaker_map(self, speaker_map):
+        if not bool(getattr(self._cfg, "single_active", False)) or not speaker_map:
+            return speaker_map
+        smoothed_items = self._smooth_speaker_items(speaker_map)
+        if not smoothed_items:
+            return speaker_map
+        best_sid = None
+        best_doa = None
+        best_key = None
+        for sid_i, doa_sm, gain_sm in smoothed_items:
+            item = speaker_map.get(int(sid_i))
+            if item is None:
+                continue
+            key = (
+                float(getattr(item, "activity_confidence", 0.0)),
+                float(getattr(item, "confidence", 0.0)),
+                float(gain_sm),
+                -int(sid_i),
+            )
+            if best_key is None or key > best_key:
+                best_key = key
+                best_sid = int(sid_i)
+                best_doa = float(doa_sm)
+        if best_sid is None or best_doa is None:
+            return speaker_map
+        item = speaker_map.get(best_sid)
+        if item is None:
+            return speaker_map
+        return {
+            int(best_sid): SpeakerGainDirection(
+                speaker_id=int(best_sid),
+                direction_degrees=float(best_doa),
+                gain_weight=float(getattr(item, "gain_weight", 0.0)),
+                confidence=float(getattr(item, "confidence", 0.0)),
+                active=True,
+                activity_confidence=float(getattr(item, "activity_confidence", 0.0)),
+                updated_at_ms=float(getattr(item, "updated_at_ms", 0.0)),
+                identity_confidence=float(getattr(item, "identity_confidence", 0.0)),
+                identity_maturity=str(getattr(item, "identity_maturity", "unknown")),
+                predicted_direction_deg=float(best_doa),
+                angular_velocity_deg_per_chunk=float(getattr(item, "angular_velocity_deg_per_chunk", 0.0)),
+                last_separator_stream_index=getattr(item, "last_separator_stream_index", None),
+                anchor_direction_deg=float(best_doa),
+                anchor_confidence=float(getattr(item, "anchor_confidence", 0.0)),
+                anchor_locked=bool(getattr(item, "anchor_locked", False)),
+                anchor_last_confirmed_ms=float(getattr(item, "anchor_last_confirmed_ms", 0.0)),
+            )
+        }
+
     def _beamforming_mode(self) -> str:
         return str(self._cfg.beamforming_mode).strip().lower()
 
@@ -2139,6 +2188,7 @@ class FastPathWorker(threading.Thread):
                     srp_ms += (perf_counter() - t0) * 1000.0
 
                     speaker_map = self._state.get_speaker_map_snapshot()
+                    speaker_map = self._collapse_to_single_active_speaker_map(speaker_map)
                     t0 = perf_counter()
                     ref_mode = str(self._cfg.fast_path_reference_mode).strip().lower()
                     suppression_mode = self._suppression_mode()
