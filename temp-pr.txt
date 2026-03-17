@@ -1,9 +1,0 @@
-PR title example: Expose noise covariance update telemetry in UI
-
-Concise summary:
-Track when the beamformer `Rnn` covariance and Wiener-style postfilter noise model are actually updated, merge that into one shared `noise model update` signal, expose it on live session messages, persist it in offline `summary.json` traces, and render it in the realtime UI as a timeline band over the waveform panel.
-
-Notes:
-- Commit for this change: `cb7000c`
-- Live messages now include optional `noise_model_update_active` and `noise_model_update_sources`
-- Offline traces now include `noise_model_update_trace`
