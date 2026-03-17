@@ -1,0 +1,897 @@
+{
+  "scene_name": "testing_specific_angles_near_target_far_diffuse_k2_scene00",
+  "scene_type": "testing_specific_angles_near_target_far_diffuse",
+  "scene_prefix": "testing_specific_angles_near_target_far_diffuse",
+  "seed": 42,
+  "speaker_count": 2,
+  "main_angle_deg": 0,
+  "secondary_angle_deg": 35,
+  "bootstrap_noise_only_window_sec": [
+    0.0,
+    4.0
+  ],
+  "bootstrap_reference_doa_deg": 0,
+  "target_radius_scale": 0.14,
+  "background_radius_scale": 0.46,
+  "target_distance_regime": "near_field_relative",
+  "background_distance_regime": "far_field_relative",
+  "background_noise_centroid_deg": 72.3896213537177,
+  "background_noise_all_centroid_deg": 177.13392128338427,
+  "background_babble_count": 10,
+  "background_babble_gain_range": [
+    0.02,
+    0.055
+  ],
+  "background_wham_gain": 0.08,
+  "noise_schedule": {
+    "background_chatter_gain_segments": [
+      {
+        "background_speaker_id": 0,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 4.240305206059076,
+            "gain_start": 0.02285081574834179,
+            "gain_end": 0.02266921147112649
+          },
+          {
+            "start_sec": 4.240305206059076,
+            "end_sec": 6.901654733937353,
+            "gain_start": 0.02266921147112649,
+            "gain_end": 0.029356965926406003
+          },
+          {
+            "start_sec": 6.901654733937353,
+            "end_sec": 9.350384914802572,
+            "gain_start": 0.029356965926406003,
+            "gain_end": 0.02547643219095827
+          },
+          {
+            "start_sec": 9.350384914802572,
+            "end_sec": 12.0,
+            "gain_start": 0.02547643219095827,
+            "gain_end": 0.023967740596362287
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 1,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 4.1283366235055095,
+            "gain_start": 0.0547289754592361,
+            "gain_end": 0.05759426204105258
+          },
+          {
+            "start_sec": 4.1283366235055095,
+            "end_sec": 6.976641987846912,
+            "gain_start": 0.05759426204105258,
+            "gain_end": 0.051601015100257296
+          },
+          {
+            "start_sec": 6.976641987846912,
+            "end_sec": 9.59765799751104,
+            "gain_start": 0.051601015100257296,
+            "gain_end": 0.046613327598384775
+          },
+          {
+            "start_sec": 9.59765799751104,
+            "end_sec": 12.0,
+            "gain_start": 0.046613327598384775,
+            "gain_end": 0.058735353232286625
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 2,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.9433967833192307,
+            "gain_start": 0.046951851347467995,
+            "gain_end": 0.04170920495035542
+          },
+          {
+            "start_sec": 3.9433967833192307,
+            "end_sec": 7.16991657209891,
+            "gain_start": 0.04170920495035542,
+            "gain_end": 0.04188027766749742
+          },
+          {
+            "start_sec": 7.16991657209891,
+            "end_sec": 10.511336606041633,
+            "gain_start": 0.04188027766749742,
+            "gain_end": 0.04053279772737811
+          },
+          {
+            "start_sec": 10.511336606041633,
+            "end_sec": 12.0,
+            "gain_start": 0.04053279772737811,
+            "gain_end": 0.03615977577404429
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 3,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.2050768989658764,
+            "gain_start": 0.05411117663832968,
+            "gain_end": 0.05412647468298869
+          },
+          {
+            "start_sec": 3.2050768989658764,
+            "end_sec": 5.614019093241152,
+            "gain_start": 0.05412647468298869,
+            "gain_end": 0.04774372338371807
+          },
+          {
+            "start_sec": 5.614019093241152,
+            "end_sec": 8.13331222662,
+            "gain_start": 0.04774372338371807,
+            "gain_end": 0.042922405029938555
+          },
+          {
+            "start_sec": 8.13331222662,
+            "end_sec": 10.208448673522946,
+            "gain_start": 0.042922405029938555,
+            "gain_end": 0.04077398811440928
+          },
+          {
+            "start_sec": 10.208448673522946,
+            "end_sec": 12.0,
+            "gain_start": 0.04077398811440928,
+            "gain_end": 0.04401634386755967
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 4,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.0011281131131957,
+            "gain_start": 0.03074840503913164,
+            "gain_end": 0.03145901339994494
+          },
+          {
+            "start_sec": 3.0011281131131957,
+            "end_sec": 5.46922547465155,
+            "gain_start": 0.03145901339994494,
+            "gain_end": 0.036312280680154144
+          },
+          {
+            "start_sec": 5.46922547465155,
+            "end_sec": 9.514995146411207,
+            "gain_start": 0.036312280680154144,
+            "gain_end": 0.03368767331126147
+          },
+          {
+            "start_sec": 9.514995146411207,
+            "end_sec": 12.0,
+            "gain_start": 0.03368767331126147,
+            "gain_end": 0.0274315115151298
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 5,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.853467668454319,
+            "gain_start": 0.03867647240136597,
+            "gain_end": 0.028623390229655227
+          },
+          {
+            "start_sec": 2.853467668454319,
+            "end_sec": 5.7094768604808905,
+            "gain_start": 0.028623390229655227,
+            "gain_end": 0.037219032445252695
+          },
+          {
+            "start_sec": 5.7094768604808905,
+            "end_sec": 9.26624872295141,
+            "gain_start": 0.037219032445252695,
+            "gain_end": 0.036715333403113705
+          },
+          {
+            "start_sec": 9.26624872295141,
+            "end_sec": 12.0,
+            "gain_start": 0.036715333403113705,
+            "gain_end": 0.03049238490769677
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 6,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.597534123160411,
+            "gain_start": 0.0342825601597236,
+            "gain_end": 0.029072046895829137
+          },
+          {
+            "start_sec": 3.597534123160411,
+            "end_sec": 8.080955369188356,
+            "gain_start": 0.029072046895829137,
+            "gain_end": 0.03240380802368995
+          },
+          {
+            "start_sec": 8.080955369188356,
+            "end_sec": 10.236113135538744,
+            "gain_start": 0.03240380802368995,
+            "gain_end": 0.03452500784836761
+          },
+          {
+            "start_sec": 10.236113135538744,
+            "end_sec": 12.0,
+            "gain_start": 0.03452500784836761,
+            "gain_end": 0.030866182416862602
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 7,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.982318478925583,
+            "gain_start": 0.0499230940530191,
+            "gain_end": 0.0546460279427148
+          },
+          {
+            "start_sec": 2.982318478925583,
+            "end_sec": 5.780209715445758,
+            "gain_start": 0.0546460279427148,
+            "gain_end": 0.051454576487568286
+          },
+          {
+            "start_sec": 5.780209715445758,
+            "end_sec": 8.932958290833028,
+            "gain_start": 0.051454576487568286,
+            "gain_end": 0.05037437216842254
+          },
+          {
+            "start_sec": 8.932958290833028,
+            "end_sec": 12.0,
+            "gain_start": 0.05037437216842254,
+            "gain_end": 0.04732163871549195
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 8,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.85678410688739,
+            "gain_start": 0.05561676497579475,
+            "gain_end": 0.04289503241123378
+          },
+          {
+            "start_sec": 2.85678410688739,
+            "end_sec": 6.55201925908696,
+            "gain_start": 0.04289503241123378,
+            "gain_end": 0.053903906040223895
+          },
+          {
+            "start_sec": 6.55201925908696,
+            "end_sec": 8.65265360893677,
+            "gain_start": 0.053903906040223895,
+            "gain_end": 0.04737905079295489
+          },
+          {
+            "start_sec": 8.65265360893677,
+            "end_sec": 12.0,
+            "gain_start": 0.04737905079295489,
+            "gain_end": 0.052317216420062596
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 9,
+        "segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.649989297002878,
+            "gain_start": 0.02821891779531291,
+            "gain_end": 0.026036387832341183
+          },
+          {
+            "start_sec": 3.649989297002878,
+            "end_sec": 8.018828296167857,
+            "gain_start": 0.026036387832341183,
+            "gain_end": 0.026645149262802127
+          },
+          {
+            "start_sec": 8.018828296167857,
+            "end_sec": 11.86510507788443,
+            "gain_start": 0.026645149262802127,
+            "gain_end": 0.026996025756659294
+          },
+          {
+            "start_sec": 11.86510507788443,
+            "end_sec": 12.0,
+            "gain_start": 0.026996025756659294,
+            "gain_end": 0.030014724561300544
+          }
+        ]
+      }
+    ],
+    "background_wham_gain_segments": [
+      {
+        "start_sec": 0.0,
+        "end_sec": 4.767715817273771,
+        "gain_start": 0.08217868303502708,
+        "gain_end": 0.08038601975855621
+      },
+      {
+        "start_sec": 4.767715817273771,
+        "end_sec": 8.885395312632085,
+        "gain_start": 0.08038601975855621,
+        "gain_end": 0.07884724866600108
+      },
+      {
+        "start_sec": 8.885395312632085,
+        "end_sec": 12.0,
+        "gain_start": 0.07884724866600108,
+        "gain_end": 0.08080100216467105
+      }
+    ]
+  },
+  "target_activity_schedule": {
+    "speaker_0_windows_sec": [
+      [
+        4.0,
+        8.0
+      ]
+    ],
+    "speaker_1_windows_sec": [
+      [
+        8.0,
+        12.0
+      ]
+    ]
+  },
+  "room": {
+    "dimensions_m": [
+      8.0,
+      6.4,
+      3.1
+    ],
+    "absorption": 0.5
+  },
+  "mic_array": {
+    "mic_center_m": [
+      4.0,
+      3.2,
+      1.45
+    ],
+    "mic_radius_m": 0.1,
+    "mic_count": 4
+  },
+  "assets": {
+    "speech": [
+      {
+        "speaker_id": 0,
+        "speaker_label": "6927",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/6927/86043/6927-86043-0025.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/target_0_seg000.wav",
+        "active_window_sec": [
+          4.0,
+          8.0
+        ],
+        "position_m": [
+          4.896,
+          3.2,
+          1.45
+        ],
+        "angle_deg": 0
+      },
+      {
+        "speaker_id": 1,
+        "speaker_label": "476",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/476/133471/476-133471-0057.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/target_1_seg000.wav",
+        "active_window_sec": [
+          8.0,
+          12.0
+        ],
+        "position_m": [
+          4.734,
+          3.7139,
+          1.45
+        ],
+        "angle_deg": 35
+      }
+    ],
+    "background_chatter": [
+      {
+        "background_speaker_id": 0,
+        "speaker_label": "5618",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/5618/48830/5618-48830-0015.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_00.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          6.944,
+          3.2,
+          1.3
+        ],
+        "angle_deg": 0,
+        "gain": 0.025610920874379033,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 4.240305206059076,
+            "gain_start": 0.02285081574834179,
+            "gain_end": 0.02266921147112649
+          },
+          {
+            "start_sec": 4.240305206059076,
+            "end_sec": 6.901654733937353,
+            "gain_start": 0.02266921147112649,
+            "gain_end": 0.029356965926406003
+          },
+          {
+            "start_sec": 6.901654733937353,
+            "end_sec": 9.350384914802572,
+            "gain_start": 0.029356965926406003,
+            "gain_end": 0.02547643219095827
+          },
+          {
+            "start_sec": 9.350384914802572,
+            "end_sec": 12.0,
+            "gain_start": 0.02547643219095827,
+            "gain_end": 0.023967740596362287
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 1,
+        "speaker_label": "3240",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-100/3240/131231/3240-131231-0008.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_01.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          6.3817,
+          4.9304,
+          1.3
+        ],
+        "angle_deg": 36,
+        "gain": 0.049817660522817955,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 4.1283366235055095,
+            "gain_start": 0.0547289754592361,
+            "gain_end": 0.05759426204105258
+          },
+          {
+            "start_sec": 4.1283366235055095,
+            "end_sec": 6.976641987846912,
+            "gain_start": 0.05759426204105258,
+            "gain_end": 0.051601015100257296
+          },
+          {
+            "start_sec": 6.976641987846912,
+            "end_sec": 9.59765799751104,
+            "gain_start": 0.051601015100257296,
+            "gain_end": 0.046613327598384775
+          },
+          {
+            "start_sec": 9.59765799751104,
+            "end_sec": 12.0,
+            "gain_start": 0.046613327598384775,
+            "gain_end": 0.058735353232286625
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 2,
+        "speaker_label": "781",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/781/126737/781-126737-0021.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_02.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          4.9097,
+          5.8,
+          1.3
+        ],
+        "angle_deg": 72,
+        "gain": 0.04044797510214264,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.9433967833192307,
+            "gain_start": 0.046951851347467995,
+            "gain_end": 0.04170920495035542
+          },
+          {
+            "start_sec": 3.9433967833192307,
+            "end_sec": 7.16991657209891,
+            "gain_start": 0.04170920495035542,
+            "gain_end": 0.04188027766749742
+          },
+          {
+            "start_sec": 7.16991657209891,
+            "end_sec": 10.511336606041633,
+            "gain_start": 0.04188027766749742,
+            "gain_end": 0.04053279772737811
+          },
+          {
+            "start_sec": 10.511336606041633,
+            "end_sec": 12.0,
+            "gain_start": 0.04053279772737811,
+            "gain_end": 0.03615977577404429
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 3,
+        "speaker_label": "1580",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/test-clean/1580/141084/1580-141084-0001.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_03.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          3.0903,
+          5.8,
+          1.3
+        ],
+        "angle_deg": 108,
+        "gain": 0.045729529963187174,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.2050768989658764,
+            "gain_start": 0.05411117663832968,
+            "gain_end": 0.05412647468298869
+          },
+          {
+            "start_sec": 3.2050768989658764,
+            "end_sec": 5.614019093241152,
+            "gain_start": 0.05412647468298869,
+            "gain_end": 0.04774372338371807
+          },
+          {
+            "start_sec": 5.614019093241152,
+            "end_sec": 8.13331222662,
+            "gain_start": 0.04774372338371807,
+            "gain_end": 0.042922405029938555
+          },
+          {
+            "start_sec": 8.13331222662,
+            "end_sec": 10.208448673522946,
+            "gain_start": 0.042922405029938555,
+            "gain_end": 0.04077398811440928
+          },
+          {
+            "start_sec": 10.208448673522946,
+            "end_sec": 12.0,
+            "gain_start": 0.04077398811440928,
+            "gain_end": 0.04401634386755967
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 4,
+        "speaker_label": "3001",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/3001/160984/3001-160984-0014.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_04.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          1.6183,
+          4.9304,
+          1.3
+        ],
+        "angle_deg": 144,
+        "gain": 0.0303611502018509,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.0011281131131957,
+            "gain_start": 0.03074840503913164,
+            "gain_end": 0.03145901339994494
+          },
+          {
+            "start_sec": 3.0011281131131957,
+            "end_sec": 5.46922547465155,
+            "gain_start": 0.03145901339994494,
+            "gain_end": 0.036312280680154144
+          },
+          {
+            "start_sec": 5.46922547465155,
+            "end_sec": 9.514995146411207,
+            "gain_start": 0.036312280680154144,
+            "gain_end": 0.03368767331126147
+          },
+          {
+            "start_sec": 9.514995146411207,
+            "end_sec": 12.0,
+            "gain_start": 0.03368767331126147,
+            "gain_end": 0.0274315115151298
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 5,
+        "speaker_label": "2045",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/2045/158081/2045-158081-0010.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_05.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          1.056,
+          3.2,
+          1.3
+        ],
+        "angle_deg": 180,
+        "gain": 0.0329938422980897,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.853467668454319,
+            "gain_start": 0.03867647240136597,
+            "gain_end": 0.028623390229655227
+          },
+          {
+            "start_sec": 2.853467668454319,
+            "end_sec": 5.7094768604808905,
+            "gain_start": 0.028623390229655227,
+            "gain_end": 0.037219032445252695
+          },
+          {
+            "start_sec": 5.7094768604808905,
+            "end_sec": 9.26624872295141,
+            "gain_start": 0.037219032445252695,
+            "gain_end": 0.036715333403113705
+          },
+          {
+            "start_sec": 9.26624872295141,
+            "end_sec": 12.0,
+            "gain_start": 0.036715333403113705,
+            "gain_end": 0.03049238490769677
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 6,
+        "speaker_label": "7939",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/7939/120330/7939-120330-0009.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_06.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          1.6183,
+          1.4696,
+          1.3
+        ],
+        "angle_deg": 216,
+        "gain": 0.03416992375492869,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.597534123160411,
+            "gain_start": 0.0342825601597236,
+            "gain_end": 0.029072046895829137
+          },
+          {
+            "start_sec": 3.597534123160411,
+            "end_sec": 8.080955369188356,
+            "gain_start": 0.029072046895829137,
+            "gain_end": 0.03240380802368995
+          },
+          {
+            "start_sec": 8.080955369188356,
+            "end_sec": 10.236113135538744,
+            "gain_start": 0.03240380802368995,
+            "gain_end": 0.03452500784836761
+          },
+          {
+            "start_sec": 10.236113135538744,
+            "end_sec": 12.0,
+            "gain_start": 0.03452500784836761,
+            "gain_end": 0.030866182416862602
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 7,
+        "speaker_label": "192",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/192/128345/192-128345-0059.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_07.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          3.0903,
+          0.6,
+          1.3
+        ],
+        "angle_deg": 252,
+        "gain": 0.04660052401104123,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.982318478925583,
+            "gain_start": 0.0499230940530191,
+            "gain_end": 0.0546460279427148
+          },
+          {
+            "start_sec": 2.982318478925583,
+            "end_sec": 5.780209715445758,
+            "gain_start": 0.0546460279427148,
+            "gain_end": 0.051454576487568286
+          },
+          {
+            "start_sec": 5.780209715445758,
+            "end_sec": 8.932958290833028,
+            "gain_start": 0.051454576487568286,
+            "gain_end": 0.05037437216842254
+          },
+          {
+            "start_sec": 8.932958290833028,
+            "end_sec": 12.0,
+            "gain_start": 0.05037437216842254,
+            "gain_end": 0.04732163871549195
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 8,
+        "speaker_label": "4427",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/4427/41933/4427-41933-0030.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_08.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          4.9097,
+          0.6,
+          1.3
+        ],
+        "angle_deg": 288,
+        "gain": 0.04703235456860989,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.85678410688739,
+            "gain_start": 0.05561676497579475,
+            "gain_end": 0.04289503241123378
+          },
+          {
+            "start_sec": 2.85678410688739,
+            "end_sec": 6.55201925908696,
+            "gain_start": 0.04289503241123378,
+            "gain_end": 0.053903906040223895
+          },
+          {
+            "start_sec": 6.55201925908696,
+            "end_sec": 8.65265360893677,
+            "gain_start": 0.053903906040223895,
+            "gain_end": 0.04737905079295489
+          },
+          {
+            "start_sec": 8.65265360893677,
+            "end_sec": 12.0,
+            "gain_start": 0.04737905079295489,
+            "gain_end": 0.052317216420062596
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 9,
+        "speaker_label": "1705",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/1705/142318/1705-142318-0056.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_chatter_09.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          6.3817,
+          1.4696,
+          1.3
+        ],
+        "angle_deg": 324,
+        "gain": 0.02723847346299111,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.649989297002878,
+            "gain_start": 0.02821891779531291,
+            "gain_end": 0.026036387832341183
+          },
+          {
+            "start_sec": 3.649989297002878,
+            "end_sec": 8.018828296167857,
+            "gain_start": 0.026036387832341183,
+            "gain_end": 0.026645149262802127
+          },
+          {
+            "start_sec": 8.018828296167857,
+            "end_sec": 11.86510507788443,
+            "gain_start": 0.026645149262802127,
+            "gain_end": 0.026996025756659294
+          },
+          {
+            "start_sec": 11.86510507788443,
+            "end_sec": 12.0,
+            "gain_start": 0.026996025756659294,
+            "gain_end": 0.030014724561300544
+          }
+        ]
+      }
+    ],
+    "noise": [
+      {
+        "noise_id": 0,
+        "source_path": "/home/mkeller/data/librimix/wham_noise/tr/40cc0202_2.1543_02do030l_-2.1543sp08.wav",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00/render_assets/background_wham_0.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          0.9088,
+          3.2,
+          1.2
+        ],
+        "angle_deg": 180,
+        "gain": 0.08,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 4.767715817273771,
+            "gain_start": 0.08217868303502708,
+            "gain_end": 0.08038601975855621
+          },
+          {
+            "start_sec": 4.767715817273771,
+            "end_sec": 8.885395312632085,
+            "gain_start": 0.08038601975855621,
+            "gain_end": 0.07884724866600108
+          },
+          {
+            "start_sec": 8.885395312632085,
+            "end_sec": 12.0,
+            "gain_start": 0.07884724866600108,
+            "gain_end": 0.08080100216467105
+          }
+        ]
+      }
+    ]
+  },
+  "summary_metrics": {
+    "bootstrap_noise_only_sec": 4.0,
+    "background_only_ratio": 0.3333333333333333,
+    "speaker_activity_frames": {
+      "0": 200,
+      "1": 200
+    }
+  }
+}

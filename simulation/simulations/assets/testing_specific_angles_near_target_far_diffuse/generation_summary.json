@@ -1,0 +1,94 @@
+{
+  "scenes": [
+    {
+      "scene_name": "testing_specific_angles_near_target_far_diffuse_k2_scene00",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene00",
+      "main_angle_deg": 0,
+      "secondary_angle_deg": 35,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "target_radius_scale": 0.14,
+      "background_radius_scale": 0.46,
+      "background_babble_count": 10,
+      "background_wham_gain": 0.08
+    },
+    {
+      "scene_name": "testing_specific_angles_near_target_far_diffuse_k2_scene01",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene01.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene01",
+      "main_angle_deg": 35,
+      "secondary_angle_deg": 70,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "target_radius_scale": 0.14,
+      "background_radius_scale": 0.46,
+      "background_babble_count": 10,
+      "background_wham_gain": 0.08
+    },
+    {
+      "scene_name": "testing_specific_angles_near_target_far_diffuse_k2_scene02",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02",
+      "main_angle_deg": 70,
+      "secondary_angle_deg": 110,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "target_radius_scale": 0.14,
+      "background_radius_scale": 0.46,
+      "background_babble_count": 10,
+      "background_wham_gain": 0.08
+    },
+    {
+      "scene_name": "testing_specific_angles_near_target_far_diffuse_k2_scene03",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene03.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene03",
+      "main_angle_deg": 110,
+      "secondary_angle_deg": 150,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "target_radius_scale": 0.14,
+      "background_radius_scale": 0.46,
+      "background_babble_count": 10,
+      "background_wham_gain": 0.08
+    },
+    {
+      "scene_name": "testing_specific_angles_near_target_far_diffuse_k2_scene04",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene04.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene04",
+      "main_angle_deg": 180,
+      "secondary_angle_deg": 220,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "target_radius_scale": 0.14,
+      "background_radius_scale": 0.46,
+      "background_babble_count": 10,
+      "background_wham_gain": 0.08
+    },
+    {
+      "scene_name": "testing_specific_angles_near_target_far_diffuse_k2_scene05",
+      "scene_config_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/configs/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene05.json",
+      "scene_dir": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene05",
+      "main_angle_deg": 250,
+      "secondary_angle_deg": 300,
+      "bootstrap_noise_only_window_sec": [
+        0.0,
+        4.0
+      ],
+      "target_radius_scale": 0.14,
+      "background_radius_scale": 0.46,
+      "background_babble_count": 10,
+      "background_wham_gain": 0.08
+    }
+  ]
+}
