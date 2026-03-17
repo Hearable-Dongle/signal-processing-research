@@ -167,6 +167,82 @@ class _FDBufferedBeamformer:
         self._ola_tail_gsc = np.zeros(self.analysis_n, dtype=np.float64)
         self._ola_norm_mvdr = np.zeros(self.analysis_n, dtype=np.float64)
         self._ola_norm_gsc = np.zeros(self.analysis_n, dtype=np.float64)
+        mvdr_hop_ms = getattr(cfg, "mvdr_hop_ms", None)
+        if mvdr_hop_ms is None:
+            self.solve_interval_frames = 1
+        else:
+            self.solve_interval_frames = max(1, int(np.ceil(float(mvdr_hop_ms) / max(float(cfg.fast_frame_ms), 1.0))))
+        self._mvdr_frame_counter = 0
+        self._cached_mvdr_weights: np.ndarray | None = None
+        self._cached_lcmv_weights: np.ndarray | None = None
+        self._cached_steering: np.ndarray | None = None
+        self._cached_target_doa_deg: float | None = None
+        self._cached_null_doa_deg: float | None = None
+        self._cached_last_target_active: bool | None = None
+
+    def _should_refresh_weights(
+        self,
+        *,
+        doa_deg: float,
+        target_active: bool,
+        null_doa_deg: float | None = None,
+    ) -> bool:
+        if null_doa_deg is None:
+            if self._cached_mvdr_weights is None:
+                return True
+        else:
+            if self._cached_lcmv_weights is None:
+                return True
+        if self._cached_mvdr_weights is None and self._cached_lcmv_weights is None:
+            return True
+        if self._mvdr_frame_counter % max(self.solve_interval_frames, 1) == 0:
+            return True
+        if self._cached_target_doa_deg is None or _angular_dist_deg(self._cached_target_doa_deg, doa_deg) >= 1.0:
+            return True
+        if self._cached_last_target_active is None or bool(self._cached_last_target_active) != bool(target_active):
+            return True
+        if null_doa_deg is not None:
+            if self._cached_lcmv_weights is None:
+                return True
+            if self._cached_null_doa_deg is None or _angular_dist_deg(self._cached_null_doa_deg, null_doa_deg) >= 1.0:
+                return True
+        return False
+
+    def _solve_mvdr_weights(self, steering: np.ndarray) -> np.ndarray:
+        f_bins = steering.shape[0]
+        weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
+        eye = np.eye(self.n_mics, dtype=np.complex128)
+        for f in range(f_bins):
+            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
+            af = steering[f].reshape(-1, 1)
+            try:
+                rinv_a = np.linalg.solve(r, af)
+            except np.linalg.LinAlgError:
+                rinv_a = np.linalg.pinv(r) @ af
+            denom = (af.conj().T @ rinv_a)[0, 0]
+            wf = rinv_a / (denom + 1e-10)
+            weights[f, :] = wf.reshape(-1)
+        return weights
+
+    def _solve_lcmv_weights(self, a_target: np.ndarray, a_null: np.ndarray) -> np.ndarray:
+        f_bins = a_target.shape[0]
+        weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
+        eye = np.eye(self.n_mics, dtype=np.complex128)
+        response = np.asarray([[1.0 + 0.0j], [0.0 + 0.0j]], dtype=np.complex128)
+        for f in range(f_bins):
+            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
+            constraint = np.stack([a_target[f], a_null[f]], axis=1)
+            try:
+                r_inv_constraint = np.linalg.solve(r, constraint)
+            except np.linalg.LinAlgError:
+                r_inv_constraint = np.linalg.pinv(r) @ constraint
+            gram = constraint.conj().T @ r_inv_constraint
+            try:
+                mid = np.linalg.solve(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128), response)
+            except np.linalg.LinAlgError:
+                mid = np.linalg.pinv(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128)) @ response
+            weights[f, :] = (r_inv_constraint @ mid).reshape(-1)
+        return weights
 
     def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
@@ -299,36 +375,36 @@ class _FDBufferedBeamformer:
     ) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)  # (F, M)
+        self._mvdr_frame_counter += 1
         oracle_noise_fft = None
         if oracle_noise_frame is not None:
             oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
             self._prev_noise_mc = next_prev_noise
-        a = _steering_vector_f_domain(
+        refresh = self._should_refresh_weights(doa_deg=float(doa_deg), target_active=bool(target_active))
+        a = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
             doa_deg=doa_deg,
             n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )  # (F, M)
-        self.rnn_mvdr_noise = self._update_noise_covariance(
-            self.rnn_mvdr_noise,
-            x_fft,
-            a,
-            float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
-            target_active=bool(target_active),
-            oracle_noise_fft=oracle_noise_fft,
-        )
-
-        f_bins = x_fft.shape[0]
-        y_fft = np.zeros(f_bins, dtype=np.complex128)
-        eye = np.eye(self.n_mics, dtype=np.complex128)
-        for f in range(f_bins):
-            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
-            af = a[f].reshape(-1, 1)
-            rinv_a = np.linalg.pinv(r) @ af
-            denom = (af.conj().T @ rinv_a)[0, 0]
-            wf = rinv_a / (denom + 1e-10)
-            y_fft[f] = (wf.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
+        if refresh:
+            self.rnn_mvdr_noise = self._update_noise_covariance(
+                self.rnn_mvdr_noise,
+                x_fft,
+                a,
+                float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                target_active=bool(target_active),
+                oracle_noise_fft=oracle_noise_fft,
+            )
+            self._cached_mvdr_weights = self._solve_mvdr_weights(a)
+            self._cached_steering = np.asarray(a, dtype=np.complex128)
+            self._cached_target_doa_deg = float(doa_deg)
+            self._cached_null_doa_deg = None
+            self._cached_last_target_active = bool(target_active)
+        if self._cached_mvdr_weights is None:
+            raise RuntimeError("MVDR weights were not initialized.")
+        y_fft = np.einsum("fm,fm->f", np.conj(self._cached_mvdr_weights), x_fft)
 
         y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
@@ -345,44 +421,55 @@ class _FDBufferedBeamformer:
     ) -> np.ndarray:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)
+        self._mvdr_frame_counter += 1
         oracle_noise_fft = None
         if oracle_noise_frame is not None:
             oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
             self._prev_noise_mc = next_prev_noise
-        a_target = _steering_vector_f_domain(
+        refresh = self._should_refresh_weights(
+            doa_deg=float(target_doa_deg),
+            target_active=bool(target_active),
+            null_doa_deg=float(null_doa_deg),
+        )
+        a_target = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
             doa_deg=target_doa_deg,
             n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )
-        a_null = _steering_vector_f_domain(
+        a_null = None if (not refresh and self._cached_null_doa_deg is not None and self._cached_lcmv_weights is not None) else _steering_vector_f_domain(
             doa_deg=null_doa_deg,
             n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )
-        self.rnn_mvdr_noise = self._update_noise_covariance(
-            self.rnn_mvdr_noise,
-            x_fft,
-            a_target,
-            float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
-            target_active=bool(target_active),
-            oracle_noise_fft=oracle_noise_fft,
-        )
-
-        f_bins = x_fft.shape[0]
-        y_fft = np.zeros(f_bins, dtype=np.complex128)
-        eye = np.eye(self.n_mics, dtype=np.complex128)
-        response = np.asarray([[1.0 + 0.0j], [0.0 + 0.0j]], dtype=np.complex128)
-        for f in range(f_bins):
-            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
-            constraint = np.stack([a_target[f], a_null[f]], axis=1)
-            r_inv = np.linalg.pinv(r)
-            gram = constraint.conj().T @ r_inv @ constraint
-            weights = r_inv @ constraint @ np.linalg.pinv(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128)) @ response
-            y_fft[f] = (weights.conj().T @ x_fft[f].reshape(-1, 1))[0, 0]
+        if refresh:
+            if a_null is None:
+                a_null = _steering_vector_f_domain(
+                    doa_deg=null_doa_deg,
+                    n_fft=self.analysis_n,
+                    fs=self.cfg.sample_rate_hz,
+                    mic_geometry_xyz=self.mic_geometry_xyz,
+                    sound_speed_m_s=self.cfg.sound_speed_m_s,
+                )
+            self.rnn_mvdr_noise = self._update_noise_covariance(
+                self.rnn_mvdr_noise,
+                x_fft,
+                a_target,
+                float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                target_active=bool(target_active),
+                oracle_noise_fft=oracle_noise_fft,
+            )
+            self._cached_lcmv_weights = self._solve_lcmv_weights(a_target, a_null)
+            self._cached_steering = np.asarray(a_target, dtype=np.complex128)
+            self._cached_target_doa_deg = float(target_doa_deg)
+            self._cached_null_doa_deg = float(null_doa_deg)
+            self._cached_last_target_active = bool(target_active)
+        if self._cached_lcmv_weights is None:
+            raise RuntimeError("LCMV weights were not initialized.")
+        y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
 
         y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
@@ -651,6 +738,12 @@ class FastPathWorker(threading.Thread):
         self._target_activity_calibration_frames = 0
         self._target_activity_bootstrap_complete = False
         self._target_activity_last_debug: dict[str, float | str | bool] = {}
+        self._target_activity_last_score = 0.0
+        self._target_activity_last_covariance_alpha = float(config.fd_cov_ema_alpha)
+        self._target_activity_update_every_n_fast_frames = max(
+            1,
+            int(getattr(config, "target_activity_update_every_n_fast_frames", 1)),
+        )
         self._last_target_doa_deg: float | None = None
         backend = str(getattr(config, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
         if backend == "silero_fused":
@@ -767,6 +860,8 @@ class FastPathWorker(threading.Thread):
         self._target_activity_last_debug = {
             "backend": self._target_activity_detector_backend(),
             "vad_source": str(vad.source),
+            "detector_skipped": False,
+            "detector_update_every_n_fast_frames": float(self._target_activity_update_every_n_fast_frames),
             "target_rms_dbfs": _rms_db(target_ref),
             "blocker_rms_dbfs": _rms_db(blocker_ref),
             "target_floor_dbfs": float(20.0 * np.log10(max(self._target_activity_target_floor, 1e-12))),
@@ -814,7 +909,20 @@ class FastPathWorker(threading.Thread):
                 score = 0.0 if raw is None else float(np.clip(raw, 0.0, 1.0))
         else:
             estimate_doa = target_doa_deg if target_doa_deg is not None else self._last_target_doa_deg
-            score = 0.0 if estimate_doa is None else self._estimate_target_activity(frame_mc, float(estimate_doa))
+            detector_should_update = (self._frame_idx % max(self._target_activity_update_every_n_fast_frames, 1)) == 0
+            if estimate_doa is None:
+                score = 0.0
+                detector_should_update = False
+            elif detector_should_update:
+                score = self._estimate_target_activity(frame_mc, float(estimate_doa))
+                self._target_activity_last_score = float(score)
+            else:
+                score = float(self._target_activity_last_score)
+                self._target_activity_last_debug = {
+                    **dict(self._target_activity_last_debug),
+                    "detector_skipped": True,
+                    "detector_update_every_n_fast_frames": float(self._target_activity_update_every_n_fast_frames),
+                }
         if target_doa_deg is not None:
             self._last_target_doa_deg = float(target_doa_deg)
         if mode == "estimated_target_activity" and not self._target_activity_bootstrap_complete and self._target_activity_calibration_frames < 12:
@@ -828,7 +936,10 @@ class FastPathWorker(threading.Thread):
             if is_active
             else float(np.clip(self._cfg.fd_cov_update_scale_target_inactive, 0.0, 1.0))
         )
-        return float(score), bool(is_active), float(base_alpha * scale)
+        covariance_alpha = float(base_alpha * scale)
+        self._target_activity_last_score = float(score)
+        self._target_activity_last_covariance_alpha = covariance_alpha
+        return float(score), bool(is_active), covariance_alpha
 
     def _suppressed_user_doa(self) -> float | None:
         if self._cfg.suppressed_user_voice_doa_deg is None:

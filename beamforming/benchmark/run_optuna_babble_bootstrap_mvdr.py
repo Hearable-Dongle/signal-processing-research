@@ -58,6 +58,7 @@ def _objective_factory(args: argparse.Namespace, trial_root: Path):
 
     def objective(trial):
         params = {
+            "mvdr_hop_ms": trial.suggest_categorical("mvdr_hop_ms", [40, 60, 80]),
             "fd_analysis_window_ms": trial.suggest_float("fd_analysis_window_ms", 80.0, 80.0, step=10.0),
             "fd_cov_ema_alpha": trial.suggest_float("fd_cov_ema_alpha", 0.04, 0.25),
             "fd_diag_load": trial.suggest_float("fd_diag_load", 1e-4, 5e-2, log=True),
@@ -66,6 +67,7 @@ def _objective_factory(args: argparse.Namespace, trial_root: Path):
             "target_activity_exit_frames": trial.suggest_int("target_activity_exit_frames", 1, 8),
             "fd_cov_update_scale_target_active": trial.suggest_float("fd_cov_update_scale_target_active", 0.0, 0.5),
             "fd_cov_update_scale_target_inactive": trial.suggest_float("fd_cov_update_scale_target_inactive", 0.6, 1.5),
+            "target_activity_update_every_n_fast_frames": trial.suggest_categorical("target_activity_update_every_n_fast_frames", [1, 2, 4]),
             "target_activity_blocker_offset_deg": trial.suggest_float("target_activity_blocker_offset_deg", 75.0, 120.0, step=15.0),
             "target_activity_ratio_floor_db": trial.suggest_float("target_activity_ratio_floor_db", -2.0, 8.0),
             "target_activity_ratio_active_db": trial.suggest_float("target_activity_ratio_active_db", 1.0, 12.0),
@@ -110,6 +112,8 @@ def _objective_factory(args: argparse.Namespace, trial_root: Path):
             str(float(args.background_babble_gain_max)),
             "--background-wham-gain",
             str(float(args.background_wham_gain)),
+            "--mvdr-hop-ms",
+            str(int(params["mvdr_hop_ms"])),
             "--fd-analysis-window-ms",
             str(float(params["fd_analysis_window_ms"])),
             "--fd-cov-ema-alpha",
@@ -132,6 +136,8 @@ def _objective_factory(args: argparse.Namespace, trial_root: Path):
             "target_blocker_calibrated",
             "--target-activity-detector-backend",
             str(args.target_activity_detector_backend),
+            "--target-activity-update-every-n-fast-frames",
+            str(int(params["target_activity_update_every_n_fast_frames"])),
             "--target-activity-blocker-offset-deg",
             str(float(params["target_activity_blocker_offset_deg"])),
             "--target-activity-bootstrap-only-calibration",

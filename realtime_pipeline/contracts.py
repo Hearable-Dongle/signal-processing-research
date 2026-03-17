@@ -191,6 +191,7 @@ class PipelineConfig:
     speaker_map_activity_decay: float = 0.92
     # Beamformer mode
     beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum
+    mvdr_hop_ms: int | None = None
     # DOA/gain smoothing to reduce steering chatter
     doa_ema_alpha: float = 0.2
     gain_ema_alpha: float = 0.2
@@ -212,6 +213,7 @@ class PipelineConfig:
     fd_cov_update_scale_target_inactive: float = 1.2561064512368887
     target_activity_detector_mode: str = "target_blocker_calibrated"
     target_activity_detector_backend: str = "silero_fused"
+    target_activity_update_every_n_fast_frames: int = 1
     target_activity_blocker_offset_deg: float = 120.0
     target_activity_bootstrap_only_calibration: bool = True
     target_activity_ratio_floor_db: float = -1.5557320895954578
