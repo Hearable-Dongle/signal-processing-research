@@ -227,6 +227,7 @@ class _FDBufferedBeamformer:
         self._cached_last_target_active: bool | None = None
         self._last_weights_reused: bool = False
         self._last_noise_model_update: dict = _inactive_noise_model_update()
+        self._frozen_bootstrap_frames = max(1, int(np.ceil(1000.0 / max(float(cfg.fast_frame_ms), 1.0))))
 
     def get_last_noise_model_update(self) -> dict:
         return _normalize_noise_model_update(self._last_noise_model_update)
@@ -325,6 +326,12 @@ class _FDBufferedBeamformer:
     def _noise_covariance_mode(self) -> str:
         return str(getattr(self.cfg, "fd_noise_covariance_mode", "estimated_target_subtractive")).strip().lower()
 
+    def _noise_covariance_is_frozen(self) -> bool:
+        return self._noise_covariance_mode() == "estimated_target_subtractive_frozen"
+
+    def _noise_covariance_frozen_bootstrap_active(self) -> bool:
+        return bool(self._noise_covariance_is_frozen() and self._mvdr_frame_counter <= self._frozen_bootstrap_frames)
+
     def _update_noise_covariance(
         self,
         rnn_prev: np.ndarray | None,
@@ -335,10 +342,14 @@ class _FDBufferedBeamformer:
         target_active: bool,
         oracle_noise_fft: np.ndarray | None = None,
     ) -> np.ndarray:
+        if self._noise_covariance_is_frozen() and rnn_prev is not None and not self._noise_covariance_frozen_bootstrap_active():
+            return np.asarray(rnn_prev, dtype=np.complex128)
         if self._noise_covariance_mode() == "oracle_non_target_residual":
             if oracle_noise_fft is None:
                 raise ValueError("oracle_non_target_residual mode requires oracle noise FFT observations.")
             return self._update_covariance(rnn_prev, oracle_noise_fft, cov_alpha)
+        if self._noise_covariance_frozen_bootstrap_active():
+            return self._update_covariance(rnn_prev, x_fft, cov_alpha)
         # When the target is inactive, the mixture is a direct observation of the noise field and can
         # refresh Rnn without any target subtraction. Otherwise estimate interference/noise covariance
         # by subtracting the steered target covariance from the full mixture covariance.
@@ -392,12 +403,16 @@ class _FDBufferedBeamformer:
         target_active: bool,
         oracle_noise_fft: np.ndarray | None = None,
     ) -> np.ndarray:
+        if self._noise_covariance_is_frozen() and rnn_prev is not None and not self._noise_covariance_frozen_bootstrap_active():
+            return np.asarray(rnn_prev, dtype=np.complex128)
         if not steerings:
             raise ValueError("multi-target covariance update requires at least one steering vector")
         if self._noise_covariance_mode() == "oracle_non_target_residual":
             if oracle_noise_fft is None:
                 raise ValueError("oracle_non_target_residual mode requires oracle noise FFT observations.")
             return self._update_covariance(rnn_prev, oracle_noise_fft, cov_alpha)
+        if self._noise_covariance_frozen_bootstrap_active():
+            return self._update_covariance(rnn_prev, x_fft, cov_alpha)
         if len(steerings) == 1 or not bool(target_active):
             return self._update_noise_covariance(
                 rnn_prev,
@@ -528,6 +543,10 @@ class _FDBufferedBeamformer:
             self._cached_last_target_active = bool(target_active)
             if self._noise_covariance_mode() == "oracle_non_target_residual":
                 reason = "oracle_non_target_residual"
+            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
+                reason = "estimated_target_subtractive_frozen_bootstrap"
+            elif self._noise_covariance_is_frozen():
+                reason = "estimated_target_subtractive_frozen_hold"
             elif bool(target_active):
                 reason = "estimated_target_subtractive"
             else:
@@ -612,6 +631,10 @@ class _FDBufferedBeamformer:
             self._cached_last_target_active = bool(target_active)
             if self._noise_covariance_mode() == "oracle_non_target_residual":
                 reason = "oracle_non_target_residual"
+            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
+                reason = "estimated_target_subtractive_frozen_bootstrap"
+            elif self._noise_covariance_is_frozen():
+                reason = "estimated_target_subtractive_frozen_hold"
             elif bool(target_active):
                 reason = "estimated_target_subtractive"
             else:
@@ -688,6 +711,30 @@ class _FDBufferedBeamformer:
             self._cached_secondary_target_doa_deg = float(secondary_doa_deg)
             self._cached_null_doa_deg = None
             self._cached_last_target_active = bool(target_active)
+            if self._noise_covariance_mode() == "oracle_non_target_residual":
+                reason = "oracle_non_target_residual"
+            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
+                reason = "estimated_target_subtractive_frozen_bootstrap"
+            elif self._noise_covariance_is_frozen():
+                reason = "estimated_target_subtractive_frozen_hold"
+            elif bool(target_active):
+                reason = "estimated_multitarget_subtractive"
+            else:
+                reason = "target_inactive_direct_mix"
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (reason, "lcmv_top2_active"),
+                "debug": {
+                    "beamforming_mode": "lcmv_top2_tracked",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                    "primary_doa_deg": float(primary_doa_deg),
+                    "secondary_doa_deg": float(secondary_doa_deg),
+                },
+            }
+        else:
+            self._last_noise_model_update = _inactive_noise_model_update()
         if self._cached_lcmv_weights is None:
             raise RuntimeError("LCMV top2 weights were not initialized.")
         y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
@@ -1305,6 +1352,9 @@ class FastPathWorker(threading.Thread):
     def _target_activity_detector_backend(self) -> str:
         return str(getattr(self._cfg, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
 
+    def _target_activity_detector_mode_name(self) -> str:
+        return str(getattr(self._cfg, "target_activity_detector_mode", "target_blocker_calibrated")).strip().lower()
+
     def _target_activity_blocker_doa(self, doa_deg: float) -> float:
         offset = float(getattr(self._cfg, "target_activity_blocker_offset_deg", 90.0))
         candidate = _norm_deg(float(doa_deg) + offset)
@@ -1347,6 +1397,9 @@ class FastPathWorker(threading.Thread):
         self._target_activity_calibration_frames += 1
 
     def _estimate_target_activity(self, frame_mc: np.ndarray, doa_deg: float) -> float:
+        detector_mode = self._target_activity_detector_mode_name()
+        if detector_mode == "localization_peak_confidence":
+            return self._estimate_target_activity_from_localization(doa_deg)
         target_ref, blocker_ref, blocker_doa = self._target_activity_beams(frame_mc, doa_deg)
         target_rms = float(np.sqrt(np.mean(np.asarray(target_ref, dtype=np.float64) ** 2) + 1e-12))
         blocker_rms = float(np.sqrt(np.mean(np.asarray(blocker_ref, dtype=np.float64) ** 2) + 1e-12))
@@ -1399,6 +1452,49 @@ class FastPathWorker(threading.Thread):
         }
         return float(np.clip(score, 0.0, 1.0))
 
+    def _estimate_target_activity_from_localization(self, doa_deg: float) -> float:
+        snapshot = self._state.get_srp_snapshot()
+        peaks = tuple(float(v) for v in (snapshot.raw_peaks_deg or snapshot.peaks_deg or ()))
+        scores_raw = snapshot.raw_peak_scores if snapshot.raw_peak_scores is not None else snapshot.peak_scores
+        scores = tuple(float(v) for v in (scores_raw or ()))
+        if not peaks:
+            self._target_activity_last_debug = {
+                "backend": "localization_peak_confidence",
+                "detector_skipped": False,
+                "detector_update_every_n_fast_frames": float(self._target_activity_update_every_n_fast_frames),
+                "target_doa_deg": float(doa_deg),
+                "matched_peak": False,
+                "peak_count": 0.0,
+            }
+            return 0.0
+
+        best_idx = min(range(len(peaks)), key=lambda idx: _angular_dist_deg(float(doa_deg), float(peaks[idx])))
+        best_peak_deg = float(peaks[best_idx])
+        best_dist_deg = float(_angular_dist_deg(float(doa_deg), best_peak_deg))
+        match_window_deg = float(max(getattr(self._cfg, "focus_direction_match_window_deg", 30.0), 1.0))
+        matched = bool(best_dist_deg <= match_window_deg)
+        peak_score = float(scores[best_idx]) if best_idx < len(scores) else 0.0
+        distance_weight = float(np.clip(1.0 - (best_dist_deg / match_window_deg), 0.0, 1.0))
+        score = float(np.clip(peak_score * distance_weight, 0.0, 1.0)) if matched else 0.0
+        debug = dict(snapshot.debug or {})
+        self._target_activity_last_debug = {
+            "backend": "localization_peak_confidence",
+            "localization_backend": str(debug.get("backend", "")),
+            "detector_skipped": False,
+            "detector_update_every_n_fast_frames": float(self._target_activity_update_every_n_fast_frames),
+            "target_doa_deg": float(doa_deg),
+            "matched_peak": bool(matched),
+            "peak_count": float(len(peaks)),
+            "peak_doa_deg": float(best_peak_deg),
+            "peak_score": float(peak_score),
+            "peak_distance_deg": float(best_dist_deg),
+            "distance_weight": float(distance_weight),
+        }
+        for key in ("capon_confidence", "capon_peak_sharpness", "capon_peak_margin", "window_speech_active"):
+            if key in debug:
+                self._target_activity_last_debug[key] = debug[key]
+        return score
+
     def _update_target_activity_hysteresis(self, score: float) -> bool:
         high = float(np.clip(self._cfg.target_activity_high_threshold, 0.0, 1.0))
         low = float(np.clip(self._cfg.target_activity_low_threshold, 0.0, high))
@@ -1444,7 +1540,12 @@ class FastPathWorker(threading.Thread):
                 }
         if target_doa_deg is not None:
             self._last_target_doa_deg = float(target_doa_deg)
-        if mode == "estimated_target_activity" and not self._target_activity_bootstrap_complete and self._target_activity_calibration_frames < 12:
+        if (
+            mode == "estimated_target_activity"
+            and self._target_activity_detector_mode_name() == "target_blocker_calibrated"
+            and not self._target_activity_bootstrap_complete
+            and self._target_activity_calibration_frames < 12
+        ):
             score = min(float(score), 0.8 * float(np.clip(self._cfg.target_activity_low_threshold, 0.0, 1.0)))
         is_active = self._update_target_activity_hysteresis(score)
         if bool(is_active):

@@ -183,6 +183,34 @@ DEFAULT_TARGET_ACTIVITY_PRESETS: dict[str, dict[str, object]] = {
         "target_activity_rms_scale": 4.305504476133645,
         "target_activity_score_exponent": 0.15763482134447154,
     },
+    "localization_peak_confidence": {
+        "fd_cov_ema_alpha": 0.12104487978324685,
+        "fd_diag_load": 0.0025330746540014474,
+        "target_activity_low_threshold": 0.18,
+        "target_activity_high_threshold": 0.30,
+        "target_activity_enter_frames": 1,
+        "target_activity_exit_frames": 4,
+        "fd_cov_update_scale_target_active": 0.4650796940166687,
+        "fd_cov_update_scale_target_inactive": 1.4455490474077703,
+        "target_activity_detector_mode": "localization_peak_confidence",
+        "target_activity_detector_backend": "webrtc_fused",
+        "target_activity_blocker_offset_deg": 120.0,
+        "target_activity_bootstrap_only_calibration": False,
+        "target_activity_ratio_floor_db": 0.0,
+        "target_activity_ratio_active_db": 1.0,
+        "target_activity_target_rms_floor_scale": 1.0,
+        "target_activity_blocker_rms_floor_scale": 1.0,
+        "target_activity_speech_weight": 1.0,
+        "target_activity_ratio_weight": 0.0,
+        "target_activity_blocker_weight": 0.0,
+        "target_activity_vad_mode": 1,
+        "target_activity_vad_hangover_frames": 0,
+        "target_activity_noise_floor_rise_alpha": 0.01,
+        "target_activity_noise_floor_fall_alpha": 0.05,
+        "target_activity_noise_floor_margin_scale": 1.0,
+        "target_activity_rms_scale": 1.0,
+        "target_activity_score_exponent": 1.0,
+    },
 }
 
 DEFAULT_ORACLE_NOISE_PRESETS: dict[str, dict[str, object]] = {
@@ -334,6 +362,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "mvdr_fd_bootstrap_oracle_activity": MethodSpec("mvdr_fd_bootstrap_oracle_activity", "mvdr_fd", "oracle_target_activity"),
     "mvdr_fd_bootstrap_estimated_activity": MethodSpec("mvdr_fd_bootstrap_estimated_activity", "mvdr_fd", "estimated_target_activity"),
     "mvdr_fd_bootstrap_estimated_activity_silero": MethodSpec("mvdr_fd_bootstrap_estimated_activity_silero", "mvdr_fd", "estimated_target_activity"),
+    "mvdr_fd_bootstrap_estimated_activity_localization": MethodSpec("mvdr_fd_bootstrap_estimated_activity_localization", "mvdr_fd", "estimated_target_activity"),
     "mvdr_fd_bootstrap_oracle_noise_mild": MethodSpec("mvdr_fd_bootstrap_oracle_noise_mild", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "mild"),
     "mvdr_fd_bootstrap_oracle_noise_medium": MethodSpec("mvdr_fd_bootstrap_oracle_noise_medium", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "medium"),
     "mvdr_fd_bootstrap_oracle_noise_hard": MethodSpec("mvdr_fd_bootstrap_oracle_noise_hard", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "hard"),
@@ -1239,7 +1268,10 @@ def _run_job(
         capture_trace=True,
         srp_override_provider=(
             None
-            if (method_spec.multi_target_tracked and method_spec.target_activity_mode == "estimated_target_activity")
+            if (
+                (method_spec.multi_target_tracked and method_spec.target_activity_mode == "estimated_target_activity")
+                or str(params.get("target_activity_detector_mode", "")) == "localization_peak_confidence"
+            )
             else _oracle_srp_override_provider(frame_states)
         ),
         initial_focus_direction_deg=(
@@ -1415,7 +1447,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--postfilter-queue-drop-oldest", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--fd-cov-ema-alpha", type=float, default=None)
     parser.add_argument("--fd-diag-load", type=float, default=None)
-    parser.add_argument("--fd-noise-covariance-mode", default=None, choices=["estimated_target_subtractive", "oracle_non_target_residual"])
+    parser.add_argument(
+        "--fd-noise-covariance-mode",
+        default=None,
+        choices=["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"],
+    )
     parser.add_argument("--target-activity-low-threshold", type=float, default=None)
     parser.add_argument("--target-activity-high-threshold", type=float, default=None)
     parser.add_argument("--target-activity-enter-frames", type=int, default=None)
@@ -1563,6 +1599,11 @@ def main() -> None:
                     else {}
                 ),
                 **(
+                    DEFAULT_TARGET_ACTIVITY_PRESETS["localization_peak_confidence"]
+                    if str(method) == "mvdr_fd_bootstrap_estimated_activity_localization"
+                    else {}
+                ),
+                **(
                     DEFAULT_TARGET_ACTIVITY_PRESETS["silero_fused"]
                     if str(method) in {
                         "mvdr_fd_bootstrap_estimated_activity_silero",
@@ -1583,7 +1624,14 @@ def main() -> None:
                 "target_activity_detector_backend": (
                     "silero_fused"
                     if str(method) in {"mvdr_fd_bootstrap_estimated_activity_silero", "mvdr_fd_zone_target_estimated_activity", "lcmv_top2_tracked_estimated"} or str(method).startswith("mvdr_fd_bootstrap_oracle_noise_")
+                    else "webrtc_fused"
+                    if str(method) == "mvdr_fd_bootstrap_estimated_activity_localization"
                     else str(params["target_activity_detector_backend"])
+                ),
+                "localization_backend": (
+                    "capon_1src"
+                    if str(method) == "mvdr_fd_bootstrap_estimated_activity_localization"
+                    else str(params["localization_backend"])
                 ),
                 "fd_noise_covariance_mode": (
                     "oracle_non_target_residual"
