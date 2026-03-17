@@ -12,7 +12,7 @@ try:
 except ImportError:  # pragma: no cover
     PyRNNoise = None
 
-from .contracts import FastPathAudioPacket, PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
+from .contracts import FastPathAudioPacket, NoiseModelUpdateSnapshot, PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
 from .localization_strategies.vad_utils import SileroVADGate, WebRTCVADGate
 from .shared_state import SharedPipelineState, Timer
 from .srp_tracker import SRPPeakTracker
@@ -92,6 +92,46 @@ def _frame_speech_activity(frame_mc: np.ndarray) -> float:
 def _rms_db(x: np.ndarray) -> float:
     rms = float(np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2) + 1e-12))
     return float(20.0 * np.log10(max(rms, 1e-12)))
+
+
+def _inactive_noise_model_update() -> dict:
+    return {"active": False, "sources": (), "reasons": (), "debug": {}}
+
+
+def _normalize_noise_model_update(info: dict | None) -> dict:
+    if not info:
+        return _inactive_noise_model_update()
+    return {
+        "active": bool(info.get("active", False)),
+        "sources": tuple(str(v) for v in info.get("sources", ())),
+        "reasons": tuple(str(v) for v in info.get("reasons", ())),
+        "debug": dict(info.get("debug", {})),
+    }
+
+
+def _merge_noise_model_updates(*infos: dict | None) -> dict:
+    active = False
+    sources: list[str] = []
+    reasons: list[str] = []
+    debug: dict[str, object] = {}
+    for raw in infos:
+        info = _normalize_noise_model_update(raw)
+        active = active or bool(info["active"])
+        for source in info["sources"]:
+            if source not in sources:
+                sources.append(source)
+        for reason in info["reasons"]:
+            if reason not in reasons:
+                reasons.append(reason)
+        if info["debug"]:
+            for key, value in info["debug"].items():
+                debug[key] = value
+    return {
+        "active": bool(active),
+        "sources": tuple(sources),
+        "reasons": tuple(reasons),
+        "debug": debug,
+    }
 
 
 def delay_and_sum_frame(
@@ -185,6 +225,10 @@ class _FDBufferedBeamformer:
         self._cached_null_doa_deg: float | None = None
         self._cached_last_target_active: bool | None = None
         self._last_weights_reused: bool = False
+        self._last_noise_model_update: dict = _inactive_noise_model_update()
+
+    def get_last_noise_model_update(self) -> dict:
+        return _normalize_noise_model_update(self._last_noise_model_update)
 
     def _should_refresh_weights(
         self,
@@ -409,6 +453,24 @@ class _FDBufferedBeamformer:
             self._cached_target_doa_deg = float(doa_deg)
             self._cached_null_doa_deg = None
             self._cached_last_target_active = bool(target_active)
+            if self._noise_covariance_mode() == "oracle_non_target_residual":
+                reason = "oracle_non_target_residual"
+            elif bool(target_active):
+                reason = "estimated_target_subtractive"
+            else:
+                reason = "target_inactive_direct_mix"
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (reason,),
+                "debug": {
+                    "beamforming_mode": "mvdr_fd",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                },
+            }
+        else:
+            self._last_noise_model_update = _inactive_noise_model_update()
         if self._cached_mvdr_weights is None:
             raise RuntimeError("MVDR weights were not initialized.")
         y_fft = np.einsum("fm,fm->f", np.conj(self._cached_mvdr_weights), x_fft)
@@ -475,6 +537,25 @@ class _FDBufferedBeamformer:
             self._cached_target_doa_deg = float(target_doa_deg)
             self._cached_null_doa_deg = float(null_doa_deg)
             self._cached_last_target_active = bool(target_active)
+            if self._noise_covariance_mode() == "oracle_non_target_residual":
+                reason = "oracle_non_target_residual"
+            elif bool(target_active):
+                reason = "estimated_target_subtractive"
+            else:
+                reason = "target_inactive_direct_mix"
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (reason, "lcmv_active"),
+                "debug": {
+                    "beamforming_mode": "lcmv_null",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                    "null_doa_deg": float(null_doa_deg),
+                },
+            }
+        else:
+            self._last_noise_model_update = _inactive_noise_model_update()
         if self._cached_lcmv_weights is None:
             raise RuntimeError("LCMV weights were not initialized.")
         y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
@@ -486,6 +567,16 @@ class _FDBufferedBeamformer:
         x = np.asarray(frame_mc, dtype=np.float64)
         x_fft = self._analysis_block(x)  # (F, M)
         self.rnn_gsc = self._update_covariance(self.rnn_gsc, x_fft, self._cov_alpha_from_activity(speech_activity))
+        self._last_noise_model_update = {
+            "active": True,
+            "sources": ("beamformer_rnn",),
+            "reasons": ("gsc_adaptive_noise_covariance",),
+            "debug": {
+                "beamforming_mode": "gsc_fd",
+                "speech_activity": float(speech_activity),
+                "covariance_alpha": float(self._cov_alpha_from_activity(speech_activity)),
+            },
+        }
         a = _steering_vector_f_domain(
             doa_deg=doa_deg,
             n_fft=self.analysis_n,
@@ -530,6 +621,7 @@ class _PostFilterState:
         self.speech_psd: np.ndarray | None = None
         self.gain_prev: np.ndarray | None = None
         self.post_snr_prev: np.ndarray | None = None
+        self.last_noise_model_update: dict = _inactive_noise_model_update()
 
     def _smooth_gain_frequency(self, gain: np.ndarray) -> np.ndarray:
         radius = max(0, int(self.cfg.postfilter_freq_smoothing_bins))
@@ -573,6 +665,16 @@ class _PostFilterState:
         noise_alpha_eff = n_alpha * ((1.0 - speech_presence) + (speech_presence * speech_update_scale))
         noise_observation = np.minimum(psd, self.noise_psd * (1.0 + (2.5 * noise_alpha_eff)) + 1e-12)
         self.noise_psd = (1.0 - noise_alpha_eff) * self.noise_psd + noise_alpha_eff * noise_observation
+        self.last_noise_model_update = {
+            "active": True,
+            "sources": ("postfilter_noise",),
+            "reasons": ("wiener_noise_psd_ema",),
+            "debug": {
+                "speech_presence": float(speech_presence),
+                "noise_alpha_eff": float(noise_alpha_eff),
+                "speech_activity": float(speech_activity),
+            },
+        }
 
         post_snr = np.maximum(psd / np.maximum(self.noise_psd, 1e-12) - 1.0, 0.0)
         dd_prior = dd_alpha * (self.gain_prev**2) * self.post_snr_prev + (1.0 - dd_alpha) * post_snr
@@ -692,25 +794,37 @@ class _PostFilterRouter:
             self._hybrid = _HybridPostFilter(self._wiener, self._rnnoise)
         else:
             self._hybrid = None
+        self._last_noise_model_update: dict = _inactive_noise_model_update()
 
     def process(self, beamformed: np.ndarray, *, speech_activity: float, frame_mc: np.ndarray | None = None, doa_deg: float | None = None) -> np.ndarray:
         if not bool(self.cfg.postfilter_enabled) or self.method == "off":
+            self._last_noise_model_update = _inactive_noise_model_update()
             return np.asarray(beamformed, dtype=np.float32)
         if self.method == "wiener_dd":
-            return self._wiener.process(beamformed, speech_activity=speech_activity)
+            out = self._wiener.process(beamformed, speech_activity=speech_activity)
+            self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
+            return out
         if self.method == "rnnoise":
             if self._rnnoise is None:
                 raise RuntimeError("RNNoise postfilter not initialized.")
+            self._last_noise_model_update = _inactive_noise_model_update()
             return self._rnnoise.process(beamformed, speech_activity=speech_activity)
         if self.method == "coherence_wiener":
             if self._coherence is None or frame_mc is None or doa_deg is None:
                 raise RuntimeError("coherence_wiener postfilter requires frame_mc and doa_deg.")
+            self._last_noise_model_update = _inactive_noise_model_update()
             return self._coherence.process(frame_mc, beamformed, doa_deg)
         if self.method == "wiener_then_rnnoise":
             if self._hybrid is None:
                 raise RuntimeError("Hybrid postfilter not initialized.")
-            return self._hybrid.process(beamformed, speech_activity=speech_activity)
+            out = self._hybrid.process(beamformed, speech_activity=speech_activity)
+            self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
+            return out
+        self._last_noise_model_update = _inactive_noise_model_update()
         return np.asarray(beamformed, dtype=np.float32)
+
+    def get_last_noise_model_update(self) -> dict:
+        return _normalize_noise_model_update(self._last_noise_model_update)
 
 
 class _PostFilterStageCore:
@@ -721,9 +835,11 @@ class _PostFilterStageCore:
         frame_samples: int,
         mic_geometry_xyz: np.ndarray,
         frame_sink: FrameSink,
+        shared_state: SharedPipelineState,
     ):
         self._cfg = cfg
         self._sink = frame_sink
+        self._state = shared_state
         self._rms_gain_ema = 1.0
         self._postfilter = _PostFilterRouter(
             frame_samples=frame_samples,
@@ -741,6 +857,20 @@ class _PostFilterStageCore:
                 frame_mc=None if packet.frame_mc is None else np.asarray(packet.frame_mc, dtype=np.float32),
                 doa_deg=None if packet.target_doa_deg is None else float(packet.target_doa_deg),
             )
+        postfilter_noise_update = self._postfilter.get_last_noise_model_update()
+        combined_noise_update = _merge_noise_model_updates(
+            {
+                "active": bool(packet.noise_model_update_active),
+                "sources": packet.noise_model_update_sources,
+                "reasons": packet.noise_model_update_reasons,
+                "debug": {} if packet.noise_model_update_debug is None else packet.noise_model_update_debug,
+            },
+            postfilter_noise_update,
+        )
+        packet.noise_model_update_active = bool(combined_noise_update["active"])
+        packet.noise_model_update_sources = tuple(combined_noise_update["sources"])
+        packet.noise_model_update_reasons = tuple(combined_noise_update["reasons"])
+        packet.noise_model_update_debug = dict(combined_noise_update["debug"])
         postfilter_ms = (perf_counter() - t0) * 1000.0
 
         t0 = perf_counter()
@@ -748,6 +878,15 @@ class _PostFilterStageCore:
         safety_ms = (perf_counter() - t0) * 1000.0
 
         t0 = perf_counter()
+        self._state.publish_noise_model_update_snapshot(
+            NoiseModelUpdateSnapshot(
+                timestamp_ms=(1000.0 * float(packet.start_sample) / max(int(packet.sample_rate_hz), 1)),
+                active=bool(packet.noise_model_update_active),
+                sources=tuple(packet.noise_model_update_sources),
+                reasons=tuple(packet.noise_model_update_reasons),
+                debug=None if packet.noise_model_update_debug is None else dict(packet.noise_model_update_debug),
+            )
+        )
         self._sink(out)
         sink_ms = (perf_counter() - t0) * 1000.0
         return float(postfilter_ms), float(safety_ms), float(sink_ms)
@@ -805,6 +944,7 @@ class PostFilterWorker(threading.Thread):
             frame_samples=frame_samples,
             mic_geometry_xyz=_center_mic_geometry_xyz(mic_geometry_xyz),
             frame_sink=frame_sink,
+            shared_state=shared_state,
         )
 
     def _next_packet(self) -> FastPathAudioPacket | None:
@@ -963,6 +1103,7 @@ class FastPathWorker(threading.Thread):
             frame_samples=frame_samples,
             mic_geometry_xyz=self._mic_geometry_xyz,
             frame_sink=self._sink,
+            shared_state=self._state,
         )
         self._srp_override_provider = srp_override_provider
         self._target_activity_override_provider = target_activity_override_provider
@@ -1410,6 +1551,12 @@ class FastPathWorker(threading.Thread):
         gain = float(10.0 ** (-attenuation_db / 20.0))
         return (np.asarray(out, dtype=np.float32) * gain).astype(np.float32, copy=False)
 
+    def _current_beamformer_noise_model_update(self) -> dict:
+        mode = str(self._cfg.beamforming_mode).strip().lower()
+        if mode in {"mvdr_fd", "gsc_fd"}:
+            return self._fd.get_last_noise_model_update()
+        return _inactive_noise_model_update()
+
     def _build_packet(
         self,
         *,
@@ -1429,6 +1576,7 @@ class FastPathWorker(threading.Thread):
         method = "off"
         if bool(self._cfg.postfilter_enabled):
             method = str(getattr(self._cfg, "postfilter_method", "off"))
+        noise_model_update = self._current_beamformer_noise_model_update()
         return FastPathAudioPacket.create(
             frame_index=int(self._frame_idx),
             start_sample=start_sample,
@@ -1447,6 +1595,10 @@ class FastPathWorker(threading.Thread):
             beamform_start_t=float(beamform_start_t),
             beamform_end_t=float(beamform_end_t),
             weights_reused=bool(getattr(self._fd, "_last_weights_reused", False)),
+            noise_model_update_active=bool(noise_model_update["active"]),
+            noise_model_update_sources=tuple(noise_model_update["sources"]),
+            noise_model_update_reasons=tuple(noise_model_update["reasons"]),
+            noise_model_update_debug=dict(noise_model_update["debug"]),
         )
 
     def _emit_postfilter_packet(self, packet: FastPathAudioPacket) -> float:
@@ -1750,6 +1902,15 @@ class FastPathWorker(threading.Thread):
                         enqueue_ms += self._emit_postfilter_packet(packet)
                     elif self._split_runtime_mode == "beamforming_only":
                         t0 = perf_counter()
+                        self._state.publish_noise_model_update_snapshot(
+                            NoiseModelUpdateSnapshot(
+                                timestamp_ms=(1000.0 * float(packet.start_sample) / max(int(packet.sample_rate_hz), 1)),
+                                active=bool(packet.noise_model_update_active),
+                                sources=tuple(packet.noise_model_update_sources),
+                                reasons=tuple(packet.noise_model_update_reasons),
+                                debug=None if packet.noise_model_update_debug is None else dict(packet.noise_model_update_debug),
+                            )
+                        )
                         if self._frame_packet_sink is not None:
                             self._frame_packet_sink(packet)
                         self._sink(packet.beamformed_audio)

@@ -334,6 +334,7 @@ class LiveDemoSession:
             pipe.shared_state.get_speaker_map_snapshot(),
             single_active=bool(self.req.single_active),
         )
+        noise_update = pipe.shared_state.get_noise_model_update_snapshot()
         speakers = [
             SpeakerStateItem(
                 speaker_id=int(row["speaker_id"]),
@@ -345,7 +346,13 @@ class LiveDemoSession:
             )
             for row in rows
         ]
-        msg = SpeakerStateMessage(timestamp_ms=_now_ms(), speakers=speakers, ground_truth=[]).model_dump()
+        msg = SpeakerStateMessage(
+            timestamp_ms=_now_ms(),
+            speakers=speakers,
+            ground_truth=[],
+            noise_model_update_active=bool(noise_update.active),
+            noise_model_update_sources=[str(v) for v in noise_update.sources],
+        ).model_dump()
         if self.req.processing_mode == "localize_and_beamform":
             self._apply_focus_control(speakers=speakers)
         nearest = self._nearest_speaker_id(speakers)
@@ -368,6 +375,7 @@ class LiveDemoSession:
         if pipe is None:
             return
         stats = pipe.stats_snapshot()
+        noise_update = pipe.shared_state.get_noise_model_update_snapshot()
         with self._lock:
             observations = list(self._observations)
             monitor_source = str(self._monitor_source)
@@ -395,6 +403,8 @@ class LiveDemoSession:
             startup_lock_ms=float(catchup["startup_lock_ms"]),
             reacquire_catchup_ms_median=float(catchup["reacquire_catchup_ms_median"]),
             nearest_change_catchup_ms_median=float(catchup["nearest_change_catchup_ms_median"]),
+            noise_model_update_active=bool(noise_update.active),
+            noise_model_update_sources=[str(v) for v in noise_update.sources],
         ).model_dump()
         msg["device_name"] = self._last_device_name
         msg["input_source"] = self.req.input_source

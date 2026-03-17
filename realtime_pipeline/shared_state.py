@@ -7,7 +7,7 @@ from time import perf_counter
 from types import MappingProxyType
 from typing import Mapping
 
-from .contracts import FocusControlSnapshot, SRPPeakSnapshot, SpeakerGainDirection
+from .contracts import FocusControlSnapshot, NoiseModelUpdateSnapshot, SRPPeakSnapshot, SpeakerGainDirection
 
 
 @dataclass(slots=True)
@@ -57,6 +57,7 @@ class SharedPipelineState:
         self._speaker_map_ref: Mapping[int, SpeakerGainDirection] = MappingProxyType({})
         self._srp_ref: SRPPeakSnapshot = SRPPeakSnapshot(timestamp_ms=0.0, peaks_deg=(), peak_scores=None)
         self._focus_control_ref: FocusControlSnapshot = FocusControlSnapshot()
+        self._noise_model_update_ref: NoiseModelUpdateSnapshot = NoiseModelUpdateSnapshot()
         self._stats = PipelineRuntimeStats()
         self._beamforming_samples_ms: deque[float] = deque(maxlen=4096)
         self._postfilter_samples_ms: deque[float] = deque(maxlen=4096)
@@ -95,6 +96,13 @@ class SharedPipelineState:
     def publish_focus_control(self, snapshot: FocusControlSnapshot) -> None:
         with self._lock:
             self._focus_control_ref = snapshot
+
+    def get_noise_model_update_snapshot(self) -> NoiseModelUpdateSnapshot:
+        return self._noise_model_update_ref
+
+    def publish_noise_model_update_snapshot(self, snapshot: NoiseModelUpdateSnapshot) -> None:
+        with self._lock:
+            self._noise_model_update_ref = snapshot
 
     def incr_fast_frame(self, elapsed_ms: float) -> None:
         with self._lock:

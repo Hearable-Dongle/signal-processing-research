@@ -749,6 +749,34 @@ button:disabled {
   padding: 0.5rem 0.75rem;
 }
 
+.noise-update-panel {
+  margin-bottom: 0.75rem;
+}
+
+.noise-update-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.noise-update-track {
+  position: relative;
+  width: 100%;
+  height: 18px;
+  background: linear-gradient(180deg, #fff, #f6ece3);
+  border: 1px solid #e4d2c4;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.noise-update-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #d37a2c, #c2461b);
+  opacity: 0.85;
+}
+
 .waveform-svg-wrap {
   width: 100%;
   height: 92px;

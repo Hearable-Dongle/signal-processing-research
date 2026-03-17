@@ -23,6 +23,7 @@ const DEFAULT_SAMPLE_RATE = 16000;
 const DEFAULT_LATENCY_MS = 220;
 const WAVEFORM_BINS = 800;
 type PlaybackSource = "beamformed_output" | "raw_mixed_input";
+type NoiseModelUpdateSegment = { startMs: number; endMs: number; active: boolean };
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
 function accumulateWaveformBin(samples: Float32Array): number {
@@ -135,6 +136,7 @@ export function RealtimeDemoPage({
   const [waveformBins, setWaveformBins] = useState<number[]>([]);
   const [rawWaveformBins, setRawWaveformBins] = useState<number[]>([]);
   const [playheadMs, setPlayheadMs] = useState(0);
+  const [noiseModelUpdateSegments, setNoiseModelUpdateSegments] = useState<NoiseModelUpdateSegment[]>([]);
   const [metricsExpanded, setMetricsExpanded] = useState(true);
   const [isOutputPlaybackActive, setIsOutputPlaybackActive] = useState(false);
   const [isOutputPlaybackPaused, setIsOutputPlaybackPaused] = useState(false);
@@ -149,6 +151,7 @@ export function RealtimeDemoPage({
   const capturedAudioRef = useRef<Float32Array[]>([]);
   const totalSamplesRef = useRef(0);
   const rawMixedTotalSamplesRef = useRef(0);
+  const lastNoiseModelUpdateRef = useRef<{ timestampMs: number | null; active: boolean }>({ timestampMs: null, active: false });
   const outputPlaybackRef = useRef<HTMLAudioElement | null>(null);
   const outputPlaybackUrlRef = useRef<string | null>(null);
 
@@ -200,8 +203,28 @@ export function RealtimeDemoPage({
     setGroundTruth([]);
     setPlayheadMs(0);
     setRawWaveformBins([]);
+    setNoiseModelUpdateSegments([]);
+    lastNoiseModelUpdateRef.current = { timestampMs: null, active: false };
     rawMixedTotalSamplesRef.current = 0;
     setStatus(nextStatus);
+  }
+
+  function appendNoiseModelUpdateState(timestampMs: number, active: boolean): void {
+    const prev = lastNoiseModelUpdateRef.current;
+    if (prev.timestampMs === null) {
+      lastNoiseModelUpdateRef.current = { timestampMs, active };
+      return;
+    }
+    const prevTimestampMs = prev.timestampMs;
+    if (timestampMs <= prev.timestampMs) {
+      lastNoiseModelUpdateRef.current = { timestampMs, active };
+      return;
+    }
+    setNoiseModelUpdateSegments((existing) => {
+      const next = [...existing, { startMs: prevTimestampMs, endMs: timestampMs, active: prev.active }];
+      return next.length > 400 ? next.slice(next.length - 400) : next;
+    });
+    lastNoiseModelUpdateRef.current = { timestampMs, active };
   }
 
   const ws = useMemo(
@@ -218,9 +241,13 @@ export function RealtimeDemoPage({
                 : msg.speakers;
             setSpeakers(displaySpeakers);
             setGroundTruth(msg.ground_truth ?? []);
+            appendNoiseModelUpdateState(Number(msg.timestamp_ms ?? 0), Boolean(msg.noise_model_update_active));
           }
           if (msg.type === "metrics") {
             setMetrics(msg);
+            if (typeof msg.noise_model_update_active === "boolean") {
+              appendNoiseModelUpdateState(Number(msg.timestamp_ms ?? 0), Boolean(msg.noise_model_update_active));
+            }
           }
           if (msg.type === "session_event") {
             if (msg.event === "stopped") {
@@ -524,6 +551,18 @@ export function RealtimeDemoPage({
 
   const totalDurationMs = (totalSamplesRef.current / audioSampleRateHz) * 1000;
   const rawMixedDurationMs = (rawMixedTotalSamplesRef.current / audioSampleRateHz) * 1000;
+  const noiseTimelineDurationMs = Math.max(totalDurationMs, rawMixedDurationMs, playheadMs);
+  const renderedNoiseModelUpdateSegments =
+    lastNoiseModelUpdateRef.current.timestampMs === null
+      ? noiseModelUpdateSegments
+      : [
+          ...noiseModelUpdateSegments,
+          {
+            startMs: lastNoiseModelUpdateRef.current.timestampMs,
+            endMs: noiseTimelineDurationMs,
+            active: lastNoiseModelUpdateRef.current.active,
+          },
+        ];
   const canPlayBeamformed = Boolean(sessionId) || capturedAudioRef.current.length > 0;
   const canPlayRawMixed = Boolean(sessionId);
 
@@ -581,6 +620,7 @@ export function RealtimeDemoPage({
         onToggleRawMixedPlayback={() => {
           void toggleOutputPlayback("raw_mixed_input");
         }}
+        noiseModelUpdateSegments={renderedNoiseModelUpdateSegments}
       />
 
       {selectedSpeakerId !== null && (

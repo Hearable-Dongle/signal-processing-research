@@ -45,6 +45,15 @@ class FocusControlSnapshot:
     user_boost_db: float = 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class NoiseModelUpdateSnapshot:
+    timestamp_ms: float = 0.0
+    active: bool = False
+    sources: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()
+    debug: dict | None = None
+
+
 @dataclass(slots=True)
 class FastPathAudioPacket:
     frame_index: int
@@ -70,6 +79,10 @@ class FastPathAudioPacket:
     weights_reused: bool = False
     queue_overflow_dropped: bool = False
     target_doa_missing: bool = False
+    noise_model_update_active: bool = False
+    noise_model_update_sources: tuple[str, ...] = ()
+    noise_model_update_reasons: tuple[str, ...] = ()
+    noise_model_update_debug: dict | None = None
 
     @classmethod
     def create(
@@ -92,6 +105,10 @@ class FastPathAudioPacket:
         beamform_end_t: float,
         capture_t_monotonic: float | None = None,
         weights_reused: bool = False,
+        noise_model_update_active: bool = False,
+        noise_model_update_sources: tuple[str, ...] = (),
+        noise_model_update_reasons: tuple[str, ...] = (),
+        noise_model_update_debug: dict | None = None,
     ) -> "FastPathAudioPacket":
         capture_ts = perf_counter() if capture_t_monotonic is None else float(capture_t_monotonic)
         return cls(
@@ -113,6 +130,10 @@ class FastPathAudioPacket:
             beamform_end_t=float(beamform_end_t),
             weights_reused=bool(weights_reused),
             target_doa_missing=bool(target_doa_deg is None),
+            noise_model_update_active=bool(noise_model_update_active),
+            noise_model_update_sources=tuple(str(v) for v in noise_model_update_sources),
+            noise_model_update_reasons=tuple(str(v) for v in noise_model_update_reasons),
+            noise_model_update_debug=None if noise_model_update_debug is None else dict(noise_model_update_debug),
         )
 
 

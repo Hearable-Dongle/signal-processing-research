@@ -49,6 +49,8 @@ export type SpeakerStateMessage = {
   timestamp_ms: number;
   speakers: Speaker[];
   ground_truth: GroundTruthSpeaker[];
+  noise_model_update_active?: boolean | null;
+  noise_model_update_sources?: string[] | null;
   beamforming?: BeamformingState | null;
 };
 
@@ -63,6 +65,8 @@ export type MetricsMessage = {
   startup_lock_ms: number;
   reacquire_catchup_ms_median: number;
   nearest_change_catchup_ms_median: number;
+  noise_model_update_active?: boolean | null;
+  noise_model_update_sources?: string[] | null;
 };
 
 export type SessionEventMessage = {
