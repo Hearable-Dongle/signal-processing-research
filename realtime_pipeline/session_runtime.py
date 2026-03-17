@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,7 @@ from collections.abc import Callable
 import numpy as np
 
 from mic_array_forwarder.models import SessionStartRequest
-from realtime_pipeline.contracts import PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
+from realtime_pipeline.contracts import FastPathAudioPacket, PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
 from realtime_pipeline.separation_backends import DominantSpeakerPassthroughBackend, MockSeparationBackend, build_default_backend
 
@@ -40,6 +41,9 @@ def build_pipeline_config_from_request(
         fast_frame_ms=max(10, int(req.localization_hop_ms)),
         slow_chunk_ms=int(req.slow_chunk_ms),
         slow_path_enabled=slow_path_enabled,
+        split_runtime_mode=str(req.split_runtime_mode),
+        postfilter_queue_max_frames=int(req.postfilter_queue_max_frames),
+        postfilter_queue_drop_oldest=bool(req.postfilter_queue_drop_oldest),
         max_speakers_hint=1 if assume_single_speaker else max(1, int(max_speakers_hint)),
         assume_single_speaker=assume_single_speaker,
         convtasnet_model_name=str(req.convtasnet_model_name),
@@ -221,6 +225,7 @@ def run_offline_session_pipeline(
     mic_geometry_xy = mic_geometry_xyz[:2, :].T if mic_geometry_xyz.shape[0] == 3 else mic_geometry_xyz[:, :2]
 
     enhanced_parts: list[np.ndarray] = []
+    captured_packets: list[FastPathAudioPacket] = []
     speaker_map_trace: list[dict[str, Any]] = []
     srp_trace: list[dict[str, Any]] = []
     pipe_holder: dict[str, RealtimeSpeakerPipeline] = {}
@@ -259,16 +264,41 @@ def run_offline_session_pipeline(
             }
         )
 
+    def _packet_sink(packet: FastPathAudioPacket) -> None:
+        captured_packets.append(packet)
+
+    split_mode = str(getattr(cfg, "split_runtime_mode", "monolithic")).strip().lower()
+    packet_iterator = None
+    if split_mode == "postfilter_only":
+        pre_cfg = copy.deepcopy(cfg)
+        pre_cfg.split_runtime_mode = "beamforming_only"
+        prepipe = RealtimeSpeakerPipeline(
+            config=pre_cfg,
+            mic_geometry_xyz=mic_geometry_xyz,
+            mic_geometry_xy=mic_geometry_xy,
+            frame_iterator=frame_iter_from_audio(audio, frame_samples),
+            frame_sink=lambda _x: None,
+            frame_packet_sink=_packet_sink,
+            separation_backend=build_separation_backend_for_request(req, pre_cfg),
+            srp_override_provider=srp_override_provider,
+            target_activity_override_provider=target_activity_override_provider,
+            oracle_noise_frame_provider=oracle_noise_frame_provider,
+        )
+        prepipe.run_blocking()
+        packet_iterator = iter(captured_packets)
+
     pipe = RealtimeSpeakerPipeline(
         config=cfg,
         mic_geometry_xyz=mic_geometry_xyz,
         mic_geometry_xy=mic_geometry_xy,
         frame_iterator=frame_iter_from_audio(audio, frame_samples),
+        frame_packet_iterator=packet_iterator,
         frame_sink=_sink,
         separation_backend=build_separation_backend_for_request(req, cfg),
         srp_override_provider=srp_override_provider,
         target_activity_override_provider=target_activity_override_provider,
         oracle_noise_frame_provider=oracle_noise_frame_provider,
+        frame_packet_sink=_packet_sink if split_mode == "beamforming_only" else None,
     )
     pipe_holder["pipe"] = pipe
     pipe.run_blocking()
@@ -300,10 +330,26 @@ def run_offline_session_pipeline(
         "slow_chunks": int(stats.slow_chunks),
         "speaker_map_updates": int(stats.speaker_map_updates),
         "dropped_fast_to_slow_frames": int(stats.dropped_fast_to_slow_frames),
+        "dropped_interstage_frames": int(stats.dropped_interstage_frames),
         "fast_avg_ms": float(stats.fast_avg_ms),
         "slow_avg_ms": float(stats.slow_avg_ms),
         "fast_rtf": float(stats.fast_rtf),
         "slow_rtf": float(stats.slow_rtf),
+        "beamforming_avg_ms": float(stats.beamforming_avg_ms),
+        "beamforming_rtf": float(stats.beamforming_rtf),
+        "beamforming_p50_ms": float(stats.beamforming_p50_ms),
+        "beamforming_p95_ms": float(stats.beamforming_p95_ms),
+        "postfilter_avg_ms": float(stats.postfilter_avg_ms),
+        "postfilter_rtf": float(stats.postfilter_rtf),
+        "postfilter_p50_ms": float(stats.postfilter_p50_ms),
+        "postfilter_p95_ms": float(stats.postfilter_p95_ms),
+        "pipeline_avg_ms": float(stats.pipeline_avg_ms),
+        "pipeline_rtf": float(stats.pipeline_rtf),
+        "interstage_queue_wait_p50_ms": float(stats.interstage_queue_wait_p50_ms),
+        "interstage_queue_wait_p95_ms": float(stats.interstage_queue_wait_p95_ms),
+        "interstage_queue_depth_max": int(stats.interstage_queue_depth_max),
+        "end_to_end_latency_p50_ms": float(stats.end_to_end_latency_p50_ms),
+        "end_to_end_latency_p95_ms": float(stats.end_to_end_latency_p95_ms),
         "fast_stage_avg_ms": {
             "srp": float(stats.fast_srp_avg_ms),
             "beamform": float(stats.fast_beamform_avg_ms),
@@ -319,6 +365,9 @@ def run_offline_session_pipeline(
         },
         "separation_mode": str(req.separation_mode),
         "beamforming_mode": str(cfg.beamforming_mode),
+        "split_runtime_mode": str(cfg.split_runtime_mode),
+        "postfilter_queue_max_frames": int(cfg.postfilter_queue_max_frames),
+        "postfilter_queue_drop_oldest": bool(cfg.postfilter_queue_drop_oldest),
         "mvdr_hop_ms": (None if cfg.mvdr_hop_ms is None else int(cfg.mvdr_hop_ms)),
         "fd_analysis_window_ms": float(cfg.fd_analysis_window_ms),
         "fd_cov_ema_alpha": float(cfg.fd_cov_ema_alpha),
