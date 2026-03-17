@@ -1,0 +1,574 @@
+{
+  "scene_name": "testing_specific_angles_zone_overlap_k2_scene01",
+  "scene_type": "testing_specific_angles_zone_overlap",
+  "scene_prefix": "testing_specific_angles_zone_overlap",
+  "speaker_count": 2,
+  "zone_target_speaker_id": 0,
+  "target_zone_center_deg": 35,
+  "target_zone_width_deg": 30.0,
+  "main_angle_deg": 35,
+  "secondary_angle_deg": 95,
+  "bootstrap_noise_only_window_sec": [
+    0.0,
+    4.0
+  ],
+  "bootstrap_reference_doa_deg": 35,
+  "target_radius_scale": 0.14,
+  "background_radius_scale": 0.46,
+  "background_noise_centroid_deg": 29.37228746640307,
+  "background_noise_all_centroid_deg": 229.2713153906864,
+  "background_babble_count": 10,
+  "background_babble_gain_range": [
+    0.02,
+    0.055
+  ],
+  "background_wham_gain": 0.08,
+  "target_activity_schedule": {
+    "speaker_0_windows_sec": [
+      [
+        4.0,
+        10.0
+      ]
+    ],
+    "speaker_1_windows_sec": [
+      [
+        6.0,
+        12.0
+      ]
+    ]
+  },
+  "assets": {
+    "speech": [
+      {
+        "speaker_id": 0,
+        "speaker_label": "3483",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/3483/119637/3483-119637-0034.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/target_0_seg000.wav",
+        "active_window_sec": [
+          4.0,
+          10.0
+        ],
+        "position_m": [
+          4.734,
+          3.7139,
+          1.45
+        ],
+        "angle_deg": 35
+      },
+      {
+        "speaker_id": 1,
+        "speaker_label": "6330",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/6330/66016/6330-66016-0033.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/target_1_seg000.wav",
+        "active_window_sec": [
+          6.0,
+          12.0
+        ],
+        "position_m": [
+          3.918,
+          4.1372,
+          1.45
+        ],
+        "angle_deg": 95
+      }
+    ],
+    "background_chatter": [
+      {
+        "background_speaker_id": 0,
+        "speaker_label": "2182",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-100/2182/150130/2182-150130-0016.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_00.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          6.7999,
+          4.1097,
+          1.3
+        ],
+        "angle_deg": 18,
+        "gain": 0.03623728001385175,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.7323164764646375,
+            "gain_start": 0.0340725701099582,
+            "gain_end": 0.0433238213664828
+          },
+          {
+            "start_sec": 3.7323164764646375,
+            "end_sec": 6.108812194572146,
+            "gain_start": 0.0433238213664828,
+            "gain_end": 0.03192289850846918
+          },
+          {
+            "start_sec": 6.108812194572146,
+            "end_sec": 9.794300175684187,
+            "gain_start": 0.03192289850846918,
+            "gain_end": 0.03511057534604751
+          },
+          {
+            "start_sec": 9.794300175684187,
+            "end_sec": 11.972411369100666,
+            "gain_start": 0.03511057534604751,
+            "gain_end": 0.036830011980365736
+          },
+          {
+            "start_sec": 11.972411369100666,
+            "end_sec": 12.0,
+            "gain_start": 0.036830011980365736,
+            "gain_end": 0.03441790910349735
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 1,
+        "speaker_label": "7276",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/7276/90847/7276-90847-0007.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_01.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          5.7304,
+          5.5817,
+          1.3
+        ],
+        "angle_deg": 54,
+        "gain": 0.052989894011001834,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 4.11424850161743,
+            "gain_start": 0.05125534439405153,
+            "gain_end": 0.05468690433744391
+          },
+          {
+            "start_sec": 4.11424850161743,
+            "end_sec": 8.22107842363361,
+            "gain_start": 0.05468690433744391,
+            "gain_end": 0.0533203560660636
+          },
+          {
+            "start_sec": 8.22107842363361,
+            "end_sec": 12.0,
+            "gain_start": 0.0533203560660636,
+            "gain_end": 0.057111347625578256
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 2,
+        "speaker_label": "887",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-100/887/123290/887-123290-0026.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_02.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          4.0,
+          5.8,
+          1.3
+        ],
+        "angle_deg": 90,
+        "gain": 0.04569512210163214,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.2231629770769947,
+            "gain_start": 0.05299640504530006,
+            "gain_end": 0.04110612726394219
+          },
+          {
+            "start_sec": 3.2231629770769947,
+            "end_sec": 5.604888311680547,
+            "gain_start": 0.04110612726394219,
+            "gain_end": 0.04983678527623874
+          },
+          {
+            "start_sec": 5.604888311680547,
+            "end_sec": 7.723319578504272,
+            "gain_start": 0.04983678527623874,
+            "gain_end": 0.043424431764843424
+          },
+          {
+            "start_sec": 7.723319578504272,
+            "end_sec": 10.072788554678942,
+            "gain_start": 0.043424431764843424,
+            "gain_end": 0.04589513423730987
+          },
+          {
+            "start_sec": 10.072788554678942,
+            "end_sec": 12.0,
+            "gain_start": 0.04589513423730987,
+            "gain_end": 0.047187376378162414
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 3,
+        "speaker_label": "6529",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-100/6529/62554/6529-62554-0015.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_03.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          2.2696,
+          5.5817,
+          1.3
+        ],
+        "angle_deg": 126,
+        "gain": 0.027533531186270246,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.080108973445443,
+            "gain_start": 0.026098282964185236,
+            "gain_end": 0.0293241781669739
+          },
+          {
+            "start_sec": 2.080108973445443,
+            "end_sec": 5.014403980651322,
+            "gain_start": 0.0293241781669739,
+            "gain_end": 0.029680244883511134
+          },
+          {
+            "start_sec": 5.014403980651322,
+            "end_sec": 7.286071407661993,
+            "gain_start": 0.029680244883511134,
+            "gain_end": 0.02353627024290828
+          },
+          {
+            "start_sec": 7.286071407661993,
+            "end_sec": 9.906807027375224,
+            "gain_start": 0.02353627024290828,
+            "gain_end": 0.027803127492812434
+          },
+          {
+            "start_sec": 9.906807027375224,
+            "end_sec": 12.0,
+            "gain_start": 0.027803127492812434,
+            "gain_end": 0.03121217324490747
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 4,
+        "speaker_label": "1058",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/1058/133263/1058-133263-0006.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_04.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          1.2001,
+          4.1097,
+          1.3
+        ],
+        "angle_deg": 162,
+        "gain": 0.05008463966966144,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.4837889811054805,
+            "gain_start": 0.05187037809044185,
+            "gain_end": 0.04295463980363593
+          },
+          {
+            "start_sec": 3.4837889811054805,
+            "end_sec": 6.771622423220952,
+            "gain_start": 0.04295463980363593,
+            "gain_end": 0.04861670600005144
+          },
+          {
+            "start_sec": 6.771622423220952,
+            "end_sec": 9.824822742429088,
+            "gain_start": 0.04861670600005144,
+            "gain_end": 0.04432994409517704
+          },
+          {
+            "start_sec": 9.824822742429088,
+            "end_sec": 12.0,
+            "gain_start": 0.04432994409517704,
+            "gain_end": 0.05909193578292795
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 5,
+        "speaker_label": "5029",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/5029/80197/5029-80197-0017.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_05.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          1.2001,
+          2.2903,
+          1.3
+        ],
+        "angle_deg": 198,
+        "gain": 0.03323701830533884,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.5034319070283697,
+            "gain_start": 0.028510517779154525,
+            "gain_end": 0.03713723029594868
+          },
+          {
+            "start_sec": 3.5034319070283697,
+            "end_sec": 6.215450878653093,
+            "gain_start": 0.03713723029594868,
+            "gain_end": 0.03741306534623771
+          },
+          {
+            "start_sec": 6.215450878653093,
+            "end_sec": 9.796338505568846,
+            "gain_start": 0.03741306534623771,
+            "gain_end": 0.03906037395563864
+          },
+          {
+            "start_sec": 9.796338505568846,
+            "end_sec": 12.0,
+            "gain_start": 0.03906037395563864,
+            "gain_end": 0.028744076057685232
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 6,
+        "speaker_label": "2999",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-360/2999/156968/2999-156968-0015.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_06.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          2.2696,
+          0.8183,
+          1.3
+        ],
+        "angle_deg": 234,
+        "gain": 0.04981027639633816,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.3674694689455453,
+            "gain_start": 0.05009560043646049,
+            "gain_end": 0.04489699728876535
+          },
+          {
+            "start_sec": 3.3674694689455453,
+            "end_sec": 6.208184045013949,
+            "gain_start": 0.04489699728876535,
+            "gain_end": 0.059556982261097985
+          },
+          {
+            "start_sec": 6.208184045013949,
+            "end_sec": 8.248760185870127,
+            "gain_start": 0.059556982261097985,
+            "gain_end": 0.050227575736155126
+          },
+          {
+            "start_sec": 8.248760185870127,
+            "end_sec": 12.0,
+            "gain_start": 0.050227575736155126,
+            "gain_end": 0.047985498934297176
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 7,
+        "speaker_label": "196",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-100/196/122150/196-122150-0005.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_07.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          4.0,
+          0.6,
+          1.3
+        ],
+        "angle_deg": 270,
+        "gain": 0.028459485929339584,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.1871920911892597,
+            "gain_start": 0.033932700739114856,
+            "gain_end": 0.025494646674248035
+          },
+          {
+            "start_sec": 3.1871920911892597,
+            "end_sec": 5.316495820355238,
+            "gain_start": 0.025494646674248035,
+            "gain_end": 0.03360768741419036
+          },
+          {
+            "start_sec": 5.316495820355238,
+            "end_sec": 7.9810193535429015,
+            "gain_start": 0.03360768741419036,
+            "gain_end": 0.029211452919665266
+          },
+          {
+            "start_sec": 7.9810193535429015,
+            "end_sec": 10.207773768767822,
+            "gain_start": 0.029211452919665266,
+            "gain_end": 0.02841051546970956
+          },
+          {
+            "start_sec": 10.207773768767822,
+            "end_sec": 12.0,
+            "gain_start": 0.02841051546970956,
+            "gain_end": 0.02919500847297362
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 8,
+        "speaker_label": "669",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-100/669/129074/669-129074-0008.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_08.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          5.7304,
+          0.8183,
+          1.3
+        ],
+        "angle_deg": 306,
+        "gain": 0.04165312141777112,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.6470890930934994,
+            "gain_start": 0.049562936841986226,
+            "gain_end": 0.042760712650656736
+          },
+          {
+            "start_sec": 2.6470890930934994,
+            "end_sec": 6.795916072616813,
+            "gain_start": 0.042760712650656736,
+            "gain_end": 0.04194004161761555
+          },
+          {
+            "start_sec": 6.795916072616813,
+            "end_sec": 9.494634506542287,
+            "gain_start": 0.04194004161761555,
+            "gain_end": 0.04787677991893037
+          },
+          {
+            "start_sec": 9.494634506542287,
+            "end_sec": 12.0,
+            "gain_start": 0.04787677991893037,
+            "gain_end": 0.0431423517937253
+          }
+        ]
+      },
+      {
+        "background_speaker_id": 9,
+        "speaker_label": "1355",
+        "source_path": "/home/mkeller/data/librimix/LibriSpeech/train-clean-100/1355/39947/1355-39947-0077.flac",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_chatter_09.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          6.7999,
+          2.2903,
+          1.3
+        ],
+        "angle_deg": 342,
+        "gain": 0.05243346708284487,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 2.753501591800464,
+            "gain_start": 0.04799073501439685,
+            "gain_end": 0.04513862741880682
+          },
+          {
+            "start_sec": 2.753501591800464,
+            "end_sec": 5.733095866575596,
+            "gain_start": 0.04513862741880682,
+            "gain_end": 0.0482421559817539
+          },
+          {
+            "start_sec": 5.733095866575596,
+            "end_sec": 9.433183205095325,
+            "gain_start": 0.0482421559817539,
+            "gain_end": 0.04789600647928259
+          },
+          {
+            "start_sec": 9.433183205095325,
+            "end_sec": 12.0,
+            "gain_start": 0.04789600647928259,
+            "gain_end": 0.0494036725873042
+          }
+        ]
+      }
+    ],
+    "noise": [
+      {
+        "noise_id": 0,
+        "source_path": "/home/mkeller/data/librimix/wham_noise/tt/421a010z_1.6848_444c020d_-1.6848.wav",
+        "render_asset_path": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_zone_overlap/testing_specific_angles_zone_overlap_k2_scene01/render_assets/background_wham_0.wav",
+        "active_window_sec": [
+          0.0,
+          12.0
+        ],
+        "position_m": [
+          1.8142,
+          1.0142,
+          1.2
+        ],
+        "angle_deg": 225,
+        "gain": 0.08,
+        "gain_segments": [
+          {
+            "start_sec": 0.0,
+            "end_sec": 3.3721516301159937,
+            "gain_start": 0.07910435668242399,
+            "gain_end": 0.08633503500327219
+          },
+          {
+            "start_sec": 3.3721516301159937,
+            "end_sec": 7.038424787961851,
+            "gain_start": 0.08633503500327219,
+            "gain_end": 0.07922597797705366
+          },
+          {
+            "start_sec": 7.038424787961851,
+            "end_sec": 11.669981585560476,
+            "gain_start": 0.07922597797705366,
+            "gain_end": 0.08343901251282405
+          },
+          {
+            "start_sec": 11.669981585560476,
+            "end_sec": 12.0,
+            "gain_start": 0.08343901251282405,
+            "gain_end": 0.09000182556287366
+          }
+        ]
+      }
+    ]
+  },
+  "summary_metrics": {
+    "bootstrap_noise_only_sec": 4.0,
+    "target_overlap_sec": 4.0
+  }
+}

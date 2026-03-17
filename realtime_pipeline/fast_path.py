@@ -987,6 +987,8 @@ class FastPathWorker(threading.Thread):
             int(getattr(config, "target_activity_update_every_n_fast_frames", 1)),
         )
         self._last_target_doa_deg: float | None = None
+        self._last_target_speaker_id: int | None = None
+        self._focus_hold_remaining_frames: int = 0
         backend = str(getattr(config, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
         if backend == "silero_fused":
             self._target_activity_vad = SileroVADGate(
@@ -1271,6 +1273,97 @@ class FastPathWorker(threading.Thread):
             return None, 0.0
         return float(best_doa), float(max(best_score, 0.0))
 
+    def _focused_direction_match_window_deg(self) -> float:
+        return float(max(1.0, getattr(self._cfg, "focus_direction_match_window_deg", 30.0)))
+
+    def _focus_control_active(self, focus) -> bool:
+        return bool(
+            getattr(focus, "focused_speaker_ids", None)
+            or getattr(focus, "focused_direction_deg", None) is not None
+        )
+
+    def _pick_focused_peak(
+        self,
+        peaks: list[float],
+        scores: list[float] | None,
+        matched_user_idx: int | None,
+        focus,
+    ) -> tuple[float | None, float, str]:
+        focus_direction = getattr(focus, "focused_direction_deg", None)
+        if focus_direction is None:
+            doa, score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
+            return doa, score, "fallback_peak"
+        window_deg = self._focused_direction_match_window_deg()
+        best_angle = None
+        best_key = None
+        best_score = 0.0
+        for idx, peak in enumerate(peaks):
+            if matched_user_idx is not None and int(idx) == int(matched_user_idx):
+                continue
+            dist = _angular_dist_deg(float(peak), float(focus_direction))
+            if dist > window_deg:
+                continue
+            score = 1.0 if scores is None or idx >= len(scores) else float(scores[idx])
+            continuity = 1.0 if (self._last_target_doa_deg is not None and _angular_dist_deg(float(peak), float(self._last_target_doa_deg)) <= 8.0) else 0.0
+            key = (continuity, -dist, score)
+            if best_key is None or key > best_key:
+                best_key = key
+                best_angle = float(peak)
+                best_score = float(score)
+        if best_angle is not None:
+            return best_angle, best_score, "focus_direction_peak"
+        return None, 0.0, "focus_direction_miss"
+
+    def _pick_focused_speaker(self, speaker_map, focus) -> tuple[float | None, float, int | None, str]:
+        focused_ids = None if getattr(focus, "focused_speaker_ids", None) is None else {int(v) for v in focus.focused_speaker_ids}
+        focus_direction = getattr(focus, "focused_direction_deg", None)
+        user_doa = self._suppressed_user_doa()
+        best_doa = None
+        best_sid = None
+        best_score = 0.0
+        best_key = None
+        for sid, item in speaker_map.items():
+            sid_i = int(sid)
+            angle = float(item.direction_degrees)
+            if user_doa is not None and _angular_dist_deg(angle, user_doa) <= float(self._cfg.suppressed_user_match_window_deg):
+                continue
+            if focused_ids is not None and sid_i not in focused_ids:
+                continue
+            dist = 0.0 if focus_direction is None else _angular_dist_deg(angle, float(focus_direction))
+            if focus_direction is not None and dist > self._focused_direction_match_window_deg():
+                continue
+            activity = float(getattr(item, "activity_confidence", 0.0))
+            conf = float(getattr(item, "confidence", 0.0))
+            gain = float(getattr(item, "gain_weight", 0.0))
+            continuity = 1.0 if (self._last_target_speaker_id is not None and sid_i == int(self._last_target_speaker_id)) else 0.0
+            key = (continuity, activity, conf, gain, -dist)
+            if best_key is None or key > best_key:
+                best_key = key
+                best_sid = sid_i
+                best_doa = angle
+                best_score = float(max(activity, conf, gain))
+        if best_sid is None or best_doa is None:
+            if focused_ids is not None:
+                return None, 0.0, None, "focus_speaker_id_miss"
+            if focus_direction is not None:
+                return None, 0.0, None, "focus_direction_speaker_miss"
+            return None, 0.0, None, "focus_inactive"
+        if focused_ids is not None:
+            return float(best_doa), float(best_score), int(best_sid), "focus_speaker_id"
+        if focus_direction is not None:
+            return float(best_doa), float(best_score), int(best_sid), "focus_direction_speaker"
+        return float(best_doa), float(best_score), int(best_sid), "fallback_speaker"
+
+    def _apply_target_hold(self, *, selected: bool) -> tuple[float | None, int | None, bool]:
+        if selected:
+            self._focus_hold_remaining_frames = max(0, int(getattr(self._cfg, "focus_target_hold_frames", 8)))
+            return self._last_target_doa_deg, self._last_target_speaker_id, False
+        if self._focus_hold_remaining_frames > 0 and self._last_target_doa_deg is not None:
+            self._focus_hold_remaining_frames -= 1
+            return float(self._last_target_doa_deg), self._last_target_speaker_id, True
+        self._focus_hold_remaining_frames = 0
+        return None, None, False
+
     def _suppression_debug(
         self,
         *,
@@ -1550,8 +1643,12 @@ class FastPathWorker(threading.Thread):
                     t0 = perf_counter()
                     ref_mode = str(self._cfg.fast_path_reference_mode).strip().lower()
                     suppression_mode = self._suppression_mode()
+                    focus = self._state.get_focus_control_snapshot()
+                    focus_active = self._focus_control_active(focus)
                     user_doa = self._suppressed_user_doa()
                     target_doa = None
+                    selected_target_speaker_id = None
+                    target_selection_mode = "unfocused"
                     target_activity_score = 0.0
                     target_activity_active = False
                     target_covariance_alpha = float(self._cfg.fd_cov_ema_alpha)
@@ -1561,9 +1658,20 @@ class FastPathWorker(threading.Thread):
                     fallback_beam_doa = self._last_target_doa_deg
                     if ref_mode == "srp_peak" and peaks:
                         speech_activity = _frame_speech_activity(x)
-                        target_doa, _target_score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
-                        if target_doa is None and not suppression_active:
-                            target_doa = float(peaks[0])
+                        if focus_active:
+                            target_doa, _target_score, target_selection_mode = self._pick_focused_peak(peaks, scores, matched_user_idx, focus)
+                        else:
+                            target_doa, _target_score = self._pick_non_user_peak(peaks, scores, matched_user_idx)
+                            target_selection_mode = "fallback_peak"
+                            if target_doa is None and not suppression_active:
+                                target_doa = float(peaks[0])
+                                target_selection_mode = "fallback_first_peak"
+                        if focus_active and target_doa is None:
+                            held_doa, held_sid, used_hold = self._apply_target_hold(selected=False)
+                            if used_hold and held_doa is not None:
+                                target_doa = float(held_doa)
+                                selected_target_speaker_id = held_sid
+                                target_selection_mode = "focus_hold"
                         target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
                             x,
                             target_doa_deg=target_doa,
@@ -1618,9 +1726,20 @@ class FastPathWorker(threading.Thread):
                         speech_activity = float(
                             max((float(getattr(v, "activity_confidence", 0.0)) for v in speaker_map.values()), default=0.0)
                         )
-                        target_doa, _target_score = self._pick_non_user_speaker(speaker_map)
-                        if target_doa is None and not suppression_active:
-                            target_doa, _target_score = self._pick_best_smoothed_speaker(speaker_map)
+                        if focus_active:
+                            target_doa, _target_score, selected_target_speaker_id, target_selection_mode = self._pick_focused_speaker(speaker_map, focus)
+                        else:
+                            target_doa, _target_score = self._pick_non_user_speaker(speaker_map)
+                            target_selection_mode = "fallback_speaker"
+                            if target_doa is None and not suppression_active:
+                                target_doa, _target_score = self._pick_best_smoothed_speaker(speaker_map)
+                                target_selection_mode = "fallback_smoothed_speaker"
+                        if focus_active and target_doa is None:
+                            held_doa, held_sid, used_hold = self._apply_target_hold(selected=False)
+                            if used_hold and held_doa is not None:
+                                target_doa = float(held_doa)
+                                selected_target_speaker_id = held_sid
+                                target_selection_mode = "focus_hold"
                         target_activity_score, target_activity_active, target_covariance_alpha = self._resolve_target_activity(
                             x,
                             target_doa_deg=target_doa,
@@ -1696,6 +1815,11 @@ class FastPathWorker(threading.Thread):
                         out = self._apply_soft_gate(out)
                         suppression_applied = True
                         suppression_strategy = "soft_gate"
+                    if target_doa is not None:
+                        self._last_target_doa_deg = float(target_doa)
+                        self._last_target_speaker_id = None if selected_target_speaker_id is None else int(selected_target_speaker_id)
+                        if focus_active:
+                            self._focus_hold_remaining_frames = max(0, int(getattr(self._cfg, "focus_target_hold_frames", 8)))
                     target_activity_debug = {
                         "mode": self._target_activity_mode(),
                         "score": float(target_activity_score),
@@ -1724,6 +1848,15 @@ class FastPathWorker(threading.Thread):
                                 **(dict(snapshot.debug or {})),
                                 "own_voice_suppression": suppression_info,
                                 "target_activity": target_activity_debug,
+                                "target_selection": {
+                                    "focus_active": bool(focus_active),
+                                    "focused_direction_deg": None if focus.focused_direction_deg is None else float(focus.focused_direction_deg),
+                                    "focused_speaker_ids": None if focus.focused_speaker_ids is None else [int(v) for v in focus.focused_speaker_ids],
+                                    "selected_target_speaker_id": None if selected_target_speaker_id is None else int(selected_target_speaker_id),
+                                    "selected_target_doa_deg": None if target_doa is None else float(target_doa),
+                                    "selection_mode": str(target_selection_mode),
+                                    "focus_hold_remaining_frames": int(self._focus_hold_remaining_frames),
+                                },
                             },
                         )
                         self._state.publish_srp_snapshot(snapshot)

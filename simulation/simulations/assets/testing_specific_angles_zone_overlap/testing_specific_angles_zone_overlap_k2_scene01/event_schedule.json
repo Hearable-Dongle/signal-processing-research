@@ -1,0 +1,22 @@
+{
+  "bootstrap_noise_only_window_sec": [
+    0.0,
+    4.0
+  ],
+  "target_zone_center_deg": 35,
+  "target_zone_width_deg": 30.0,
+  "speech_events": [
+    {
+      "speaker_id": 0,
+      "start_sec": 4.0,
+      "end_sec": 10.0,
+      "angle_deg": 35
+    },
+    {
+      "speaker_id": 1,
+      "start_sec": 6.0,
+      "end_sec": 12.0,
+      "angle_deg": 95
+    }
+  ]
+}

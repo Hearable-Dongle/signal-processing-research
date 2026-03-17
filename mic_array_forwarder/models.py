@@ -93,6 +93,8 @@ class FastPathConfig(BaseModel):
     suppressed_user_null_off_frames: int = 10
     suppressed_user_gate_attenuation_db: float = 18.0
     suppressed_user_target_conflict_deg: float = 30.0
+    focus_direction_match_window_deg: float = 30.0
+    focus_target_hold_frames: int = 8
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
 
@@ -437,6 +439,14 @@ class SessionStartRequest(BaseModel):
     @property
     def suppressed_user_target_conflict_deg(self) -> float:
         return float(self.fast_path.suppressed_user_target_conflict_deg)
+
+    @property
+    def focus_direction_match_window_deg(self) -> float:
+        return float(self.fast_path.focus_direction_match_window_deg)
+
+    @property
+    def focus_target_hold_frames(self) -> int:
+        return int(self.fast_path.focus_target_hold_frames)
 
     @property
     def output_normalization_enabled(self) -> bool:

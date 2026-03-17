@@ -183,6 +183,8 @@ class PipelineConfig:
     suppressed_user_gate_attenuation_db: float = 18.0
     suppressed_user_target_conflict_deg: float = 30.0
     speaker_match_window_deg: float = 25.0
+    focus_direction_match_window_deg: float = 30.0
+    focus_target_hold_frames: int = 8
     centroid_association_mode: str = "hard_window"  # one of: hard_window, gaussian
     centroid_association_sigma_deg: float = 10.0
     centroid_association_min_score: float = 0.15
