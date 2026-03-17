@@ -369,6 +369,7 @@ class DemoSession:
         if pipe is None:
             return
         speaker_map = pipe.shared_state.get_speaker_map_snapshot()
+        noise_update = pipe.shared_state.get_noise_model_update_snapshot()
         speakers = [
             SpeakerStateItem(
                 speaker_id=int(v.speaker_id),
@@ -382,7 +383,13 @@ class DemoSession:
         ]
         with self._lock:
             ground_truth = list(self._ground_truth_speakers)
-        msg = SpeakerStateMessage(timestamp_ms=_now_ms(), speakers=speakers, ground_truth=ground_truth).model_dump()
+        msg = SpeakerStateMessage(
+            timestamp_ms=_now_ms(),
+            speakers=speakers,
+            ground_truth=ground_truth,
+            noise_model_update_active=bool(noise_update.active),
+            noise_model_update_sources=[str(v) for v in noise_update.sources],
+        ).model_dump()
 
         if self.req.processing_mode == "localize_and_beamform":
             self._apply_focus_control(speakers=speakers)
@@ -407,6 +414,7 @@ class DemoSession:
         if pipe is None:
             return
         stats = pipe.stats_snapshot()
+        noise_update = pipe.shared_state.get_noise_model_update_snapshot()
         with self._lock:
             observations = list(self._observations)
         catchup = compute_catchup_metrics(observations, stable_frames=3)
@@ -430,6 +438,8 @@ class DemoSession:
             startup_lock_ms=float(catchup["startup_lock_ms"]),
             reacquire_catchup_ms_median=float(catchup["reacquire_catchup_ms_median"]),
             nearest_change_catchup_ms_median=float(catchup["nearest_change_catchup_ms_median"]),
+            noise_model_update_active=bool(noise_update.active),
+            noise_model_update_sources=[str(v) for v in noise_update.sources],
         ).model_dump()
         with self._lock:
             self._metrics_state = msg

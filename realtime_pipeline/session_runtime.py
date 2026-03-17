@@ -236,6 +236,7 @@ def run_offline_session_pipeline(
     captured_packets: list[FastPathAudioPacket] = []
     speaker_map_trace: list[dict[str, Any]] = []
     srp_trace: list[dict[str, Any]] = []
+    noise_model_update_trace: list[dict[str, Any]] = []
     pipe_holder: dict[str, RealtimeSpeakerPipeline] = {}
 
     def _sink(frame_mono: np.ndarray) -> None:
@@ -246,6 +247,7 @@ def run_offline_session_pipeline(
         if pipe is None:
             return
         srp = pipe.shared_state.get_srp_snapshot()
+        noise_update = pipe.shared_state.get_noise_model_update_snapshot()
         srp_trace.append(
             {
                 "frame_index": len(enhanced_parts) - 1,
@@ -255,6 +257,22 @@ def run_offline_session_pipeline(
                 "raw_peaks_deg": [float(v) for v in srp.raw_peaks_deg],
                 "raw_peak_scores": None if srp.raw_peak_scores is None else [float(v) for v in srp.raw_peak_scores],
                 "debug": None if srp.debug is None else dict(srp.debug),
+                "noise_model_update": {
+                    "active": bool(noise_update.active),
+                    "sources": [str(v) for v in noise_update.sources],
+                    "reasons": [str(v) for v in noise_update.reasons],
+                    "debug": None if noise_update.debug is None else dict(noise_update.debug),
+                },
+            }
+        )
+        noise_model_update_trace.append(
+            {
+                "frame_index": len(enhanced_parts) - 1,
+                "timestamp_ms": float(noise_update.timestamp_ms),
+                "active": bool(noise_update.active),
+                "sources": [str(v) for v in noise_update.sources],
+                "reasons": [str(v) for v in noise_update.reasons],
+                "debug": None if noise_update.debug is None else dict(noise_update.debug),
             }
         )
         rows = public_speaker_rows(
@@ -268,6 +286,12 @@ def run_offline_session_pipeline(
                 "raw_peaks_deg": [float(v) for v in srp.raw_peaks_deg],
                 "raw_peak_scores": [] if srp.raw_peak_scores is None else [float(v) for v in srp.raw_peak_scores],
                 "suppression": dict((srp.debug or {}).get("own_voice_suppression", {})),
+                "noise_model_update": {
+                    "active": bool(noise_update.active),
+                    "sources": [str(v) for v in noise_update.sources],
+                    "reasons": [str(v) for v in noise_update.reasons],
+                    "debug": None if noise_update.debug is None else dict(noise_update.debug),
+                },
                 "speakers": rows,
             }
         )
@@ -464,6 +488,7 @@ def run_offline_session_pipeline(
     if capture_trace:
         summary["speaker_map_trace"] = speaker_map_trace
         summary["srp_trace"] = srp_trace
+        summary["noise_model_update_trace"] = noise_model_update_trace
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)

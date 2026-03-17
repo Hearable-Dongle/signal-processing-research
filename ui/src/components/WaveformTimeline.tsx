@@ -14,6 +14,7 @@ type Props = {
   canPlayRawMixed: boolean;
   isRawMixedPlaying: boolean;
   onToggleRawMixedPlayback: () => void;
+  noiseModelUpdateSegments?: Array<{ startMs: number; endMs: number; active: boolean }>;
 };
 
 function formatMs(ms: number): string {
@@ -119,9 +120,29 @@ export function WaveformTimeline({
   canPlayRawMixed,
   isRawMixedPlaying,
   onToggleRawMixedPlayback,
+  noiseModelUpdateSegments = [],
 }: Props) {
+  const overlayDurationMs = Math.max(beamformedDurationMs, rawMixedDurationMs, 1);
   return (
     <section className="waveform-panel" aria-label="Waveform timeline">
+      <div className="noise-update-panel">
+        <div className="noise-update-title">Noise model update</div>
+        <div className="noise-update-track" aria-label="Noise model update timeline">
+          {noiseModelUpdateSegments
+            .filter((segment) => segment.active && segment.endMs > segment.startMs)
+            .map((segment, index) => {
+              const leftPct = Math.max(0, Math.min(100, (segment.startMs / overlayDurationMs) * 100));
+              const widthPct = Math.max(0, Math.min(100 - leftPct, ((segment.endMs - segment.startMs) / overlayDurationMs) * 100));
+              return (
+                <div
+                  key={`${segment.startMs}-${segment.endMs}-${index}`}
+                  className="noise-update-segment"
+                  style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                />
+              );
+            })}
+        </div>
+      </div>
       <WaveformTrack
         label="Beamformed output"
         bins={beamformedBins}

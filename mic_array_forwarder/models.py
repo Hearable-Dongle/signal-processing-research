@@ -578,6 +578,8 @@ class SpeakerStateMessage(BaseModel):
     timestamp_ms: float
     speakers: list[SpeakerStateItem]
     ground_truth: list[GroundTruthSpeakerItem] = []
+    noise_model_update_active: bool | None = None
+    noise_model_update_sources: list[str] | None = None
 
 
 class MetricsMessage(BaseModel):
@@ -591,6 +593,8 @@ class MetricsMessage(BaseModel):
     startup_lock_ms: float = 0.0
     reacquire_catchup_ms_median: float = 0.0
     nearest_change_catchup_ms_median: float = 0.0
+    noise_model_update_active: bool | None = None
+    noise_model_update_sources: list[str] | None = None
 
 
 class SessionEventMessage(BaseModel):
