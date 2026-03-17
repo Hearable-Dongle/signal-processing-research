@@ -1269,6 +1269,9 @@ class FastPathWorker(threading.Thread):
         self._rms_gain_ema = 1.0
         self._smoothed_doa_by_speaker: dict[int, float] = {}
         self._smoothed_gain_by_speaker: dict[int, float] = {}
+        self._single_active_localized_doa_deg: float | None = None
+        self._single_active_localized_score: float = 0.0
+        self._single_active_missing_frames: int = 0
         frame_samples = max(1, int(config.sample_rate_hz * config.fast_frame_ms / 1000))
         self._fd = _FDBufferedBeamformer(
             n_mics=self._mic_geometry_xyz.shape[1] if self._mic_geometry_xyz.shape[0] == 3 else self._mic_geometry_xyz.shape[0],
@@ -1687,53 +1690,61 @@ class FastPathWorker(threading.Thread):
             return None, 0.0
         return float(best_doa), float(max(best_score, 0.0))
 
-    def _collapse_to_single_active_speaker_map(self, speaker_map):
-        if not bool(getattr(self._cfg, "single_active", False)) or not speaker_map:
-            return speaker_map
-        smoothed_items = self._smooth_speaker_items(speaker_map)
-        if not smoothed_items:
-            return speaker_map
-        best_sid = None
-        best_doa = None
-        best_key = None
-        for sid_i, doa_sm, gain_sm in smoothed_items:
-            item = speaker_map.get(int(sid_i))
-            if item is None:
+    def _resolve_single_active_localization(
+        self,
+        *,
+        peaks: list[float],
+        scores: list[float] | None,
+        matched_user_idx: int | None,
+    ) -> tuple[list[float], list[float] | None, dict]:
+        hold_frames = max(1, int(getattr(self._cfg, "focus_target_hold_frames", 8)))
+        max_step = float(max(0.1, getattr(self._cfg, "doa_max_step_deg_per_frame", 10.0)))
+        alpha = float(np.clip(getattr(self._cfg, "doa_ema_alpha", 0.2), 0.0, 1.0))
+        best_peak = None
+        best_score = 0.0
+        for idx, peak in enumerate(peaks):
+            if matched_user_idx is not None and int(idx) == int(matched_user_idx):
                 continue
-            key = (
-                float(getattr(item, "activity_confidence", 0.0)),
-                float(getattr(item, "confidence", 0.0)),
-                float(gain_sm),
-                -int(sid_i),
-            )
-            if best_key is None or key > best_key:
-                best_key = key
-                best_sid = int(sid_i)
-                best_doa = float(doa_sm)
-        if best_sid is None or best_doa is None:
-            return speaker_map
-        item = speaker_map.get(best_sid)
-        if item is None:
-            return speaker_map
-        return {
-            int(best_sid): SpeakerGainDirection(
-                speaker_id=int(best_sid),
-                direction_degrees=float(best_doa),
-                gain_weight=float(getattr(item, "gain_weight", 0.0)),
-                confidence=float(getattr(item, "confidence", 0.0)),
-                active=True,
-                activity_confidence=float(getattr(item, "activity_confidence", 0.0)),
-                updated_at_ms=float(getattr(item, "updated_at_ms", 0.0)),
-                identity_confidence=float(getattr(item, "identity_confidence", 0.0)),
-                identity_maturity=str(getattr(item, "identity_maturity", "unknown")),
-                predicted_direction_deg=float(best_doa),
-                angular_velocity_deg_per_chunk=float(getattr(item, "angular_velocity_deg_per_chunk", 0.0)),
-                last_separator_stream_index=getattr(item, "last_separator_stream_index", None),
-                anchor_direction_deg=float(best_doa),
-                anchor_confidence=float(getattr(item, "anchor_confidence", 0.0)),
-                anchor_locked=bool(getattr(item, "anchor_locked", False)),
-                anchor_last_confirmed_ms=float(getattr(item, "anchor_last_confirmed_ms", 0.0)),
-            )
+            score = 1.0 if scores is None or idx >= len(scores) else float(scores[idx])
+            if best_peak is None or score > best_score:
+                best_peak = float(peak)
+                best_score = float(score)
+
+        used_hold = False
+        prev_doa = self._single_active_localized_doa_deg
+        if best_peak is None:
+            self._single_active_missing_frames += 1
+            if prev_doa is not None and self._single_active_missing_frames <= hold_frames:
+                best_peak = float(prev_doa)
+                best_score = float(self._single_active_localized_score)
+                used_hold = True
+            else:
+                self._single_active_localized_doa_deg = None
+                self._single_active_localized_score = 0.0
+                return [], None, {
+                    "single_active": True,
+                    "selected_peak_deg": None,
+                    "selected_peak_score": 0.0,
+                    "used_hold": False,
+                    "missing_frames": int(self._single_active_missing_frames),
+                }
+        else:
+            self._single_active_missing_frames = 0
+
+        if prev_doa is None or used_hold:
+            smoothed = float(best_peak)
+        else:
+            limited = _step_limited_angle(float(prev_doa), float(best_peak), max_step)
+            smoothed = _ema_angle(float(prev_doa), float(limited), alpha)
+        self._single_active_localized_doa_deg = float(smoothed)
+        self._single_active_localized_score = float(best_score)
+        return [float(smoothed)], [float(best_score)], {
+            "single_active": True,
+            "selected_peak_deg": float(best_peak),
+            "selected_peak_score": float(best_score),
+            "smoothed_peak_deg": float(smoothed),
+            "used_hold": bool(used_hold),
+            "missing_frames": int(self._single_active_missing_frames),
         }
 
     def _beamforming_mode(self) -> str:
@@ -2146,6 +2157,14 @@ class FastPathWorker(threading.Thread):
                     if override is None:
                         peaks, scores, tracker_debug = self._tracker.update(x)
                         matched_user_peak_deg, matched_user_score, matched_user_idx = self._match_user_peak(peaks, scores)
+                        if bool(getattr(self._cfg, "single_active", False)):
+                            peaks, scores, single_active_debug = self._resolve_single_active_localization(
+                                peaks=peaks,
+                                scores=scores,
+                                matched_user_idx=matched_user_idx,
+                            )
+                            tracker_debug = dict(tracker_debug)
+                            tracker_debug["single_active_localization"] = dict(single_active_debug)
                         suppression_active = self._update_own_voice_hysteresis(matched_user_peak_deg is not None)
                         tracker_debug = dict(tracker_debug)
                         tracker_debug["own_voice_suppression"] = self._suppression_debug(
@@ -2188,7 +2207,6 @@ class FastPathWorker(threading.Thread):
                     srp_ms += (perf_counter() - t0) * 1000.0
 
                     speaker_map = self._state.get_speaker_map_snapshot()
-                    speaker_map = self._collapse_to_single_active_speaker_map(speaker_map)
                     t0 = perf_counter()
                     ref_mode = str(self._cfg.fast_path_reference_mode).strip().lower()
                     suppression_mode = self._suppression_mode()
