@@ -197,8 +197,37 @@ class PipelineConfig:
     doa_max_step_deg_per_frame: float = 10.0
     # Frequency-domain covariance smoothing
     fd_analysis_window_ms: float = 20.0
-    fd_cov_ema_alpha: float = 0.08
-    fd_diag_load: float = 1e-3
+    # Defaults track the sensitivity-tuned Silero preset from
+    # `beamforming/benchmark/run_optuna_babble_bootstrap_mvdr.py`
+    # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
+    fd_cov_ema_alpha: float = 0.2965906035161345
+    fd_diag_load: float = 0.012141307774357374
+    fd_noise_covariance_mode: str = "estimated_target_subtractive"  # one of: estimated_target_subtractive, oracle_non_target_residual
+    target_activity_rnn_update_mode: str | None = None  # one of: oracle_target_activity, estimated_target_activity
+    target_activity_low_threshold: float = 0.10544774305969414
+    target_activity_high_threshold: float = 0.6508335197763335
+    target_activity_enter_frames: int = 1
+    target_activity_exit_frames: int = 7
+    fd_cov_update_scale_target_active: float = 0.4241144063085703
+    fd_cov_update_scale_target_inactive: float = 1.2561064512368887
+    target_activity_detector_mode: str = "target_blocker_calibrated"
+    target_activity_detector_backend: str = "silero_fused"
+    target_activity_blocker_offset_deg: float = 120.0
+    target_activity_bootstrap_only_calibration: bool = True
+    target_activity_ratio_floor_db: float = -1.5557320895954578
+    target_activity_ratio_active_db: float = 3.1884929640820445
+    target_activity_target_rms_floor_scale: float = 1.3476071785753891
+    target_activity_blocker_rms_floor_scale: float = 2.008344796225831
+    target_activity_speech_weight: float = 0.6051437824379127
+    target_activity_ratio_weight: float = 0.26508371615422194
+    target_activity_blocker_weight: float = 0.02224542260010827
+    target_activity_vad_mode: int = 1
+    target_activity_vad_hangover_frames: int = 2
+    target_activity_noise_floor_rise_alpha: float = 0.024462802690520202
+    target_activity_noise_floor_fall_alpha: float = 0.16301379312525116
+    target_activity_noise_floor_margin_scale: float = 2.33081911386449
+    target_activity_rms_scale: float = 4.305504476133645
+    target_activity_score_exponent: float = 0.15763482134447154
     fd_speech_cov_update_scale: float = 0.25
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True

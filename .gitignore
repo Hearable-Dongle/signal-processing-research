@@ -8,6 +8,7 @@ outputs/
 .install_logs/
 verification/output/
 beamforming/benchmark/results*/
+beamforming/benchmark/_*/
 beamforming/benchmark/__pycache__/
 beamforming/output/integration_plan_impl_smoke/
 beamforming/output/localization_integration_smoke/
@@ -17,5 +18,9 @@ beamforming/output/localization_integration_smoke_localized/
 beamforming/output/loudness_fix_smoke/
 beamforming/output/loudness_fix_smoke_localized/
 beamforming/output/loudness_fix_smoke_oracle/
-
+localization/output/
+realtime_pipeline/output/
+simulation/output/
+overnight_runs/
+recordings/
 

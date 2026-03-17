@@ -1,0 +1,56 @@
+{
+    "room": {
+        "dimensions": [
+            8.0,
+            6.4,
+            3.1
+        ],
+        "absorption": 0.5
+    },
+    "microphone_array": {
+        "mic_center": [
+            4.0,
+            3.2,
+            1.45
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4,
+        "mic_positions": null
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    4.0,
+                    4.992,
+                    1.45
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_silence_gaps/testing_specific_angles_silence_gaps_k2_scene03/render_assets/speaker_0_seg000.wav",
+                "gain": 1.0,
+                "classification": "speech"
+            },
+            {
+                "loc": [
+                    2.208,
+                    3.2,
+                    1.45
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_silence_gaps/testing_specific_angles_silence_gaps_k2_scene03/render_assets/speaker_1_seg000.wav",
+                "gain": 1.0,
+                "classification": "speech"
+            },
+            {
+                "loc": [
+                    5.4952,
+                    1.7048,
+                    1.2
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_silence_gaps/testing_specific_angles_silence_gaps_k2_scene03/render_assets/noise_0_seg000.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            }
+        ],
+        "duration": 10.0,
+        "fs": 16000
+    }
+}

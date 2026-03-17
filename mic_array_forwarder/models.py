@@ -28,6 +28,37 @@ class FastPathConfig(BaseModel):
     ] = "srp_phat_localization"
     beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum"] = "mvdr_fd"
     fd_analysis_window_ms: float = 20.0
+    # Defaults track the sensitivity-tuned Silero preset from
+    # `beamforming/benchmark/run_optuna_babble_bootstrap_mvdr.py`
+    # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
+    fd_cov_ema_alpha: float = 0.2965906035161345
+    fd_diag_load: float = 0.012141307774357374
+    fd_noise_covariance_mode: Literal["estimated_target_subtractive", "oracle_non_target_residual"] = "estimated_target_subtractive"
+    target_activity_rnn_update_mode: Literal["oracle_target_activity", "estimated_target_activity"] | None = None
+    target_activity_low_threshold: float = 0.10544774305969414
+    target_activity_high_threshold: float = 0.6508335197763335
+    target_activity_enter_frames: int = 1
+    target_activity_exit_frames: int = 7
+    fd_cov_update_scale_target_active: float = 0.4241144063085703
+    fd_cov_update_scale_target_inactive: float = 1.2561064512368887
+    target_activity_detector_mode: Literal["target_blocker_calibrated"] = "target_blocker_calibrated"
+    target_activity_detector_backend: Literal["webrtc_fused", "silero_fused"] = "silero_fused"
+    target_activity_blocker_offset_deg: float = 120.0
+    target_activity_bootstrap_only_calibration: bool = True
+    target_activity_ratio_floor_db: float = -1.5557320895954578
+    target_activity_ratio_active_db: float = 3.1884929640820445
+    target_activity_target_rms_floor_scale: float = 1.3476071785753891
+    target_activity_blocker_rms_floor_scale: float = 2.008344796225831
+    target_activity_speech_weight: float = 0.6051437824379127
+    target_activity_ratio_weight: float = 0.26508371615422194
+    target_activity_blocker_weight: float = 0.02224542260010827
+    target_activity_vad_mode: int = 1
+    target_activity_vad_hangover_frames: int = 2
+    target_activity_noise_floor_rise_alpha: float = 0.024462802690520202
+    target_activity_noise_floor_fall_alpha: float = 0.16301379312525116
+    target_activity_noise_floor_margin_scale: float = 2.33081911386449
+    target_activity_rms_scale: float = 4.305504476133645
+    target_activity_score_exponent: float = 0.15763482134447154
     assume_single_speaker: bool = False
     capon_spectrum_ema_alpha: float = 0.78
     capon_peak_min_sharpness: float = 0.12
@@ -137,6 +168,119 @@ class SessionStartRequest(BaseModel):
     @property
     def fd_analysis_window_ms(self) -> float:
         return float(self.fast_path.fd_analysis_window_ms)
+
+    @property
+    def fd_cov_ema_alpha(self) -> float:
+        return float(self.fast_path.fd_cov_ema_alpha)
+
+    @property
+    def fd_diag_load(self) -> float:
+        return float(self.fast_path.fd_diag_load)
+
+    @property
+    def fd_noise_covariance_mode(self) -> str:
+        return str(self.fast_path.fd_noise_covariance_mode)
+
+    @property
+    def target_activity_rnn_update_mode(self) -> str | None:
+        value = self.fast_path.target_activity_rnn_update_mode
+        return None if value is None else str(value)
+
+    @property
+    def target_activity_low_threshold(self) -> float:
+        return float(self.fast_path.target_activity_low_threshold)
+
+    @property
+    def target_activity_high_threshold(self) -> float:
+        return float(self.fast_path.target_activity_high_threshold)
+
+    @property
+    def target_activity_enter_frames(self) -> int:
+        return int(self.fast_path.target_activity_enter_frames)
+
+    @property
+    def target_activity_exit_frames(self) -> int:
+        return int(self.fast_path.target_activity_exit_frames)
+
+    @property
+    def fd_cov_update_scale_target_active(self) -> float:
+        return float(self.fast_path.fd_cov_update_scale_target_active)
+
+    @property
+    def fd_cov_update_scale_target_inactive(self) -> float:
+        return float(self.fast_path.fd_cov_update_scale_target_inactive)
+
+    @property
+    def target_activity_detector_mode(self) -> str:
+        return str(self.fast_path.target_activity_detector_mode)
+
+    @property
+    def target_activity_detector_backend(self) -> str:
+        return str(self.fast_path.target_activity_detector_backend)
+
+    @property
+    def target_activity_blocker_offset_deg(self) -> float:
+        return float(self.fast_path.target_activity_blocker_offset_deg)
+
+    @property
+    def target_activity_bootstrap_only_calibration(self) -> bool:
+        return bool(self.fast_path.target_activity_bootstrap_only_calibration)
+
+    @property
+    def target_activity_ratio_floor_db(self) -> float:
+        return float(self.fast_path.target_activity_ratio_floor_db)
+
+    @property
+    def target_activity_ratio_active_db(self) -> float:
+        return float(self.fast_path.target_activity_ratio_active_db)
+
+    @property
+    def target_activity_target_rms_floor_scale(self) -> float:
+        return float(self.fast_path.target_activity_target_rms_floor_scale)
+
+    @property
+    def target_activity_blocker_rms_floor_scale(self) -> float:
+        return float(self.fast_path.target_activity_blocker_rms_floor_scale)
+
+    @property
+    def target_activity_speech_weight(self) -> float:
+        return float(self.fast_path.target_activity_speech_weight)
+
+    @property
+    def target_activity_ratio_weight(self) -> float:
+        return float(self.fast_path.target_activity_ratio_weight)
+
+    @property
+    def target_activity_blocker_weight(self) -> float:
+        return float(self.fast_path.target_activity_blocker_weight)
+
+    @property
+    def target_activity_vad_mode(self) -> int:
+        return int(self.fast_path.target_activity_vad_mode)
+
+    @property
+    def target_activity_vad_hangover_frames(self) -> int:
+        return int(self.fast_path.target_activity_vad_hangover_frames)
+
+    @property
+    def target_activity_noise_floor_rise_alpha(self) -> float:
+        return float(self.fast_path.target_activity_noise_floor_rise_alpha)
+
+    @property
+    def target_activity_noise_floor_fall_alpha(self) -> float:
+        return float(self.fast_path.target_activity_noise_floor_fall_alpha)
+
+    @property
+    def target_activity_noise_floor_margin_scale(self) -> float:
+        return float(self.fast_path.target_activity_noise_floor_margin_scale)
+
+    @property
+    def target_activity_rms_scale(self) -> float:
+        return float(self.fast_path.target_activity_rms_scale)
+
+    @property
+    def target_activity_score_exponent(self) -> float:
+        return float(self.fast_path.target_activity_score_exponent)
 
     @property
     def assume_single_speaker(self) -> bool:

@@ -120,6 +120,7 @@ def run_simulation_pipeline(
         ),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
+        target_activity_rnn_update_mode="estimated_target_activity" if str(beamforming_mode).strip().lower() == "mvdr_fd" else None,
         output_normalization_enabled=bool(output_normalization_enabled),
         output_allow_amplification=bool(output_allow_amplification),
         srp_prior_enabled=bool(robust_mode),

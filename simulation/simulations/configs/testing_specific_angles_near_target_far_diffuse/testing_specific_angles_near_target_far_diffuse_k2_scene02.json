@@ -1,0 +1,156 @@
+{
+    "room": {
+        "dimensions": [
+            8.0,
+            6.4,
+            3.1
+        ],
+        "absorption": 0.5
+    },
+    "microphone_array": {
+        "mic_center": [
+            4.0,
+            3.2,
+            1.45
+        ],
+        "mic_radius": 0.1,
+        "mic_count": 4,
+        "mic_positions": null
+    },
+    "audio": {
+        "sources": [
+            {
+                "loc": [
+                    4.3065,
+                    4.042,
+                    1.45
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/target_0_seg000.wav",
+                "gain": 1.0,
+                "classification": "speech"
+            },
+            {
+                "loc": [
+                    3.6935,
+                    4.042,
+                    1.45
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/target_1_seg000.wav",
+                "gain": 1.0,
+                "classification": "speech"
+            },
+            {
+                "loc": [
+                    6.3817,
+                    4.9304,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_00.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    4.9097,
+                    5.8,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_01.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    3.0903,
+                    5.8,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_02.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    1.6183,
+                    4.9304,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_03.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    1.056,
+                    3.2,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_04.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    1.6183,
+                    1.4696,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_05.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    3.0903,
+                    0.6,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_06.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    4.9097,
+                    0.6,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_07.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    6.3817,
+                    1.4696,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_08.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    6.944,
+                    3.2,
+                    1.3
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_chatter_09.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            },
+            {
+                "loc": [
+                    4.0,
+                    0.6,
+                    1.2
+                ],
+                "audio": "/home/mkeller/mkeller/signal-processing-research/simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse/testing_specific_angles_near_target_far_diffuse_k2_scene02/render_assets/background_wham_0.wav",
+                "gain": 1.0,
+                "classification": "noise"
+            }
+        ],
+        "duration": 12.0,
+        "fs": 16000
+    }
+}
