@@ -72,7 +72,7 @@ export type MetricsMessage = {
 export type SessionEventMessage = {
   schema_version: "v1";
   type: "session_event";
-  event: "started" | "stopped" | "error";
+  event: "started" | "stopped" | "error" | "device_connected";
   detail: string;
   timestamp_ms: number;
 };
