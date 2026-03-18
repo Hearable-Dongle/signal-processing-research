@@ -75,7 +75,7 @@ class FastPathConfig(BaseModel):
     capon_hold_frames: int = 2
     enhancement_tier: Literal["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"] = "custom"
     output_enhancer_mode: Literal["off", "wiener"] = "off"
-    postfilter_method: Literal["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass"] = "off"
+    postfilter_method: Literal["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"] = "off"
     postfilter_enabled: bool = True
     postfilter_noise_ema_alpha: float = 0.08
     postfilter_speech_ema_alpha: float = 0.12

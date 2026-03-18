@@ -64,6 +64,7 @@ class FastPathAudioPacket:
     beamformed_audio: np.ndarray
     postfilter_wiener_audio: np.ndarray | None = None
     postfilter_rnnoise_audio: np.ndarray | None = None
+    postfilter_bandpass_audio: np.ndarray | None = None
     postfilter_output_audio: np.ndarray | None = None
     frame_mc: np.ndarray | None = None
     target_doa_deg: float | None = None
@@ -123,6 +124,7 @@ class FastPathAudioPacket:
             beamformed_audio=np.asarray(beamformed_audio, dtype=np.float32).reshape(-1).copy(),
             postfilter_wiener_audio=None,
             postfilter_rnnoise_audio=None,
+            postfilter_bandpass_audio=None,
             postfilter_output_audio=None,
             frame_mc=None if frame_mc is None else np.asarray(frame_mc, dtype=np.float32).copy(),
             target_doa_deg=None if target_doa_deg is None else float(target_doa_deg),
@@ -346,7 +348,7 @@ class PipelineConfig:
     fd_speech_cov_update_scale: float = 0.25
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True
-    postfilter_method: str = "off"  # one of: off, wiener_dd, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass, rnnoise_then_voice_bandpass
+    postfilter_method: str = "off"  # one of: off, wiener_dd, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass, rnnoise_then_voice_bandpass, wiener_then_voice_bandpass
     postfilter_noise_ema_alpha: float = 0.08
     postfilter_speech_ema_alpha: float = 0.12
     postfilter_gain_floor: float = 0.22

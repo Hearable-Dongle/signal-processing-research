@@ -1240,10 +1240,12 @@ class _PostFilterRouter:
             self._rnnoise = _RNNoisePostFilter(cfg)
         if self.method == "coherence_wiener":
             self._coherence = _CoherenceWienerPostFilter(cfg, mic_geometry_xyz)
-        if self.method == "voice_bandpass":
+        if self.method in {"voice_bandpass", "wiener_then_voice_bandpass", "rnnoise_then_voice_bandpass"}:
             self._voice_bandpass = _VoiceBandpassPostFilter(cfg)
         if self.method == "wiener_then_rnnoise":
             self._hybrid = _HybridPostFilter(self._wiener, self._rnnoise)
+        elif self.method == "wiener_then_voice_bandpass":
+            self._hybrid = _HybridPostFilter(self._wiener, self._voice_bandpass)
         elif self.method == "rnnoise_then_voice_bandpass":
             self._hybrid = _HybridPostFilter(self._rnnoise, self._voice_bandpass)
         else:
@@ -1290,6 +1292,17 @@ class _PostFilterRouter:
                 raise RuntimeError("voice_bandpass postfilter not initialized.")
             self._last_noise_model_update = _inactive_noise_model_update()
             out = self._voice_bandpass.process(beamformed, speech_activity=speech_activity)
+            stages["post_bandpass"] = np.asarray(out, dtype=np.float32)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
+        if self.method == "wiener_then_voice_bandpass":
+            if self._wiener is None or self._voice_bandpass is None:
+                raise RuntimeError("Wiener->voice_bandpass postfilter not initialized.")
+            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity)
+            out = self._voice_bandpass.process(post_wiener, speech_activity=speech_activity)
+            self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
+            stages["post_wiener"] = np.asarray(post_wiener, dtype=np.float32)
+            stages["post_bandpass"] = np.asarray(out, dtype=np.float32)
             stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
             return out, stages
         if self.method == "rnnoise_then_voice_bandpass":
@@ -1299,6 +1312,7 @@ class _PostFilterRouter:
             out = self._voice_bandpass.process(post_rnnoise, speech_activity=speech_activity)
             self._last_noise_model_update = _inactive_noise_model_update()
             stages["post_rnnoise"] = np.asarray(post_rnnoise, dtype=np.float32)
+            stages["post_bandpass"] = np.asarray(out, dtype=np.float32)
             stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
             return out, stages
         if self.method == "wiener_then_rnnoise":
@@ -1371,6 +1385,11 @@ class _PostFilterStageCore:
             None
             if postfilter_stages.get("post_rnnoise") is None
             else np.asarray(postfilter_stages["post_rnnoise"], dtype=np.float32).reshape(-1).copy()
+        )
+        packet.postfilter_bandpass_audio = (
+            None
+            if postfilter_stages.get("post_bandpass") is None
+            else np.asarray(postfilter_stages["post_bandpass"], dtype=np.float32).reshape(-1).copy()
         )
         packet.postfilter_output_audio = np.asarray(postfilter_stages.get("postfilter_output", out), dtype=np.float32).reshape(-1).copy()
         combined_noise_update = _merge_noise_model_updates(

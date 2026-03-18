@@ -378,6 +378,18 @@ def run_offline_session_pipeline(
                 axis=0,
             )[: audio.shape[0]]
             sf.write(out_root / "post_rnnoise.wav", post_rnnoise, int(cfg.sample_rate_hz))
+        if any(packet.postfilter_bandpass_audio is not None for packet in captured_packets):
+            post_bandpass = np.concatenate(
+                [
+                    np.asarray(
+                        packet.beamformed_audio if packet.postfilter_bandpass_audio is None else packet.postfilter_bandpass_audio,
+                        dtype=np.float32,
+                    ).reshape(-1)
+                    for packet in captured_packets
+                ],
+                axis=0,
+            )[: audio.shape[0]]
+            sf.write(out_root / "post_bandpass.wav", post_bandpass, int(cfg.sample_rate_hz))
 
     final_rows = public_speaker_rows(
         pipe.shared_state.get_speaker_map_snapshot(),

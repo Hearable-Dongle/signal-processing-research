@@ -1162,6 +1162,7 @@ def _run_recording_method_job(
         "post_beamforming": run_dir / "post_beamforming.wav",
         "post_wiener": run_dir / "post_wiener.wav",
         "post_rnnoise": run_dir / "post_rnnoise.wav",
+        "post_bandpass": run_dir / "post_bandpass.wav",
     }
     stage_audio: dict[str, np.ndarray] = {}
     for stage_name, stage_path in stage_paths.items():
@@ -1257,6 +1258,7 @@ def _run_recording_method_job(
             ("post_beamforming", stage_audio.get("post_beamforming", proc)[:n]),
             *([("post_wiener", stage_audio["post_wiener"][:n])] if "post_wiener" in stage_audio else []),
             *([("post_rnnoise", stage_audio["post_rnnoise"][:n])] if "post_rnnoise" in stage_audio else []),
+            *([("post_bandpass", stage_audio["post_bandpass"][:n])] if "post_bandpass" in stage_audio else []),
             ("final", proc[:n]),
         ],
         fs,
@@ -1286,6 +1288,14 @@ def _run_recording_method_job(
             viz_dir / "psd_post_rnnoise.png",
             f"{label} post rnnoise PSD",
             color="#ee9b00",
+        )
+    if "post_bandpass" in stage_audio:
+        _plot_single_psd(
+            stage_audio["post_bandpass"][:n],
+            fs,
+            viz_dir / "psd_post_bandpass.png",
+            f"{label} post bandpass PSD",
+            color="#94d2bd",
         )
     _plot_single_psd(proc[:n], fs, viz_dir / "psd_final.png", f"{label} final PSD", color="#bb3e03")
     _plot_speaker_timeline(
@@ -1345,7 +1355,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enhancement-tier", choices=["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"], default="custom")
     parser.add_argument("--output-enhancer-mode", choices=["off", "wiener"], default="off")
     parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass"], default="off")
+    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"], default="off")
     parser.add_argument("--postfilter-noise-ema-alpha", type=float, default=0.08)
     parser.add_argument("--postfilter-speech-ema-alpha", type=float, default=0.12)
     parser.add_argument("--postfilter-gain-floor", type=float, default=0.22)
