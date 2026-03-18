@@ -1066,8 +1066,14 @@ def _run_recording_method_job(
     postfilter_gain_max_step_db: float,
     rnnoise_wet_mix: float,
     rnnoise_output_lowpass_cutoff_hz: float,
+    rnnoise_output_notch_freq_hz: float,
+    rnnoise_output_notch_q: float,
     rnnoise_residual_ema_enabled: bool,
     rnnoise_residual_ema_alpha: float,
+    beamformer_snapshot_frame_indices: tuple[int, ...] | None,
+    delay_sum_update_min_delta_deg: float,
+    delay_sum_crossfade_frames: int,
+    delay_sum_use_smoothed_doa: bool,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -1161,6 +1167,8 @@ def _run_recording_method_job(
             "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
             "rnnoise_wet_mix": float(rnnoise_wet_mix),
             "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
+            "rnnoise_output_notch_freq_hz": float(rnnoise_output_notch_freq_hz),
+            "rnnoise_output_notch_q": float(rnnoise_output_notch_q),
             "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
@@ -1175,10 +1183,14 @@ def _run_recording_method_job(
             "assume_single_speaker": bool(assume_single_speaker),
             "localization_backend": str(localization_backend),
             "beamforming_mode": str(method),
+            "beamformer_snapshot_frame_indices": (() if beamformer_snapshot_frame_indices is None else tuple(int(v) for v in beamformer_snapshot_frame_indices)),
             "robust_target_band_width_deg": float(robust_target_band_width_deg),
             "robust_target_band_max_freq_hz": float(robust_target_band_max_freq_hz),
             "robust_target_band_condition_limit": float(robust_target_band_condition_limit),
             "mvdr_hop_ms": (None if mvdr_hop_ms is None else int(mvdr_hop_ms)),
+            "delay_sum_update_min_delta_deg": float(delay_sum_update_min_delta_deg),
+            "delay_sum_crossfade_frames": int(delay_sum_crossfade_frames),
+            "delay_sum_use_smoothed_doa": bool(delay_sum_use_smoothed_doa),
             "fd_analysis_window_ms": float(fd_analysis_window_ms),
             "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
             "target_activity_rnn_update_mode": (str(target_activity_rnn_update_mode) if is_mvdr else None),
@@ -1280,7 +1292,7 @@ def _run_recording_method_job(
             continue
         stage_sig, _stage_sr = sf.read(stage_path, dtype="float32", always_2d=False)
         stage_audio[stage_name] = np.asarray(stage_sig, dtype=np.float32).reshape(-1)
-    if str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band"}:
+    if str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band", "delay_sum"}:
         _emit_beamformer_snapshot_artifacts(
             summary=summary,
             proc=proc,
@@ -1527,9 +1539,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
     parser.add_argument("--rnnoise-wet-mix", type=float, default=0.9)
     parser.add_argument("--rnnoise-output-lowpass-cutoff-hz", type=float, default=7500.0)
+    parser.add_argument("--rnnoise-output-notch-freq-hz", type=float, default=500.0)
+    parser.add_argument("--rnnoise-output-notch-q", type=float, default=20.0)
     parser.add_argument("--rnnoise-residual-ema-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--rnnoise-residual-ema-alpha", type=float, default=0.0)
+    parser.add_argument("--beamformer-snapshot-frame-indices", type=int, nargs="*", default=None)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
+    parser.add_argument("--delay-sum-update-min-delta-deg", type=float, default=3.0)
+    parser.add_argument("--delay-sum-crossfade-frames", type=int, default=1)
+    parser.add_argument("--delay-sum-use-smoothed-doa", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
     parser.add_argument("--robust-target-band-width-deg", type=float, default=10.0)
     parser.add_argument("--robust-target-band-max-freq-hz", type=float, default=0.0)
@@ -1708,8 +1726,16 @@ def main() -> None:
                 postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
                 rnnoise_wet_mix=float(args.rnnoise_wet_mix),
                 rnnoise_output_lowpass_cutoff_hz=float(args.rnnoise_output_lowpass_cutoff_hz),
+                rnnoise_output_notch_freq_hz=float(args.rnnoise_output_notch_freq_hz),
+                rnnoise_output_notch_q=float(args.rnnoise_output_notch_q),
                 rnnoise_residual_ema_enabled=bool(args.rnnoise_residual_ema_enabled),
                 rnnoise_residual_ema_alpha=float(args.rnnoise_residual_ema_alpha),
+                beamformer_snapshot_frame_indices=(
+                    None if args.beamformer_snapshot_frame_indices is None else tuple(int(v) for v in args.beamformer_snapshot_frame_indices)
+                ),
+                delay_sum_update_min_delta_deg=float(args.delay_sum_update_min_delta_deg),
+                delay_sum_crossfade_frames=int(args.delay_sum_crossfade_frames),
+                delay_sum_use_smoothed_doa=bool(args.delay_sum_use_smoothed_doa),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -1861,6 +1887,8 @@ def main() -> None:
             "postfilter_spectral_floor_beta": float(args.postfilter_spectral_floor_beta),
             "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
             "rnnoise_output_lowpass_cutoff_hz": float(args.rnnoise_output_lowpass_cutoff_hz),
+            "rnnoise_output_notch_freq_hz": float(args.rnnoise_output_notch_freq_hz),
+            "rnnoise_output_notch_q": float(args.rnnoise_output_notch_q),
             "rnnoise_residual_ema_enabled": bool(args.rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(args.rnnoise_residual_ema_alpha),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),

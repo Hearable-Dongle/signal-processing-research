@@ -32,7 +32,11 @@ class FastPathConfig(BaseModel):
     ] = "srp_phat_localization"
     beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "lcmv_top2_tracked", "lcmv_target_band"] = "mvdr_fd"
     mvdr_hop_ms: int | None = None
+    beamformer_snapshot_frame_indices: tuple[int, ...] = ()
     fd_analysis_window_ms: float = 20.0
+    delay_sum_update_min_delta_deg: float = 3.0
+    delay_sum_crossfade_frames: int = 1
+    delay_sum_use_smoothed_doa: bool = True
     # Defaults track the sensitivity-tuned Silero preset from
     # `beamforming/benchmark/run_optuna_babble_bootstrap_mvdr.py`
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
@@ -104,6 +108,8 @@ class FastPathConfig(BaseModel):
     rnnoise_wet_mix: float = 0.9
     rnnoise_input_gain_db: float = 0.0
     rnnoise_output_lowpass_cutoff_hz: float = 7500.0
+    rnnoise_output_notch_freq_hz: float = 500.0
+    rnnoise_output_notch_q: float = 20.0
     rnnoise_residual_ema_enabled: bool = False
     rnnoise_residual_ema_alpha: float = 0.0
     coherence_wiener_gain_floor: float = 0.12
@@ -243,6 +249,22 @@ class SessionStartRequest(BaseModel):
     def mvdr_hop_ms(self) -> int | None:
         value = self.fast_path.mvdr_hop_ms
         return None if value is None else int(value)
+
+    @property
+    def beamformer_snapshot_frame_indices(self) -> tuple[int, ...]:
+        return tuple(int(v) for v in self.fast_path.beamformer_snapshot_frame_indices)
+
+    @property
+    def delay_sum_update_min_delta_deg(self) -> float:
+        return float(self.fast_path.delay_sum_update_min_delta_deg)
+
+    @property
+    def delay_sum_crossfade_frames(self) -> int:
+        return int(self.fast_path.delay_sum_crossfade_frames)
+
+    @property
+    def delay_sum_use_smoothed_doa(self) -> bool:
+        return bool(self.fast_path.delay_sum_use_smoothed_doa)
 
     @property
     def fd_cov_ema_alpha(self) -> float:
@@ -508,6 +530,14 @@ class SessionStartRequest(BaseModel):
     @property
     def rnnoise_output_lowpass_cutoff_hz(self) -> float:
         return float(self.fast_path.rnnoise_output_lowpass_cutoff_hz)
+
+    @property
+    def rnnoise_output_notch_freq_hz(self) -> float:
+        return float(self.fast_path.rnnoise_output_notch_freq_hz)
+
+    @property
+    def rnnoise_output_notch_q(self) -> float:
+        return float(self.fast_path.rnnoise_output_notch_q)
 
     @property
     def rnnoise_residual_ema_enabled(self) -> bool:

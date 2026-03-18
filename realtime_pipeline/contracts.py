@@ -319,6 +319,9 @@ class PipelineConfig:
     doa_ema_alpha: float = 0.2
     gain_ema_alpha: float = 0.2
     doa_max_step_deg_per_frame: float = 10.0
+    delay_sum_update_min_delta_deg: float = 3.0
+    delay_sum_crossfade_frames: int = 1
+    delay_sum_use_smoothed_doa: bool = True
     # Frequency-domain covariance smoothing
     fd_analysis_window_ms: float = 20.0
     # Defaults track the sensitivity-tuned Silero preset from
@@ -385,6 +388,8 @@ class PipelineConfig:
     rnnoise_wet_mix: float = 0.9
     rnnoise_input_gain_db: float = 0.0
     rnnoise_output_lowpass_cutoff_hz: float = 7500.0
+    rnnoise_output_notch_freq_hz: float = 500.0
+    rnnoise_output_notch_q: float = 20.0
     rnnoise_residual_ema_enabled: bool = False
     rnnoise_residual_ema_alpha: float = 0.0
     coherence_wiener_gain_floor: float = 0.12

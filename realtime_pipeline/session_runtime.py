@@ -62,7 +62,11 @@ def build_pipeline_config_from_request(
         identity_speaker_embedding_model=str(req.identity_speaker_embedding_model),
         beamforming_mode=beamforming_mode,
         mvdr_hop_ms=(None if req.mvdr_hop_ms is None else int(req.mvdr_hop_ms)),
+        beamformer_snapshot_frame_indices=tuple(int(v) for v in req.beamformer_snapshot_frame_indices),
         fd_analysis_window_ms=float(req.fd_analysis_window_ms),
+        delay_sum_update_min_delta_deg=float(req.delay_sum_update_min_delta_deg),
+        delay_sum_crossfade_frames=int(req.delay_sum_crossfade_frames),
+        delay_sum_use_smoothed_doa=bool(req.delay_sum_use_smoothed_doa),
         fd_cov_ema_alpha=float(req.fd_cov_ema_alpha),
         fd_diag_load=float(req.fd_diag_load),
         fd_trace_diagonal_loading_factor=float(req.fd_trace_diagonal_loading_factor),
@@ -130,6 +134,8 @@ def build_pipeline_config_from_request(
         rnnoise_wet_mix=float(req.rnnoise_wet_mix),
         rnnoise_input_gain_db=float(req.rnnoise_input_gain_db),
         rnnoise_output_lowpass_cutoff_hz=float(req.rnnoise_output_lowpass_cutoff_hz),
+        rnnoise_output_notch_freq_hz=float(req.rnnoise_output_notch_freq_hz),
+        rnnoise_output_notch_q=float(req.rnnoise_output_notch_q),
         rnnoise_residual_ema_enabled=bool(req.rnnoise_residual_ema_enabled),
         rnnoise_residual_ema_alpha=float(req.rnnoise_residual_ema_alpha),
         coherence_wiener_gain_floor=float(req.coherence_wiener_gain_floor),
@@ -272,14 +278,22 @@ def run_offline_session_pipeline(
 
     frame_samples = max(1, int(cfg.sample_rate_hz * cfg.fast_frame_ms / 1000))
     total_fast_frames = max(1, int(np.ceil(float(audio.shape[0]) / float(frame_samples))))
-    cfg.beamformer_snapshot_frame_indices = tuple(
-        sorted(
-            {
-                max(1, min(total_fast_frames, int(round(total_fast_frames * frac))))
-                for frac in (0.25, 0.5, 0.75)
-            }
-        )
+    requested_snapshot_indices = tuple(
+        max(1, min(total_fast_frames, int(v)))
+        for v in getattr(req, "beamformer_snapshot_frame_indices", ())
+        if int(v) > 0
     )
+    if requested_snapshot_indices:
+        cfg.beamformer_snapshot_frame_indices = tuple(sorted(set(requested_snapshot_indices)))
+    else:
+        cfg.beamformer_snapshot_frame_indices = tuple(
+            sorted(
+                {
+                    max(1, min(total_fast_frames, int(round(total_fast_frames * frac))))
+                    for frac in (0.25, 0.5, 0.75)
+                }
+            )
+        )
     mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=float)
     mic_geometry_xy = mic_geometry_xyz[:2, :].T if mic_geometry_xyz.shape[0] == 3 else mic_geometry_xyz[:, :2]
 
@@ -567,6 +581,8 @@ def run_offline_session_pipeline(
         "rnnoise_wet_mix": float(cfg.rnnoise_wet_mix),
         "rnnoise_input_gain_db": float(cfg.rnnoise_input_gain_db),
         "rnnoise_output_lowpass_cutoff_hz": float(cfg.rnnoise_output_lowpass_cutoff_hz),
+        "rnnoise_output_notch_freq_hz": float(cfg.rnnoise_output_notch_freq_hz),
+        "rnnoise_output_notch_q": float(cfg.rnnoise_output_notch_q),
         "rnnoise_residual_ema_enabled": bool(cfg.rnnoise_residual_ema_enabled),
         "rnnoise_residual_ema_alpha": float(cfg.rnnoise_residual_ema_alpha),
         "coherence_wiener_gain_floor": float(cfg.coherence_wiener_gain_floor),

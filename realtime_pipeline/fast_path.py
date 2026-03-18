@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Callable
 
 import numpy as np
-from scipy.signal import butter, resample_poly, sosfiltfilt
+from scipy.signal import butter, iirnotch, resample_poly, sosfilt, sosfiltfilt, tf2sos
 from scipy.special import exp1
 
 try:
@@ -1432,6 +1432,15 @@ class _RNNoisePostFilter:
             if cutoff_hz <= 0.0 or cutoff_hz >= 0.5 * float(self._input_sample_rate_hz)
             else butter(6, cutoff_hz, btype="lowpass", fs=float(self._input_sample_rate_hz), output="sos")
         )
+        notch_freq_hz = float(max(getattr(cfg, "rnnoise_output_notch_freq_hz", 0.0), 0.0))
+        notch_q = float(max(getattr(cfg, "rnnoise_output_notch_q", 0.0), 0.0))
+        if 0.0 < notch_freq_hz < 0.5 * float(self._input_sample_rate_hz) and notch_q > 0.0:
+            b_notch, a_notch = iirnotch(notch_freq_hz, notch_q, fs=float(self._input_sample_rate_hz))
+            self._output_notch_sos = tf2sos(b_notch, a_notch)
+            self._output_notch_zi = np.zeros((self._output_notch_sos.shape[0], 2), dtype=np.float32)
+        else:
+            self._output_notch_sos = None
+            self._output_notch_zi = None
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
@@ -1489,6 +1498,9 @@ class _RNNoisePostFilter:
         mixed = ((wet * out) + ((1.0 - wet) * x)).astype(np.float32, copy=False)
         if self._output_lowpass_sos is not None and mixed.shape[0] > 8:
             mixed = np.asarray(sosfiltfilt(self._output_lowpass_sos, mixed), dtype=np.float32)
+        if self._output_notch_sos is not None and self._output_notch_zi is not None and mixed.shape[0] > 0:
+            mixed, self._output_notch_zi = sosfilt(self._output_notch_sos, mixed, zi=self._output_notch_zi)
+            mixed = np.asarray(mixed, dtype=np.float32)
         return mixed.astype(np.float32, copy=False)
 
 
@@ -2057,6 +2069,12 @@ class FastPathWorker(threading.Thread):
         self._last_multi_target_doas_deg: tuple[float, ...] = ()
         self._multi_target_hold_remaining_frames: int = 0
         self._focus_hold_remaining_frames: int = 0
+        self._delay_sum_state_by_key: dict[str, dict[str, float | int | None]] = {}
+        self._beamformer_snapshot_targets = tuple(
+            int(v) for v in getattr(config, "beamformer_snapshot_frame_indices", ()) if int(v) > 0
+        )
+        self._beamformer_snapshot_target_set = set(self._beamformer_snapshot_targets)
+        self._delay_sum_snapshot_trace: list[dict] = []
         backend = str(getattr(config, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
         if backend == "silero_fused":
             self._target_activity_vad = SileroVADGate(
@@ -2086,10 +2104,153 @@ class FastPathWorker(threading.Thread):
             raise ValueError("oracle_non_target_residual mode requires an oracle noise frame provider.")
 
     def get_beamformer_snapshot_trace(self) -> list[dict]:
+        mode = str(self._cfg.beamforming_mode).strip().lower()
+        if mode == "delay_sum":
+            return [dict(item) for item in self._delay_sum_snapshot_trace]
         return self._fd.get_beamformer_snapshot_trace()
 
     def get_beamformer_runtime_stats(self) -> dict[str, float | int]:
         return self._fd.get_beamformer_runtime_stats()
+
+    def _maybe_record_delay_sum_snapshot(self, *, state_key: str, doa_deg: float) -> None:
+        del state_key
+        frame_idx = int(self._frame_idx) + 1
+        if frame_idx not in self._beamformer_snapshot_target_set:
+            return
+        if any(int(item.get("frame_index", -1)) == frame_idx for item in self._delay_sum_snapshot_trace):
+            return
+        weights = (
+            np.conj(
+                _steering_vector_f_domain(
+                    doa_deg=float(doa_deg),
+                    n_fft=int(self._fd.analysis_n),
+                    fs=int(self._cfg.sample_rate_hz),
+                    mic_geometry_xyz=self._mic_geometry_xyz,
+                    sound_speed_m_s=float(self._cfg.sound_speed_m_s),
+                )
+            )
+            / max(1, int(self._fd.n_mics))
+        )
+        self._delay_sum_snapshot_trace.append(
+            {
+                "frame_index": frame_idx,
+                "target_doa_deg": float(doa_deg),
+                "weights_real": np.asarray(np.real(weights), dtype=np.float64).tolist(),
+                "weights_imag": np.asarray(np.imag(weights), dtype=np.float64).tolist(),
+            }
+        )
+
+    def _delay_sum_candidate_doa(self, *, state: dict[str, float | int | None], doa_deg: float) -> float:
+        candidate = _norm_deg(float(doa_deg))
+        if not bool(getattr(self._cfg, "delay_sum_use_smoothed_doa", True)):
+            state["smoothed_doa_deg"] = candidate
+            return candidate
+        prev_smoothed = state.get("smoothed_doa_deg")
+        if prev_smoothed is None:
+            state["smoothed_doa_deg"] = candidate
+            return candidate
+        limited = _step_limited_angle(
+            float(prev_smoothed),
+            candidate,
+            float(max(0.1, getattr(self._cfg, "doa_max_step_deg_per_frame", 10.0))),
+        )
+        smoothed = _ema_angle(
+            float(prev_smoothed),
+            limited,
+            float(np.clip(getattr(self._cfg, "doa_ema_alpha", 0.2), 0.0, 1.0)),
+        )
+        state["smoothed_doa_deg"] = smoothed
+        return float(smoothed)
+
+    def _delay_sum_with_state(self, x: np.ndarray, *, doa_deg: float, state_key: str) -> np.ndarray:
+        state = self._delay_sum_state_by_key.setdefault(
+            str(state_key),
+            {
+                "applied_doa_deg": None,
+                "smoothed_doa_deg": None,
+                "transition_from_doa_deg": None,
+                "transition_to_doa_deg": None,
+                "transition_frame_idx": 0,
+                "transition_total_frames": 0,
+            },
+        )
+        candidate_doa = self._delay_sum_candidate_doa(state=state, doa_deg=float(doa_deg))
+        applied_doa = state.get("applied_doa_deg")
+        min_delta = float(max(0.0, getattr(self._cfg, "delay_sum_update_min_delta_deg", 0.0)))
+        crossfade_frames = max(1, int(getattr(self._cfg, "delay_sum_crossfade_frames", 1)))
+        if applied_doa is None:
+            state["applied_doa_deg"] = candidate_doa
+            self._maybe_record_delay_sum_snapshot(state_key=str(state_key), doa_deg=candidate_doa)
+            return delay_and_sum_frame(
+                x,
+                doa_deg=float(candidate_doa),
+                mic_geometry_xyz=self._mic_geometry_xyz,
+                fs=self._cfg.sample_rate_hz,
+                sound_speed_m_s=self._cfg.sound_speed_m_s,
+            )
+
+        if _angular_dist_deg(float(applied_doa), float(candidate_doa)) < min_delta:
+            candidate_doa = float(applied_doa)
+
+        transition_total_frames = int(state.get("transition_total_frames", 0) or 0)
+        transition_frame_idx = int(state.get("transition_frame_idx", 0) or 0)
+        transition_from_doa = state.get("transition_from_doa_deg")
+        transition_to_doa = state.get("transition_to_doa_deg")
+
+        if candidate_doa != float(applied_doa):
+            if transition_total_frames <= 0 or transition_to_doa is None or _angular_dist_deg(float(transition_to_doa), float(candidate_doa)) >= min_delta:
+                state["transition_from_doa_deg"] = float(applied_doa)
+                state["transition_to_doa_deg"] = float(candidate_doa)
+                state["transition_frame_idx"] = 0
+                state["transition_total_frames"] = crossfade_frames
+                transition_total_frames = crossfade_frames
+                transition_frame_idx = 0
+                transition_from_doa = float(applied_doa)
+                transition_to_doa = float(candidate_doa)
+
+        if transition_total_frames > 0 and transition_from_doa is not None and transition_to_doa is not None:
+            old_out = delay_and_sum_frame(
+                x,
+                doa_deg=float(transition_from_doa),
+                mic_geometry_xyz=self._mic_geometry_xyz,
+                fs=self._cfg.sample_rate_hz,
+                sound_speed_m_s=self._cfg.sound_speed_m_s,
+            )
+            new_out = delay_and_sum_frame(
+                x,
+                doa_deg=float(transition_to_doa),
+                mic_geometry_xyz=self._mic_geometry_xyz,
+                fs=self._cfg.sample_rate_hz,
+                sound_speed_m_s=self._cfg.sound_speed_m_s,
+            )
+            sample_progress = np.linspace(
+                float(transition_frame_idx) / float(transition_total_frames),
+                float(transition_frame_idx + 1) / float(transition_total_frames),
+                num=int(old_out.shape[0]),
+                endpoint=True,
+                dtype=np.float32,
+            )
+            out = ((1.0 - sample_progress) * old_out.astype(np.float32) + sample_progress * new_out.astype(np.float32)).astype(np.float32)
+            transition_frame_idx += 1
+            if transition_frame_idx >= transition_total_frames:
+                state["applied_doa_deg"] = float(transition_to_doa)
+                state["transition_from_doa_deg"] = None
+                state["transition_to_doa_deg"] = None
+                state["transition_frame_idx"] = 0
+                state["transition_total_frames"] = 0
+                self._maybe_record_delay_sum_snapshot(state_key=str(state_key), doa_deg=float(transition_to_doa))
+            else:
+                state["transition_frame_idx"] = transition_frame_idx
+            return out
+
+        self._maybe_record_delay_sum_snapshot(state_key=str(state_key), doa_deg=float(candidate_doa))
+        return delay_and_sum_frame(
+            x,
+            doa_deg=float(candidate_doa),
+            mic_geometry_xyz=self._mic_geometry_xyz,
+            fs=self._cfg.sample_rate_hz,
+            sound_speed_m_s=self._cfg.sound_speed_m_s,
+        )
 
     def _suppression_mode(self) -> str:
         return str(self._cfg.own_voice_suppression_mode).strip().lower()
@@ -2724,13 +2885,7 @@ class FastPathWorker(threading.Thread):
     ) -> np.ndarray:
         mode = str(self._cfg.beamforming_mode).strip().lower()
         if mode == "delay_sum":
-            return delay_and_sum_frame(
-                x,
-                doa_deg=doa_deg,
-                mic_geometry_xyz=self._mic_geometry_xyz,
-                fs=self._cfg.sample_rate_hz,
-                sound_speed_m_s=self._cfg.sound_speed_m_s,
-            )
+            return self._delay_sum_with_state(x, doa_deg=doa_deg, state_key="primary")
         if mode == "gsc_fd":
             return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
         if mode == "lcmv_target_band":
@@ -2772,16 +2927,7 @@ class FastPathWorker(threading.Thread):
                 oracle_noise_frame=oracle_noise_frame,
             )
         if mode == "delay_sum":
-            aligned = [
-                delay_and_sum_frame(
-                    x,
-                    doa_deg=float(doa),
-                    mic_geometry_xyz=self._mic_geometry_xyz,
-                    fs=self._cfg.sample_rate_hz,
-                    sound_speed_m_s=self._cfg.sound_speed_m_s,
-                )
-                for doa in target_doas_deg[:2]
-            ]
+            aligned = [self._delay_sum_with_state(x, doa_deg=float(doa), state_key=f"target_{idx}") for idx, doa in enumerate(target_doas_deg[:2])]
             return np.mean(np.stack(aligned, axis=0), axis=0).astype(np.float32, copy=False)
         return self._fd.lcmv_top2(
             x,
