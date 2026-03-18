@@ -15,6 +15,7 @@ class FastPathConfig(BaseModel):
     postfilter_queue_drop_oldest: bool = False
     localization_hop_ms: int = 10
     localization_window_ms: int = 160
+    input_downsample_rate_hz: int | None = None
     overlap: float = 0.2
     freq_low_hz: int = 200
     freq_high_hz: int = 3000
@@ -181,6 +182,11 @@ class SessionStartRequest(BaseModel):
     @property
     def localization_window_ms(self) -> int:
         return int(self.fast_path.localization_window_ms)
+
+    @property
+    def input_downsample_rate_hz(self) -> int | None:
+        value = self.fast_path.input_downsample_rate_hz
+        return None if value is None else int(value)
 
     @property
     def overlap(self) -> float:

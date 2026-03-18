@@ -7,6 +7,7 @@ from typing import Any
 from collections.abc import Callable
 
 import numpy as np
+from scipy.signal import resample_poly
 
 from mic_array_forwarder.models import SessionStartRequest
 from realtime_pipeline.contracts import FastPathAudioPacket, PipelineConfig, SRPPeakSnapshot, SpeakerGainDirection
@@ -39,6 +40,8 @@ def build_pipeline_config_from_request(
         raise ValueError("Covariance beamforming requires fast_path.target_activity_rnn_update_mode to be explicitly set.")
     return PipelineConfig(
         sample_rate_hz=int(sample_rate_hz),
+        input_sample_rate_hz=int(req.sample_rate_hz),
+        input_downsample_rate_hz=(None if req.input_downsample_rate_hz is None else int(req.input_downsample_rate_hz)),
         fast_frame_ms=max(10, int(req.localization_hop_ms)),
         slow_chunk_ms=int(req.slow_chunk_ms),
         slow_path_enabled=slow_path_enabled,
@@ -151,6 +154,23 @@ def build_pipeline_config_from_request(
     )
 
 
+def _resample_multichannel_audio(
+    mic_audio: np.ndarray,
+    *,
+    in_sample_rate_hz: int,
+    out_sample_rate_hz: int,
+) -> np.ndarray:
+    audio = np.asarray(mic_audio, dtype=np.float32)
+    if int(in_sample_rate_hz) <= 0 or int(out_sample_rate_hz) <= 0:
+        raise ValueError("sample rates must be positive for resampling")
+    if int(in_sample_rate_hz) == int(out_sample_rate_hz):
+        return audio
+    if audio.ndim != 2:
+        raise ValueError("mic_audio must have shape [samples, channels] for resampling")
+    out = resample_poly(audio, up=int(out_sample_rate_hz), down=int(in_sample_rate_hz), axis=0)
+    return np.asarray(out, dtype=np.float32)
+
+
 def build_separation_backend_for_request(req: SessionStartRequest, cfg: PipelineConfig):
     separation_mode = str(req.separation_mode)
     if separation_mode == "single_dominant_no_separator":
@@ -212,9 +232,20 @@ def run_offline_session_pipeline(
     if audio.ndim != 2:
         raise ValueError("mic_audio must have shape [samples, channels]")
 
+    processing_sample_rate_hz = int(req.sample_rate_hz)
+    if req.input_downsample_rate_hz is not None:
+        processing_sample_rate_hz = int(req.input_downsample_rate_hz)
+        if processing_sample_rate_hz <= 0:
+            raise ValueError("fast_path.input_downsample_rate_hz must be positive when set")
+        audio = _resample_multichannel_audio(
+            audio,
+            in_sample_rate_hz=int(req.sample_rate_hz),
+            out_sample_rate_hz=processing_sample_rate_hz,
+        )
+
     cfg = build_pipeline_config_from_request(
         req,
-        sample_rate_hz=int(req.sample_rate_hz),
+        sample_rate_hz=int(processing_sample_rate_hz),
         max_speakers_hint=max(int(req.max_speakers_hint), int(audio.shape[1]), 1),
     )
     out_root = Path(out_dir).resolve()
@@ -404,6 +435,10 @@ def run_offline_session_pipeline(
     summary: dict[str, Any] = {
         "input_recording_path": "" if input_recording_path is None else str(Path(input_recording_path).resolve()),
         "sample_rate_hz": int(cfg.sample_rate_hz),
+        "input_sample_rate_hz": int(cfg.input_sample_rate_hz),
+        "input_downsample_rate_hz": (
+            None if cfg.input_downsample_rate_hz is None else int(cfg.input_downsample_rate_hz)
+        ),
         "duration_s": float(audio.shape[0] / max(int(cfg.sample_rate_hz), 1)),
         "fast_frame_ms": int(cfg.fast_frame_ms),
         "channel_count": int(audio.shape[1]),
