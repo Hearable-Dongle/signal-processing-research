@@ -426,6 +426,11 @@ class _FDBufferedBeamformer:
         r = np.asarray(rnn_bin, dtype=np.complex128)
         mics = r.shape[0]
         eye = np.eye(mics, dtype=np.complex128)
+        blend_alpha = float(np.clip(getattr(self.cfg, "fd_identity_blend_alpha", 0.0), 0.0, 1.0))
+        trace_scale = float(np.real(np.trace(r))) / float(max(1, mics))
+        if blend_alpha > 0.0:
+            isotropic = max(trace_scale, 0.0) * eye
+            r = ((1.0 - blend_alpha) * r) + (blend_alpha * isotropic)
         static_load = float(max(getattr(self.cfg, "fd_diag_load", 0.0), 0.0))
         trace_factor = float(max(getattr(self.cfg, "fd_trace_diagonal_loading_factor", 0.0), 0.0))
         trace_scale = float(np.real(np.trace(r))) / float(max(1, mics))

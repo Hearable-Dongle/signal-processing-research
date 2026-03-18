@@ -38,6 +38,7 @@ class FastPathConfig(BaseModel):
     fd_cov_ema_alpha: float = 0.2965906035161345
     fd_diag_load: float = 0.012141307774357374
     fd_trace_diagonal_loading_factor: float = 0.0
+    fd_identity_blend_alpha: float = 0.0
     fd_noise_covariance_mode: Literal["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"] = "estimated_target_subtractive"
     target_activity_rnn_update_mode: Literal["oracle_target_activity", "estimated_target_activity"] | None = (
         "estimated_target_activity"
@@ -227,6 +228,10 @@ class SessionStartRequest(BaseModel):
     @property
     def fd_trace_diagonal_loading_factor(self) -> float:
         return float(self.fast_path.fd_trace_diagonal_loading_factor)
+
+    @property
+    def fd_identity_blend_alpha(self) -> float:
+        return float(self.fast_path.fd_identity_blend_alpha)
 
     @property
     def fd_noise_covariance_mode(self) -> str:

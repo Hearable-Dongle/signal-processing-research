@@ -950,6 +950,7 @@ def _run_recording_method_job(
     fd_cov_ema_alpha: float,
     fd_diag_load: float,
     fd_trace_diagonal_loading_factor: float,
+    fd_identity_blend_alpha: float,
     target_activity_low_threshold: float,
     target_activity_high_threshold: float,
     target_activity_enter_frames: int,
@@ -1012,6 +1013,7 @@ def _run_recording_method_job(
             "fd_cov_ema_alpha": float(fd_cov_ema_alpha),
             "fd_diag_load": float(fd_diag_load),
             "fd_trace_diagonal_loading_factor": float(fd_trace_diagonal_loading_factor),
+            "fd_identity_blend_alpha": float(fd_identity_blend_alpha),
             "target_activity_low_threshold": float(target_activity_low_threshold),
             "target_activity_high_threshold": float(target_activity_high_threshold),
             "target_activity_enter_frames": int(target_activity_enter_frames),
@@ -1118,8 +1120,12 @@ def _run_recording_method_job(
         "target_activity_detector_mode": str(target_activity_detector_mode) if is_mvdr else "",
         "target_activity_detector_backend": str(target_activity_detector_backend) if is_mvdr else "",
         "target_activity_update_every_n_fast_frames": int(target_activity_update_every_n_fast_frames) if is_mvdr else 0,
+        "fd_cov_ema_alpha": float(fd_cov_ema_alpha) if is_mvdr else float("nan"),
         "fd_diag_load": float(fd_diag_load) if is_mvdr else float("nan"),
         "fd_trace_diagonal_loading_factor": float(fd_trace_diagonal_loading_factor) if is_mvdr else float("nan"),
+        "fd_identity_blend_alpha": float(fd_identity_blend_alpha) if is_mvdr else float("nan"),
+        "fd_cov_update_scale_target_active": float(fd_cov_update_scale_target_active) if is_mvdr else float("nan"),
+        "fd_cov_update_scale_target_inactive": float(fd_cov_update_scale_target_inactive) if is_mvdr else float("nan"),
         "fast_rtf": float(summary["fast_rtf"]),
         "slow_rtf": float(summary["slow_rtf"]),
         "fast_avg_ms": float(summary["fast_avg_ms"]),
@@ -1230,6 +1236,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fd-cov-ema-alpha", type=float, default=0.6)
     parser.add_argument("--fd-diag-load", type=float, default=0.01)
     parser.add_argument("--fd-trace-diagonal-loading-factor", type=float, default=0.0)
+    parser.add_argument("--fd-identity-blend-alpha", type=float, default=0.0)
     parser.add_argument("--target-activity-low-threshold", type=float, default=0.35)
     parser.add_argument("--target-activity-high-threshold", type=float, default=0.55)
     parser.add_argument("--target-activity-enter-frames", type=int, default=2)
@@ -1378,6 +1385,7 @@ def main() -> None:
                 fd_cov_ema_alpha=float(args.fd_cov_ema_alpha),
                 fd_diag_load=float(args.fd_diag_load),
                 fd_trace_diagonal_loading_factor=float(args.fd_trace_diagonal_loading_factor),
+                fd_identity_blend_alpha=float(args.fd_identity_blend_alpha),
                 target_activity_low_threshold=float(args.target_activity_low_threshold),
                 target_activity_high_threshold=float(args.target_activity_high_threshold),
                 target_activity_enter_frames=int(args.target_activity_enter_frames),
@@ -1487,6 +1495,7 @@ def main() -> None:
             "fd_cov_ema_alpha": float(args.fd_cov_ema_alpha),
             "fd_diag_load": float(args.fd_diag_load),
             "fd_trace_diagonal_loading_factor": float(args.fd_trace_diagonal_loading_factor),
+            "fd_identity_blend_alpha": float(args.fd_identity_blend_alpha),
             "target_activity_low_threshold": float(args.target_activity_low_threshold),
             "target_activity_high_threshold": float(args.target_activity_high_threshold),
             "target_activity_enter_frames": int(args.target_activity_enter_frames),

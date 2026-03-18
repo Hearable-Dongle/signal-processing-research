@@ -63,6 +63,7 @@ def build_pipeline_config_from_request(
         fd_cov_ema_alpha=float(req.fd_cov_ema_alpha),
         fd_diag_load=float(req.fd_diag_load),
         fd_trace_diagonal_loading_factor=float(req.fd_trace_diagonal_loading_factor),
+        fd_identity_blend_alpha=float(req.fd_identity_blend_alpha),
         fd_noise_covariance_mode=str(req.fd_noise_covariance_mode),
         target_activity_rnn_update_mode=target_activity_mode,
         target_activity_low_threshold=float(req.target_activity_low_threshold),
