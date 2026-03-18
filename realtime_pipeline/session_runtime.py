@@ -216,6 +216,15 @@ def run_offline_session_pipeline(
     out_root.mkdir(parents=True, exist_ok=True)
 
     frame_samples = max(1, int(cfg.sample_rate_hz * cfg.fast_frame_ms / 1000))
+    total_fast_frames = max(1, int(np.ceil(float(audio.shape[0]) / float(frame_samples))))
+    cfg.beamformer_snapshot_frame_indices = tuple(
+        sorted(
+            {
+                max(1, min(total_fast_frames, int(round(total_fast_frames * frac))))
+                for frac in (0.25, 0.5, 0.75)
+            }
+        )
+    )
     mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=float)
     mic_geometry_xy = mic_geometry_xyz[:2, :].T if mic_geometry_xyz.shape[0] == 3 else mic_geometry_xyz[:, :2]
 
@@ -476,6 +485,8 @@ def run_offline_session_pipeline(
         summary["speaker_map_trace"] = speaker_map_trace
         summary["srp_trace"] = srp_trace
         summary["noise_model_update_trace"] = noise_model_update_trace
+        if pipe._fast is not None:
+            summary["beamformer_snapshot_trace"] = pipe._fast.get_beamformer_snapshot_trace()
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)

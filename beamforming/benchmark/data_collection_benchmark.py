@@ -48,6 +48,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
 
 from mic_array_forwarder.models import SessionStartRequest
 from realtime_pipeline.contracts import SRPPeakSnapshot
+from realtime_pipeline.fast_path import _steering_vector_f_domain
 from realtime_pipeline.session_runtime import run_offline_session_pipeline
 from realtime_pipeline.tracking_modes import TRACKING_MODE_CHOICES, validate_tracking_mode
 from simulation.mic_array_profiles import mic_positions_xyz
@@ -257,6 +258,102 @@ def _plot_spectrogram_compare(raw: np.ndarray, proc: np.ndarray, fs: int, out_pa
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
     plt.close(fig)
+
+
+def _snapshot_clip_bounds(center_sample: int, total_samples: int, fs: int, clip_duration_s: float = 2.0) -> tuple[int, int]:
+    half = max(1, int(round(0.5 * clip_duration_s * max(fs, 1))))
+    start = max(0, int(center_sample) - half)
+    end = min(int(total_samples), int(center_sample) + half)
+    return start, max(start + 1, end)
+
+
+def _plot_beam_pattern_from_snapshot(
+    *,
+    snapshot: dict,
+    mic_geometry_xyz: np.ndarray,
+    sample_rate_hz: int,
+    out_path: Path,
+    title: str,
+) -> None:
+    weights_real = np.asarray(snapshot.get("weights_real", []), dtype=np.float64)
+    weights_imag = np.asarray(snapshot.get("weights_imag", []), dtype=np.float64)
+    if weights_real.size == 0 or weights_imag.size == 0:
+        return
+    weights = weights_real + 1j * weights_imag
+    if weights.ndim != 2:
+        return
+    angles = np.linspace(0.0, 360.0, 361, endpoint=True)
+    freqs = np.fft.rfftfreq((weights.shape[0] - 1) * 2, d=1.0 / float(sample_rate_hz))
+    freq_mask = np.asarray((freqs >= 300.0) & (freqs <= 3000.0), dtype=bool)
+    if not np.any(freq_mask):
+        freq_mask = np.ones_like(freqs, dtype=bool)
+    response = np.zeros(angles.shape[0], dtype=np.float64)
+    for idx, angle_deg in enumerate(angles):
+        steering = _steering_vector_f_domain(
+            doa_deg=float(angle_deg),
+            n_fft=int((weights.shape[0] - 1) * 2),
+            fs=int(sample_rate_hz),
+            mic_geometry_xyz=np.asarray(mic_geometry_xyz, dtype=np.float64),
+            sound_speed_m_s=343.0,
+        )
+        gain = np.abs(np.einsum("fm,fm->f", np.conj(weights), steering))
+        response[idx] = float(np.mean(gain[freq_mask]))
+    max_resp = float(np.max(response))
+    if max_resp > 0.0:
+        response = response / max_resp
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.add_subplot(111, projection="polar")
+    ax.plot(np.deg2rad(angles), response, color="#0a9396", linewidth=1.5)
+    target = snapshot.get("target_doa_deg")
+    if target is not None:
+        ax.scatter([np.deg2rad(float(target))], [1.0], color="#ae2012", s=40)
+    ax.set_title(title)
+    ax.set_theta_zero_location("E")
+    ax.set_theta_direction(1)
+    ax.set_rlim(0.0, 1.05)
+    ax.grid(alpha=0.3)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def _emit_beamformer_snapshot_artifacts(
+    *,
+    summary: dict,
+    proc: np.ndarray,
+    fs: int,
+    run_dir: Path,
+    mic_geometry_xyz: np.ndarray,
+) -> None:
+    snapshots = list(summary.get("beamformer_snapshot_trace", []))
+    if not snapshots:
+        return
+    artifact_dir = run_dir / "beamformer_snapshots"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    total_samples = int(proc.size)
+    fast_frame_ms = float(summary.get("fast_frame_ms", 10.0))
+    frame_samples = max(1, int(round((fast_frame_ms / 1000.0) * max(fs, 1))))
+    for idx, snapshot in enumerate(snapshots[:3], start=1):
+        center_sample = int(max(0, int(snapshot.get("frame_index", 1)) - 1) * frame_samples)
+        start, end = _snapshot_clip_bounds(center_sample, total_samples, fs)
+        clip_path = artifact_dir / f"snapshot_{idx:02d}.wav"
+        sf.write(clip_path, np.asarray(proc[start:end], dtype=np.float32), fs)
+        target = snapshot.get("target_doa_deg")
+        title = (
+            f"{summary.get('beamforming_mode', 'beamformer')} snapshot {idx} | "
+            f"frame {int(snapshot.get('frame_index', -1))} | "
+            f"target {float(target):.1f} deg"
+            if target is not None
+            else f"{summary.get('beamforming_mode', 'beamformer')} snapshot {idx}"
+        )
+        _plot_beam_pattern_from_snapshot(
+            snapshot=snapshot,
+            mic_geometry_xyz=np.asarray(mic_geometry_xyz, dtype=np.float64),
+            sample_rate_hz=int(fs),
+            out_path=artifact_dir / f"snapshot_{idx:02d}_polar.png",
+            title=title,
+        )
 def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float, mic_array_profile: str) -> list[dict]:
     metadata_path = recording_dir / "metadata.json"
     if not metadata_path.exists():
@@ -968,6 +1065,14 @@ def _run_recording_method_job(
     proc, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
     proc = np.asarray(proc, dtype=np.float32).reshape(-1)
     fs = int(proc_sr if proc_sr > 0 else sample_rate_hz)
+    if str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band"}:
+        _emit_beamformer_snapshot_artifacts(
+            summary=summary,
+            proc=proc,
+            fs=fs,
+            run_dir=run_dir,
+            mic_geometry_xyz=np.asarray(mic_geometry_xyz, dtype=np.float64),
+        )
     n = min(raw_mix.size, proc.size)
     trace_metrics = _trace_metrics(summary)
     duration_s = float(n / max(fs, 1))

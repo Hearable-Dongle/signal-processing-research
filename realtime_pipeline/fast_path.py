@@ -228,9 +228,46 @@ class _FDBufferedBeamformer:
         self._last_weights_reused: bool = False
         self._last_noise_model_update: dict = _inactive_noise_model_update()
         self._frozen_bootstrap_frames = max(1, int(np.ceil(1000.0 / max(float(cfg.fast_frame_ms), 1.0))))
+        self._beamformer_snapshot_targets = tuple(
+            int(v) for v in getattr(cfg, "beamformer_snapshot_frame_indices", ()) if int(v) > 0
+        )
+        self._beamformer_snapshot_target_set = set(self._beamformer_snapshot_targets)
+        self._beamformer_snapshot_trace: list[dict] = []
 
     def get_last_noise_model_update(self) -> dict:
         return _normalize_noise_model_update(self._last_noise_model_update)
+
+    def get_beamformer_snapshot_trace(self) -> list[dict]:
+        return [dict(item) for item in self._beamformer_snapshot_trace]
+
+    def _maybe_record_beamformer_snapshot(
+        self,
+        *,
+        beamforming_mode: str,
+        target_doa_deg: float,
+        weights: np.ndarray,
+        null_doa_deg: float | None = None,
+        secondary_doa_deg: float | None = None,
+        target_band_width_deg: float | None = None,
+    ) -> None:
+        frame_idx = int(self._mvdr_frame_counter)
+        if frame_idx not in self._beamformer_snapshot_target_set:
+            return
+        if any(int(item.get("frame_index", -1)) == frame_idx for item in self._beamformer_snapshot_trace):
+            return
+        w = np.asarray(weights, dtype=np.complex128)
+        self._beamformer_snapshot_trace.append(
+            {
+                "frame_index": frame_idx,
+                "beamforming_mode": str(beamforming_mode),
+                "target_doa_deg": float(target_doa_deg),
+                "null_doa_deg": None if null_doa_deg is None else float(null_doa_deg),
+                "secondary_doa_deg": None if secondary_doa_deg is None else float(secondary_doa_deg),
+                "target_band_width_deg": None if target_band_width_deg is None else float(target_band_width_deg),
+                "weights_real": np.asarray(np.real(w), dtype=np.float32).tolist(),
+                "weights_imag": np.asarray(np.imag(w), dtype=np.float32).tolist(),
+            }
+        )
 
     def _should_refresh_weights(
         self,
@@ -542,6 +579,11 @@ class _FDBufferedBeamformer:
                 oracle_noise_fft=oracle_noise_fft,
             )
             self._cached_mvdr_weights = self._solve_mvdr_weights(a)
+            self._maybe_record_beamformer_snapshot(
+                beamforming_mode="mvdr_fd",
+                target_doa_deg=float(doa_deg),
+                weights=self._cached_mvdr_weights,
+            )
             self._cached_steering = np.asarray(a, dtype=np.complex128)
             self._cached_target_doa_deg = float(doa_deg)
             self._cached_null_doa_deg = None
@@ -630,6 +672,12 @@ class _FDBufferedBeamformer:
                 oracle_noise_fft=oracle_noise_fft,
             )
             self._cached_lcmv_weights = self._solve_lcmv_weights(a_target, a_null)
+            self._maybe_record_beamformer_snapshot(
+                beamforming_mode="lcmv_null",
+                target_doa_deg=float(target_doa_deg),
+                null_doa_deg=float(null_doa_deg),
+                weights=self._cached_lcmv_weights,
+            )
             self._cached_steering = np.asarray(a_target, dtype=np.complex128)
             self._cached_target_doa_deg = float(target_doa_deg)
             self._cached_null_doa_deg = float(null_doa_deg)
@@ -711,6 +759,12 @@ class _FDBufferedBeamformer:
                 oracle_noise_fft=oracle_noise_fft,
             )
             self._cached_lcmv_weights = self._solve_lcmv_top2_weights(a_primary, a_secondary)
+            self._maybe_record_beamformer_snapshot(
+                beamforming_mode="lcmv_top2_tracked",
+                target_doa_deg=float(primary_doa_deg),
+                secondary_doa_deg=float(secondary_doa_deg),
+                weights=self._cached_lcmv_weights,
+            )
             self._cached_steering = np.asarray(a_primary, dtype=np.complex128)
             self._cached_target_doa_deg = float(primary_doa_deg)
             self._cached_secondary_target_doa_deg = float(secondary_doa_deg)
@@ -799,6 +853,12 @@ class _FDBufferedBeamformer:
                     for offset in offsets
                 ]
                 self._cached_lcmv_weights = self._solve_lcmv_target_band_weights(steerings)
+            self._maybe_record_beamformer_snapshot(
+                beamforming_mode="lcmv_target_band",
+                target_doa_deg=float(target_doa_deg),
+                target_band_width_deg=float(band_width_deg),
+                weights=self._cached_lcmv_weights,
+            )
             self._cached_steering = np.asarray(target_steering, dtype=np.complex128)
             self._cached_target_doa_deg = float(target_doa_deg)
             self._cached_null_doa_deg = None
@@ -1434,6 +1494,9 @@ class FastPathWorker(threading.Thread):
             and self._oracle_noise_frame_provider is None
         ):
             raise ValueError("oracle_non_target_residual mode requires an oracle noise frame provider.")
+
+    def get_beamformer_snapshot_trace(self) -> list[dict]:
+        return self._fd.get_beamformer_snapshot_trace()
 
     def _suppression_mode(self) -> str:
         return str(self._cfg.own_voice_suppression_mode).strip().lower()

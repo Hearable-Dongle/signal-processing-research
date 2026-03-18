@@ -361,3 +361,4 @@ class PipelineConfig:
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
     robust_target_band_width_deg: float = 10.0
+    beamformer_snapshot_frame_indices: tuple[int, ...] = ()
