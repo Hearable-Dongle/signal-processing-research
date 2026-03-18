@@ -340,7 +340,7 @@ class PipelineConfig:
     fd_speech_cov_update_scale: float = 0.25
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True
-    postfilter_method: str = "off"  # one of: off, wiener_dd, rnnoise, coherence_wiener, wiener_then_rnnoise
+    postfilter_method: str = "off"  # one of: off, wiener_dd, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass
     postfilter_noise_ema_alpha: float = 0.08
     postfilter_speech_ema_alpha: float = 0.12
     postfilter_gain_floor: float = 0.22

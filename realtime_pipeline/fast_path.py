@@ -1122,22 +1122,35 @@ class _RNNoisePostFilter:
             raise RuntimeError("RNNoise postfilter requested but pyrnnoise is unavailable.")
         self.cfg = cfg
         self._backend = PyRNNoise(48000)
+        self._frame_size = 480
+        self._pending_in = np.zeros((0,), dtype=np.float32)
+        self._pending_out = np.zeros((0,), dtype=np.float32)
+        self._backend.channels = 1
+        self._backend.dtype = np.float32
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
         x = np.asarray(frame, dtype=np.float32).reshape(-1)
         gain = float(10.0 ** (float(self.cfg.rnnoise_input_gain_db) / 20.0))
         x_in = (x * gain).astype(np.float32, copy=False)
+        self._pending_in = np.concatenate([self._pending_in, x_in], axis=0)
         parts: list[np.ndarray] = []
-        for _vad, den in self._backend.denoise_chunk(x_in):
+        while self._pending_in.shape[0] >= self._frame_size:
+            chunk = self._pending_in[: self._frame_size]
+            self._pending_in = self._pending_in[self._frame_size :]
+            _vad, den = self._backend.denoise_frame(np.atleast_2d(chunk), partial=False)
             den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
             if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
                 den_arr = den_arr / 32768.0
             parts.append(den_arr)
-        out = np.concatenate(parts, axis=0) if parts else np.zeros_like(x)
-        if out.shape[0] < x.shape[0]:
-            out = np.pad(out, (0, x.shape[0] - out.shape[0]))
-        out = out[: x.shape[0]]
+        if parts:
+            self._pending_out = np.concatenate([self._pending_out, np.concatenate(parts, axis=0)], axis=0)
+        if self._pending_out.shape[0] < x.shape[0]:
+            out = np.pad(self._pending_out, (0, x.shape[0] - self._pending_out.shape[0]))
+            self._pending_out = np.zeros((0,), dtype=np.float32)
+        else:
+            out = self._pending_out[: x.shape[0]]
+            self._pending_out = self._pending_out[x.shape[0] :]
         wet = float(np.clip(self.cfg.rnnoise_wet_mix, 0.0, 1.0))
         return (((wet * out) + ((1.0 - wet) * x))).astype(np.float32, copy=False)
 
@@ -1186,6 +1199,24 @@ class _CoherenceWienerPostFilter:
         return out.astype(np.float32, copy=False)
 
 
+class _VoiceBandpassPostFilter:
+    def __init__(self, cfg: PipelineConfig):
+        self.cfg = cfg
+
+    def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
+        del speech_activity
+        x = np.asarray(frame, dtype=np.float32).reshape(-1)
+        n = int(x.shape[0])
+        if n <= 1:
+            return x.astype(np.float32, copy=False)
+        x_fft = np.fft.rfft(x, n=n)
+        freqs = np.fft.rfftfreq(n, d=1.0 / float(self.cfg.sample_rate_hz))
+        # Cheap speech-focused band limit for quick real-data sanity checks.
+        mask = (freqs >= 180.0) & (freqs <= 3600.0)
+        y = np.fft.irfft(x_fft * mask.astype(np.float32), n=n).real
+        return y.astype(np.float32, copy=False)
+
+
 class _HybridPostFilter:
     def __init__(self, first, second):
         self._first = first
@@ -1203,10 +1234,13 @@ class _PostFilterRouter:
         self._wiener = _PostFilterState(frame_samples=frame_samples, cfg=cfg)
         self._rnnoise = None
         self._coherence = None
+        self._voice_bandpass = None
         if self.method in {"rnnoise", "wiener_then_rnnoise"}:
             self._rnnoise = _RNNoisePostFilter(cfg)
         if self.method == "coherence_wiener":
             self._coherence = _CoherenceWienerPostFilter(cfg, mic_geometry_xyz)
+        if self.method == "voice_bandpass":
+            self._voice_bandpass = _VoiceBandpassPostFilter(cfg)
         if self.method == "wiener_then_rnnoise":
             self._hybrid = _HybridPostFilter(self._wiener, self._rnnoise)
         else:
@@ -1231,6 +1265,11 @@ class _PostFilterRouter:
                 raise RuntimeError("coherence_wiener postfilter requires frame_mc and doa_deg.")
             self._last_noise_model_update = _inactive_noise_model_update()
             return self._coherence.process(frame_mc, beamformed, doa_deg)
+        if self.method == "voice_bandpass":
+            if self._voice_bandpass is None:
+                raise RuntimeError("voice_bandpass postfilter not initialized.")
+            self._last_noise_model_update = _inactive_noise_model_update()
+            return self._voice_bandpass.process(beamformed, speech_activity=speech_activity)
         if self.method == "wiener_then_rnnoise":
             if self._hybrid is None:
                 raise RuntimeError("Hybrid postfilter not initialized.")

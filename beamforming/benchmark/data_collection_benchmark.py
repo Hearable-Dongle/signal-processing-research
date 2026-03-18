@@ -925,6 +925,7 @@ def _run_recording_method_job(
     output_enhancer_mode: str,
     postfilter_enabled: bool,
     postfilter_method: str,
+    rnnoise_wet_mix: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -990,6 +991,7 @@ def _run_recording_method_job(
             "output_enhancer_mode": str(output_enhancer_mode),
             "postfilter_enabled": bool(postfilter_enabled),
             "postfilter_method": str(postfilter_method),
+            "rnnoise_wet_mix": float(rnnoise_wet_mix),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
             "suppressed_user_voice_doa_deg": (
                 None if suppressed_user_voice_doa_deg is None else float(suppressed_user_voice_doa_deg)
@@ -1112,6 +1114,7 @@ def _run_recording_method_job(
         "enhancement_tier": str(summary.get("enhancement_tier", enhancement_tier)),
         "output_enhancer_mode": str(summary.get("output_enhancer_mode", output_enhancer_mode)),
         "postfilter_method": str(postfilter_method),
+        "rnnoise_wet_mix": float(rnnoise_wet_mix),
         "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
         "fd_analysis_window_ms": float(fd_analysis_window_ms),
         "robust_target_band_width_deg": float(robust_target_band_width_deg),
@@ -1208,7 +1211,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enhancement-tier", choices=["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"], default="custom")
     parser.add_argument("--output-enhancer-mode", choices=["off", "wiener"], default="off")
     parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise"], default="off")
+    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass"], default="off")
+    parser.add_argument("--rnnoise-wet-mix", type=float, default=1.0)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
     parser.add_argument("--robust-target-band-width-deg", type=float, default=10.0)
@@ -1360,6 +1364,7 @@ def main() -> None:
                 output_enhancer_mode=str(args.output_enhancer_mode),
                 postfilter_enabled=bool(args.postfilter_enabled),
                 postfilter_method=str(args.postfilter_method),
+                rnnoise_wet_mix=float(args.rnnoise_wet_mix),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -1485,6 +1490,7 @@ def main() -> None:
             "output_enhancer_mode": str(args.output_enhancer_mode),
             "postfilter_enabled": bool(args.postfilter_enabled),
             "postfilter_method": str(args.postfilter_method),
+            "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),
             "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
             "fd_noise_covariance_mode": str(args.fd_noise_covariance_mode),
