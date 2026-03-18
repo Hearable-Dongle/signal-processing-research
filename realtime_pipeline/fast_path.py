@@ -377,10 +377,12 @@ class _FDBufferedBeamformer:
             center_constraints = full_constraints[:, [center_idx]]
             center_response = np.ones((1, 1), dtype=np.complex128)
             if max_freq_hz > 0.0 and float(freq_axis[f]) > max_freq_hz:
-                selected_label = "high_freq_center_only"
-                selected_constraints = center_constraints
-                selected_response = center_response
-                selected_cond = 1.0
+                af = center_constraints[:, 0].reshape(-1, 1)
+                denom = (af.conj().T @ af)[0, 0]
+                wf = af / (denom + 1e-10)
+                weights[f, :] = wf.reshape(-1)
+                self._last_target_band_conditioning["high_freq_fallback_frames"] += 1
+                continue
             else:
                 candidates: list[tuple[str, np.ndarray, np.ndarray]] = [("full_band", full_constraints, full_response)]
                 if full_constraints.shape[1] >= 3:
