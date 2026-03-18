@@ -29,7 +29,7 @@ class FastPathConfig(BaseModel):
         "capon_mvdr_refine_1src",
         "music_1src",
     ] = "srp_phat_localization"
-    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "lcmv_top2_tracked"] = "mvdr_fd"
+    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "lcmv_top2_tracked", "lcmv_target_band"] = "mvdr_fd"
     mvdr_hop_ms: int | None = None
     fd_analysis_window_ms: float = 20.0
     # Defaults track the sensitivity-tuned Silero preset from
@@ -37,6 +37,8 @@ class FastPathConfig(BaseModel):
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
     fd_cov_ema_alpha: float = 0.2965906035161345
     fd_diag_load: float = 0.012141307774357374
+    fd_trace_diagonal_loading_factor: float = 0.0
+    fd_identity_blend_alpha: float = 0.0
     fd_noise_covariance_mode: Literal["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"] = "estimated_target_subtractive"
     target_activity_rnn_update_mode: Literal["oracle_target_activity", "estimated_target_activity"] | None = (
         "estimated_target_activity"
@@ -73,7 +75,7 @@ class FastPathConfig(BaseModel):
     capon_hold_frames: int = 2
     enhancement_tier: Literal["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"] = "custom"
     output_enhancer_mode: Literal["off", "wiener"] = "off"
-    postfilter_method: Literal["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise"] = "off"
+    postfilter_method: Literal["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"] = "off"
     postfilter_enabled: bool = True
     postfilter_noise_ema_alpha: float = 0.08
     postfilter_speech_ema_alpha: float = 0.12
@@ -103,6 +105,10 @@ class FastPathConfig(BaseModel):
     multi_target_min_activity: float = 0.15
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
+    robust_target_band_width_deg: float = 10.0
+    robust_target_band_conditioning_enabled: bool = False
+    robust_target_band_max_freq_hz: float = 0.0
+    robust_target_band_condition_limit: float = 1e3
 
 
 class SlowPathConfig(BaseModel):
@@ -220,6 +226,14 @@ class SessionStartRequest(BaseModel):
     @property
     def fd_diag_load(self) -> float:
         return float(self.fast_path.fd_diag_load)
+
+    @property
+    def fd_trace_diagonal_loading_factor(self) -> float:
+        return float(self.fast_path.fd_trace_diagonal_loading_factor)
+
+    @property
+    def fd_identity_blend_alpha(self) -> float:
+        return float(self.fast_path.fd_identity_blend_alpha)
 
     @property
     def fd_noise_covariance_mode(self) -> str:
@@ -477,6 +491,22 @@ class SessionStartRequest(BaseModel):
     @property
     def output_allow_amplification(self) -> bool:
         return bool(self.fast_path.output_allow_amplification)
+
+    @property
+    def robust_target_band_width_deg(self) -> float:
+        return float(self.fast_path.robust_target_band_width_deg)
+
+    @property
+    def robust_target_band_conditioning_enabled(self) -> bool:
+        return bool(self.fast_path.robust_target_band_conditioning_enabled)
+
+    @property
+    def robust_target_band_max_freq_hz(self) -> float:
+        return float(self.fast_path.robust_target_band_max_freq_hz)
+
+    @property
+    def robust_target_band_condition_limit(self) -> float:
+        return float(self.fast_path.robust_target_band_condition_limit)
 
     @property
     def tracking_mode(self) -> str:

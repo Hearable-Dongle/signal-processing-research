@@ -35,8 +35,8 @@ def build_pipeline_config_from_request(
     slow_path_enabled = bool(req.slow_path_enabled) and (not single_active)
     beamforming_mode = str(req.beamforming_mode).strip().lower()
     target_activity_mode = req.target_activity_rnn_update_mode
-    if beamforming_mode == "mvdr_fd" and target_activity_mode is None:
-        raise ValueError("MVDR requires fast_path.target_activity_rnn_update_mode to be explicitly set.")
+    if beamforming_mode in {"mvdr_fd", "lcmv_target_band"} and target_activity_mode is None:
+        raise ValueError("Covariance beamforming requires fast_path.target_activity_rnn_update_mode to be explicitly set.")
     return PipelineConfig(
         sample_rate_hz=int(sample_rate_hz),
         fast_frame_ms=max(10, int(req.localization_hop_ms)),
@@ -62,6 +62,8 @@ def build_pipeline_config_from_request(
         fd_analysis_window_ms=float(req.fd_analysis_window_ms),
         fd_cov_ema_alpha=float(req.fd_cov_ema_alpha),
         fd_diag_load=float(req.fd_diag_load),
+        fd_trace_diagonal_loading_factor=float(req.fd_trace_diagonal_loading_factor),
+        fd_identity_blend_alpha=float(req.fd_identity_blend_alpha),
         fd_noise_covariance_mode=str(req.fd_noise_covariance_mode),
         target_activity_rnn_update_mode=target_activity_mode,
         target_activity_low_threshold=float(req.target_activity_low_threshold),
@@ -114,6 +116,10 @@ def build_pipeline_config_from_request(
         coherence_wiener_temporal_alpha=float(req.coherence_wiener_temporal_alpha),
         output_normalization_enabled=bool(req.output_normalization_enabled),
         output_allow_amplification=bool(req.output_allow_amplification),
+        robust_target_band_width_deg=float(req.robust_target_band_width_deg),
+        robust_target_band_conditioning_enabled=bool(req.robust_target_band_conditioning_enabled),
+        robust_target_band_max_freq_hz=float(req.robust_target_band_max_freq_hz),
+        robust_target_band_condition_limit=float(req.robust_target_band_condition_limit),
         srp_overlap=float(req.overlap),
         srp_freq_min_hz=int(req.freq_low_hz),
         srp_freq_max_hz=int(req.freq_high_hz),
@@ -215,6 +221,15 @@ def run_offline_session_pipeline(
     out_root.mkdir(parents=True, exist_ok=True)
 
     frame_samples = max(1, int(cfg.sample_rate_hz * cfg.fast_frame_ms / 1000))
+    total_fast_frames = max(1, int(np.ceil(float(audio.shape[0]) / float(frame_samples))))
+    cfg.beamformer_snapshot_frame_indices = tuple(
+        sorted(
+            {
+                max(1, min(total_fast_frames, int(round(total_fast_frames * frac))))
+                for frac in (0.25, 0.5, 0.75)
+            }
+        )
+    )
     mic_geometry_xyz = np.asarray(mic_geometry_xyz, dtype=float)
     mic_geometry_xy = mic_geometry_xyz[:2, :].T if mic_geometry_xyz.shape[0] == 3 else mic_geometry_xyz[:, :2]
 
@@ -316,7 +331,7 @@ def run_offline_session_pipeline(
         srp_override_provider=srp_override_provider,
         target_activity_override_provider=target_activity_override_provider,
         oracle_noise_frame_provider=oracle_noise_frame_provider,
-        frame_packet_sink=_packet_sink if split_mode == "beamforming_only" else None,
+        frame_packet_sink=_packet_sink if (capture_trace or split_mode == "beamforming_only") else None,
     )
     pipe_holder["pipe"] = pipe
     if initial_focus_direction_deg is not None or initial_focus_speaker_ids:
@@ -335,6 +350,48 @@ def run_offline_session_pipeline(
     raw_mix_mean = np.mean(np.asarray(audio, dtype=np.float64), axis=1).astype(np.float32, copy=False)
     sf.write(out_root / "enhanced_fast_path.wav", enhanced, int(cfg.sample_rate_hz))
     sf.write(out_root / "raw_mix_mean.wav", raw_mix_mean, int(cfg.sample_rate_hz))
+    if captured_packets:
+        beamformed_stage = np.concatenate(
+            [np.asarray(packet.beamformed_audio, dtype=np.float32).reshape(-1) for packet in captured_packets],
+            axis=0,
+        )[: audio.shape[0]]
+        sf.write(out_root / "post_beamforming.wav", beamformed_stage, int(cfg.sample_rate_hz))
+        if any(packet.postfilter_wiener_audio is not None for packet in captured_packets):
+            post_wiener = np.concatenate(
+                [
+                    np.asarray(
+                        packet.beamformed_audio if packet.postfilter_wiener_audio is None else packet.postfilter_wiener_audio,
+                        dtype=np.float32,
+                    ).reshape(-1)
+                    for packet in captured_packets
+                ],
+                axis=0,
+            )[: audio.shape[0]]
+            sf.write(out_root / "post_wiener.wav", post_wiener, int(cfg.sample_rate_hz))
+        if any(packet.postfilter_rnnoise_audio is not None for packet in captured_packets):
+            post_rnnoise = np.concatenate(
+                [
+                    np.asarray(
+                        packet.beamformed_audio if packet.postfilter_rnnoise_audio is None else packet.postfilter_rnnoise_audio,
+                        dtype=np.float32,
+                    ).reshape(-1)
+                    for packet in captured_packets
+                ],
+                axis=0,
+            )[: audio.shape[0]]
+            sf.write(out_root / "post_rnnoise.wav", post_rnnoise, int(cfg.sample_rate_hz))
+        if any(packet.postfilter_bandpass_audio is not None for packet in captured_packets):
+            post_bandpass = np.concatenate(
+                [
+                    np.asarray(
+                        packet.beamformed_audio if packet.postfilter_bandpass_audio is None else packet.postfilter_bandpass_audio,
+                        dtype=np.float32,
+                    ).reshape(-1)
+                    for packet in captured_packets
+                ],
+                axis=0,
+            )[: audio.shape[0]]
+            sf.write(out_root / "post_bandpass.wav", post_bandpass, int(cfg.sample_rate_hz))
 
     final_rows = public_speaker_rows(
         pipe.shared_state.get_speaker_map_snapshot(),
@@ -475,6 +532,8 @@ def run_offline_session_pipeline(
         summary["speaker_map_trace"] = speaker_map_trace
         summary["srp_trace"] = srp_trace
         summary["noise_model_update_trace"] = noise_model_update_trace
+        if pipe._fast is not None:
+            summary["beamformer_snapshot_trace"] = pipe._fast.get_beamformer_snapshot_trace()
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)

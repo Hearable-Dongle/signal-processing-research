@@ -12,6 +12,8 @@ Integration/orchestration layer for real-time multi-speaker spatial processing.
   - produce candidate DOA peaks
   - apply low-latency beamforming with per-speaker gain weights from shared state
     - `mvdr_fd` (default)
+    - `lcmv_target_band`
+    - `lcmv_top2_tracked`
     - `gsc_fd`
     - `delay_sum`
 - Slow path (`~200 ms` chunk cadence):
@@ -132,6 +134,119 @@ Behavior:
 - if neither is set, all speaker gains default to `1.0`
 - fast path applies soft clipping by default and optional RMS normalization (`PipelineConfig.output_target_rms`)
   - attenuation-only normalization is default (`output_allow_amplification=False`)
+
+### Multi-speaker beamforming
+
+The fast path also supports a single mixed-output multi-speaker mode:
+
+- `beamforming_mode="lcmv_top2_tracked"`
+
+Behavior:
+- preserves the top 2 tracked speakers in one mono output with a 2-constraint LCMV solve
+- treats non-selected speakers and ambient background as interference
+- falls back to the single-target path if only one tracked speaker is stable enough
+
+Relevant config fields:
+- `multi_target_max_speakers`
+- `multi_target_hold_frames`
+- `multi_target_min_confidence`
+- `multi_target_min_activity`
+
+Current caveat:
+- this mode relies on the slow-path tracked speaker map
+- benchmark support exists for both SRP-PHAT and Capon backends, but the current `capon_1src` path is still effectively single-source-shaped for overlap tracking
+
+### Robust single-speaker beamforming
+
+The fast path also supports a robust single-target mode:
+
+- `beamforming_mode="lcmv_target_band"`
+
+Behavior:
+- uses the selected single-active target DOA as the center
+- preserves a small angular band around that DOA with 3 unity constraints:
+  - `theta - width`
+  - `theta`
+  - `theta + width`
+- keeps the existing `Rnn` update path, target activity logic, and realtime scheduling
+
+Current default target-band width:
+- `robust_target_band_width_deg = 10.0`
+
+This mode is intended for cases where localization is slightly off and plain `mvdr_fd` attenuates the target too much.
+
+### Benchmark examples
+
+Top-2 tracked overlap smoke:
+
+```bash
+python beamforming/benchmark/oracle_babble_bootstrap_mvdr_benchmark.py \
+  --scene-family zone_overlap \
+  --methods lcmv_top2_tracked_oracle \
+  --max-scenes 1 \
+  --workers 1 \
+  --out-root beamforming/benchmark/_top2_tracked_smoke
+```
+
+Estimated top-2 tracked overlap smoke:
+
+```bash
+python beamforming/benchmark/oracle_babble_bootstrap_mvdr_benchmark.py \
+  --scene-family zone_overlap \
+  --methods lcmv_top2_tracked_estimated \
+  --max-scenes 1 \
+  --workers 1 \
+  --out-root beamforming/benchmark/_top2_tracked_smoke
+```
+
+SRP vs Capon comparison for the estimated tracked-speaker path:
+
+```bash
+python beamforming/benchmark/oracle_babble_bootstrap_mvdr_benchmark.py \
+  --scene-family zone_overlap \
+  --methods lcmv_top2_tracked_estimated \
+  --max-scenes 1 \
+  --workers 1 \
+  --localization-backend srp_phat_localization \
+  --out-root beamforming/benchmark/_top2_tracked_estimated_srp_real_novad
+```
+
+```bash
+python beamforming/benchmark/oracle_babble_bootstrap_mvdr_benchmark.py \
+  --scene-family zone_overlap \
+  --methods lcmv_top2_tracked_estimated \
+  --max-scenes 1 \
+  --workers 1 \
+  --localization-backend capon_1src \
+  --out-root beamforming/benchmark/_top2_tracked_estimated_capon_real_novad
+```
+
+Real-data robust single-speaker GT benchmark:
+
+```bash
+python beamforming/benchmark/data_collection_benchmark.py \
+  --input-path data-collection/icon-gym-mar-17 \
+  --out-dir beamforming/benchmark/_realdata_icon_gym_lcmv_target_band_gt \
+  --methods lcmv_target_band \
+  --workers 1 \
+  --algorithm-mode speaker_tracking_single_active \
+  --use-ground-truth-doa-override \
+  --localization-backend capon_1src \
+  --no-localization-vad-enabled
+```
+
+Real-data robust single-speaker estimated Capon benchmark:
+
+```bash
+python beamforming/benchmark/data_collection_benchmark.py \
+  --input-path data-collection/icon-gym-mar-17 \
+  --out-dir beamforming/benchmark/_realdata_icon_gym_lcmv_target_band_est \
+  --methods lcmv_target_band \
+  --workers 1 \
+  --algorithm-mode speaker_tracking_single_active \
+  --localization-backend capon_1src \
+  --no-localization-vad-enabled
+```
 
 ### 5) Run simulation E2E with real backend resolution
 

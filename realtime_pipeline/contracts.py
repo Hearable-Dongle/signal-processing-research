@@ -62,6 +62,10 @@ class FastPathAudioPacket:
     sample_rate_hz: int
     frame_samples: int
     beamformed_audio: np.ndarray
+    postfilter_wiener_audio: np.ndarray | None = None
+    postfilter_rnnoise_audio: np.ndarray | None = None
+    postfilter_bandpass_audio: np.ndarray | None = None
+    postfilter_output_audio: np.ndarray | None = None
     frame_mc: np.ndarray | None = None
     target_doa_deg: float | None = None
     target_activity_score: float = 0.0
@@ -118,6 +122,10 @@ class FastPathAudioPacket:
             sample_rate_hz=int(sample_rate_hz),
             frame_samples=int(frame_samples),
             beamformed_audio=np.asarray(beamformed_audio, dtype=np.float32).reshape(-1).copy(),
+            postfilter_wiener_audio=None,
+            postfilter_rnnoise_audio=None,
+            postfilter_bandpass_audio=None,
+            postfilter_output_audio=None,
             frame_mc=None if frame_mc is None else np.asarray(frame_mc, dtype=np.float32).copy(),
             target_doa_deg=None if target_doa_deg is None else float(target_doa_deg),
             target_activity_score=float(target_activity_score),
@@ -295,7 +303,7 @@ class PipelineConfig:
     speaker_map_confidence_decay: float = 0.9
     speaker_map_activity_decay: float = 0.92
     # Beamformer mode
-    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum, lcmv_top2_tracked
+    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum, lcmv_top2_tracked, lcmv_target_band
     mvdr_hop_ms: int | None = None
     # DOA/gain smoothing to reduce steering chatter
     doa_ema_alpha: float = 0.2
@@ -308,6 +316,8 @@ class PipelineConfig:
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
     fd_cov_ema_alpha: float = 0.2965906035161345
     fd_diag_load: float = 0.012141307774357374
+    fd_trace_diagonal_loading_factor: float = 0.0
+    fd_identity_blend_alpha: float = 0.0
     fd_noise_covariance_mode: str = "estimated_target_subtractive"  # one of: estimated_target_subtractive, estimated_target_subtractive_frozen, oracle_non_target_residual
     target_activity_rnn_update_mode: str | None = None  # one of: oracle_target_activity, estimated_target_activity
     target_activity_low_threshold: float = 0.10544774305969414
@@ -338,7 +348,7 @@ class PipelineConfig:
     fd_speech_cov_update_scale: float = 0.25
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True
-    postfilter_method: str = "off"  # one of: off, wiener_dd, rnnoise, coherence_wiener, wiener_then_rnnoise
+    postfilter_method: str = "off"  # one of: off, wiener_dd, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass, rnnoise_then_voice_bandpass, wiener_then_voice_bandpass
     postfilter_noise_ema_alpha: float = 0.08
     postfilter_speech_ema_alpha: float = 0.12
     postfilter_gain_floor: float = 0.22
@@ -360,3 +370,8 @@ class PipelineConfig:
     output_rms_max_gain_db: float = 6.0
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
+    robust_target_band_width_deg: float = 10.0
+    robust_target_band_conditioning_enabled: bool = False
+    robust_target_band_max_freq_hz: float = 0.0
+    robust_target_band_condition_limit: float = 1e3
+    beamformer_snapshot_frame_indices: tuple[int, ...] = ()

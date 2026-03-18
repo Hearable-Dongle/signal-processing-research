@@ -94,6 +94,13 @@ def _rms_db(x: np.ndarray) -> float:
     return float(20.0 * np.log10(max(rms, 1e-12)))
 
 
+def _safe_condition_number(x: np.ndarray) -> float:
+    try:
+        return float(np.linalg.cond(np.asarray(x, dtype=np.complex128)))
+    except np.linalg.LinAlgError:
+        return float("inf")
+
+
 def _inactive_noise_model_update() -> dict:
     return {"active": False, "sources": (), "reasons": (), "debug": {}}
 
@@ -228,9 +235,46 @@ class _FDBufferedBeamformer:
         self._last_weights_reused: bool = False
         self._last_noise_model_update: dict = _inactive_noise_model_update()
         self._frozen_bootstrap_frames = max(1, int(np.ceil(1000.0 / max(float(cfg.fast_frame_ms), 1.0))))
+        self._beamformer_snapshot_targets = tuple(
+            int(v) for v in getattr(cfg, "beamformer_snapshot_frame_indices", ()) if int(v) > 0
+        )
+        self._beamformer_snapshot_target_set = set(self._beamformer_snapshot_targets)
+        self._beamformer_snapshot_trace: list[dict] = []
 
     def get_last_noise_model_update(self) -> dict:
         return _normalize_noise_model_update(self._last_noise_model_update)
+
+    def get_beamformer_snapshot_trace(self) -> list[dict]:
+        return [dict(item) for item in self._beamformer_snapshot_trace]
+
+    def _maybe_record_beamformer_snapshot(
+        self,
+        *,
+        beamforming_mode: str,
+        target_doa_deg: float,
+        weights: np.ndarray,
+        null_doa_deg: float | None = None,
+        secondary_doa_deg: float | None = None,
+        target_band_width_deg: float | None = None,
+    ) -> None:
+        frame_idx = int(self._mvdr_frame_counter)
+        if frame_idx not in self._beamformer_snapshot_target_set:
+            return
+        if any(int(item.get("frame_index", -1)) == frame_idx for item in self._beamformer_snapshot_trace):
+            return
+        w = np.asarray(weights, dtype=np.complex128)
+        self._beamformer_snapshot_trace.append(
+            {
+                "frame_index": frame_idx,
+                "beamforming_mode": str(beamforming_mode),
+                "target_doa_deg": float(target_doa_deg),
+                "null_doa_deg": None if null_doa_deg is None else float(null_doa_deg),
+                "secondary_doa_deg": None if secondary_doa_deg is None else float(secondary_doa_deg),
+                "target_band_width_deg": None if target_band_width_deg is None else float(target_band_width_deg),
+                "weights_real": np.asarray(np.real(w), dtype=np.float32).tolist(),
+                "weights_imag": np.asarray(np.imag(w), dtype=np.float32).tolist(),
+            }
+        )
 
     def _should_refresh_weights(
         self,
@@ -269,9 +313,8 @@ class _FDBufferedBeamformer:
     def _solve_mvdr_weights(self, steering: np.ndarray) -> np.ndarray:
         f_bins = steering.shape[0]
         weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
-        eye = np.eye(self.n_mics, dtype=np.complex128)
         for f in range(f_bins):
-            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
+            r = self._loaded_noise_covariance(self.rnn_mvdr_noise[f])
             af = steering[f].reshape(-1, 1)
             try:
                 rinv_a = np.linalg.solve(r, af)
@@ -285,9 +328,8 @@ class _FDBufferedBeamformer:
     def _solve_lcmv_constraint_weights(self, constraints: np.ndarray, response: np.ndarray) -> np.ndarray:
         f_bins = constraints.shape[0]
         weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
-        eye = np.eye(self.n_mics, dtype=np.complex128)
         for f in range(f_bins):
-            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
+            r = self._loaded_noise_covariance(self.rnn_mvdr_noise[f])
             try:
                 r_inv_constraint = np.linalg.solve(r, constraints[f])
             except np.linalg.LinAlgError:
@@ -309,6 +351,96 @@ class _FDBufferedBeamformer:
         constraints = np.stack([a_primary, a_secondary], axis=2)
         response = np.asarray([[1.0 + 0.0j], [1.0 + 0.0j]], dtype=np.complex128)
         return self._solve_lcmv_constraint_weights(constraints, response)
+
+    def _solve_lcmv_target_band_weights(self, steerings: list[np.ndarray]) -> np.ndarray:
+        max_freq_hz = float(max(0.0, getattr(self.cfg, "robust_target_band_max_freq_hz", 0.0)))
+        freq_axis = np.fft.rfftfreq(self.analysis_n, d=1.0 / float(self.cfg.sample_rate_hz))
+        if not bool(getattr(self.cfg, "robust_target_band_conditioning_enabled", False)) and max_freq_hz <= 0.0:
+            constraints = np.stack(steerings, axis=2)
+            response = np.ones((constraints.shape[2], 1), dtype=np.complex128)
+            return self._solve_lcmv_constraint_weights(constraints, response)
+        constraints = np.stack(steerings, axis=2)
+        f_bins = constraints.shape[0]
+        weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
+        condition_limit = float(max(1.0, getattr(self.cfg, "robust_target_band_condition_limit", 1e3)))
+        self._last_target_band_conditioning = {
+            "full_band_frames": 0,
+            "edge_only_frames": 0,
+            "center_only_frames": 0,
+            "high_freq_fallback_frames": 0,
+            "max_selected_cond": 0.0,
+        }
+        for f in range(f_bins):
+            full_constraints = constraints[f]
+            full_response = np.ones((full_constraints.shape[1], 1), dtype=np.complex128)
+            center_idx = full_constraints.shape[1] // 2
+            center_constraints = full_constraints[:, [center_idx]]
+            center_response = np.ones((1, 1), dtype=np.complex128)
+            if max_freq_hz > 0.0 and float(freq_axis[f]) > max_freq_hz:
+                af = center_constraints[:, 0].reshape(-1, 1)
+                denom = (af.conj().T @ af)[0, 0]
+                wf = af / (denom + 1e-10)
+                weights[f, :] = wf.reshape(-1)
+                self._last_target_band_conditioning["high_freq_fallback_frames"] += 1
+                continue
+            else:
+                candidates: list[tuple[str, np.ndarray, np.ndarray]] = [("full_band", full_constraints, full_response)]
+                if full_constraints.shape[1] >= 3:
+                    candidates.append(("center_only", center_constraints, center_response))
+                selected_label, selected_constraints, selected_response = candidates[-1]
+                selected_cond = float("inf")
+                for label, candidate_constraints, candidate_response in candidates:
+                    gram = candidate_constraints.conj().T @ candidate_constraints
+                    cond = _safe_condition_number(gram)
+                    if np.isfinite(cond) and cond <= condition_limit:
+                        selected_label = label
+                        selected_constraints = candidate_constraints
+                        selected_response = candidate_response
+                        selected_cond = cond
+                        break
+                    if label == candidates[-1][0]:
+                        selected_label = label
+                        selected_constraints = candidate_constraints
+                        selected_response = candidate_response
+                        selected_cond = cond
+            r = self._loaded_noise_covariance(self.rnn_mvdr_noise[f])
+            try:
+                r_inv_constraint = np.linalg.solve(r, selected_constraints)
+            except np.linalg.LinAlgError:
+                r_inv_constraint = np.linalg.pinv(r) @ selected_constraints
+            gram = selected_constraints.conj().T @ r_inv_constraint
+            try:
+                mid = np.linalg.solve(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128), selected_response)
+            except np.linalg.LinAlgError:
+                mid = np.linalg.pinv(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128)) @ selected_response
+            weights[f, :] = (r_inv_constraint @ mid).reshape(-1)
+            if selected_label == "full_band":
+                self._last_target_band_conditioning["full_band_frames"] += 1
+            elif selected_label == "high_freq_center_only":
+                self._last_target_band_conditioning["high_freq_fallback_frames"] += 1
+            else:
+                self._last_target_band_conditioning["center_only_frames"] += 1
+            self._last_target_band_conditioning["max_selected_cond"] = max(
+                float(self._last_target_band_conditioning["max_selected_cond"]),
+                float(selected_cond if np.isfinite(selected_cond) else 0.0),
+            )
+        return weights
+
+    def _loaded_noise_covariance(self, rnn_bin: np.ndarray) -> np.ndarray:
+        r = np.asarray(rnn_bin, dtype=np.complex128)
+        mics = r.shape[0]
+        eye = np.eye(mics, dtype=np.complex128)
+        blend_alpha = float(np.clip(getattr(self.cfg, "fd_identity_blend_alpha", 0.0), 0.0, 1.0))
+        trace_scale = float(np.real(np.trace(r))) / float(max(1, mics))
+        if blend_alpha > 0.0:
+            isotropic = max(trace_scale, 0.0) * eye
+            r = ((1.0 - blend_alpha) * r) + (blend_alpha * isotropic)
+        static_load = float(max(getattr(self.cfg, "fd_diag_load", 0.0), 0.0))
+        trace_factor = float(max(getattr(self.cfg, "fd_trace_diagonal_loading_factor", 0.0), 0.0))
+        trace_scale = float(np.real(np.trace(r))) / float(max(1, mics))
+        adaptive_load = trace_factor * max(trace_scale, 0.0)
+        total_load = static_load + adaptive_load + 1e-8
+        return r + (total_load * eye)
 
     def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
@@ -537,6 +669,11 @@ class _FDBufferedBeamformer:
                 oracle_noise_fft=oracle_noise_fft,
             )
             self._cached_mvdr_weights = self._solve_mvdr_weights(a)
+            self._maybe_record_beamformer_snapshot(
+                beamforming_mode="mvdr_fd",
+                target_doa_deg=float(doa_deg),
+                weights=self._cached_mvdr_weights,
+            )
             self._cached_steering = np.asarray(a, dtype=np.complex128)
             self._cached_target_doa_deg = float(doa_deg)
             self._cached_null_doa_deg = None
@@ -625,6 +762,12 @@ class _FDBufferedBeamformer:
                 oracle_noise_fft=oracle_noise_fft,
             )
             self._cached_lcmv_weights = self._solve_lcmv_weights(a_target, a_null)
+            self._maybe_record_beamformer_snapshot(
+                beamforming_mode="lcmv_null",
+                target_doa_deg=float(target_doa_deg),
+                null_doa_deg=float(null_doa_deg),
+                weights=self._cached_lcmv_weights,
+            )
             self._cached_steering = np.asarray(a_target, dtype=np.complex128)
             self._cached_target_doa_deg = float(target_doa_deg)
             self._cached_null_doa_deg = float(null_doa_deg)
@@ -706,6 +849,12 @@ class _FDBufferedBeamformer:
                 oracle_noise_fft=oracle_noise_fft,
             )
             self._cached_lcmv_weights = self._solve_lcmv_top2_weights(a_primary, a_secondary)
+            self._maybe_record_beamformer_snapshot(
+                beamforming_mode="lcmv_top2_tracked",
+                target_doa_deg=float(primary_doa_deg),
+                secondary_doa_deg=float(secondary_doa_deg),
+                weights=self._cached_lcmv_weights,
+            )
             self._cached_steering = np.asarray(a_primary, dtype=np.complex128)
             self._cached_target_doa_deg = float(primary_doa_deg)
             self._cached_secondary_target_doa_deg = float(secondary_doa_deg)
@@ -737,6 +886,100 @@ class _FDBufferedBeamformer:
             self._last_noise_model_update = _inactive_noise_model_update()
         if self._cached_lcmv_weights is None:
             raise RuntimeError("LCMV top2 weights were not initialized.")
+        y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
+        y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
+        return y
+
+    def lcmv_target_band(
+        self,
+        frame_mc: np.ndarray,
+        target_doa_deg: float,
+        covariance_alpha: float | None = None,
+        *,
+        target_active: bool = True,
+        oracle_noise_frame: np.ndarray | None = None,
+    ) -> np.ndarray:
+        x = np.asarray(frame_mc, dtype=np.float64)
+        x_fft = self._analysis_block(x)
+        self._mvdr_frame_counter += 1
+        oracle_noise_fft = None
+        if oracle_noise_frame is not None:
+            oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
+            self._prev_noise_mc = next_prev_noise
+        refresh = self._should_refresh_weights(
+            doa_deg=float(target_doa_deg),
+            target_active=bool(target_active),
+        )
+        self._last_weights_reused = bool(not refresh)
+        band_width_deg = float(max(0.0, getattr(self.cfg, "robust_target_band_width_deg", 10.0)))
+        target_steering = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
+            doa_deg=target_doa_deg,
+            n_fft=self.analysis_n,
+            fs=self.cfg.sample_rate_hz,
+            mic_geometry_xyz=self.mic_geometry_xyz,
+            sound_speed_m_s=self.cfg.sound_speed_m_s,
+        )
+        if refresh:
+            self.rnn_mvdr_noise = self._update_noise_covariance(
+                self.rnn_mvdr_noise,
+                x_fft,
+                target_steering,
+                float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                target_active=bool(target_active),
+                oracle_noise_fft=oracle_noise_fft,
+            )
+            if band_width_deg <= 0.0:
+                self._cached_lcmv_weights = self._solve_lcmv_target_band_weights([target_steering])
+            else:
+                offsets = (-band_width_deg, 0.0, band_width_deg)
+                steerings = [
+                    _steering_vector_f_domain(
+                        doa_deg=float(target_doa_deg + offset),
+                        n_fft=self.analysis_n,
+                        fs=self.cfg.sample_rate_hz,
+                        mic_geometry_xyz=self.mic_geometry_xyz,
+                        sound_speed_m_s=self.cfg.sound_speed_m_s,
+                    )
+                    for offset in offsets
+                ]
+                self._cached_lcmv_weights = self._solve_lcmv_target_band_weights(steerings)
+            self._maybe_record_beamformer_snapshot(
+                beamforming_mode="lcmv_target_band",
+                target_doa_deg=float(target_doa_deg),
+                target_band_width_deg=float(band_width_deg),
+                weights=self._cached_lcmv_weights,
+            )
+            self._cached_steering = np.asarray(target_steering, dtype=np.complex128)
+            self._cached_target_doa_deg = float(target_doa_deg)
+            self._cached_null_doa_deg = None
+            self._cached_secondary_target_doa_deg = None
+            self._cached_last_target_active = bool(target_active)
+            if self._noise_covariance_mode() == "oracle_non_target_residual":
+                reason = "oracle_non_target_residual"
+            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
+                reason = "estimated_target_subtractive_frozen_bootstrap"
+            elif self._noise_covariance_is_frozen():
+                reason = "estimated_target_subtractive_frozen_hold"
+            elif bool(target_active):
+                reason = "estimated_target_subtractive"
+            else:
+                reason = "target_inactive_direct_mix"
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (reason, "lcmv_target_band_active"),
+                "debug": {
+                    "beamforming_mode": "lcmv_target_band",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                    "target_doa_deg": float(target_doa_deg),
+                    "target_band_width_deg": float(band_width_deg),
+                },
+            }
+        else:
+            self._last_noise_model_update = _inactive_noise_model_update()
+        if self._cached_lcmv_weights is None:
+            raise RuntimeError("LCMV target-band weights were not initialized.")
         y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
         y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
@@ -883,22 +1126,36 @@ class _RNNoisePostFilter:
             raise RuntimeError("RNNoise postfilter requested but pyrnnoise is unavailable.")
         self.cfg = cfg
         self._backend = PyRNNoise(48000)
+        self._frame_size = 480
+        self._pending_in = np.zeros((0,), dtype=np.float32)
+        self._pending_out = np.zeros((0,), dtype=np.float32)
+        self._backend.channels = 1
+        self._backend.dtype = np.int16
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
         x = np.asarray(frame, dtype=np.float32).reshape(-1)
         gain = float(10.0 ** (float(self.cfg.rnnoise_input_gain_db) / 20.0))
         x_in = (x * gain).astype(np.float32, copy=False)
+        self._pending_in = np.concatenate([self._pending_in, x_in], axis=0)
         parts: list[np.ndarray] = []
-        for _vad, den in self._backend.denoise_chunk(x_in):
+        while self._pending_in.shape[0] >= self._frame_size:
+            chunk = self._pending_in[: self._frame_size]
+            self._pending_in = self._pending_in[self._frame_size :]
+            chunk_i16 = np.clip(np.round(chunk * 32768.0), -32768.0, 32767.0).astype(np.int16, copy=False)
+            _vad, den = self._backend.denoise_frame(np.atleast_2d(chunk_i16), partial=False)
             den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
             if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
                 den_arr = den_arr / 32768.0
             parts.append(den_arr)
-        out = np.concatenate(parts, axis=0) if parts else np.zeros_like(x)
-        if out.shape[0] < x.shape[0]:
-            out = np.pad(out, (0, x.shape[0] - out.shape[0]))
-        out = out[: x.shape[0]]
+        if parts:
+            self._pending_out = np.concatenate([self._pending_out, np.concatenate(parts, axis=0)], axis=0)
+        if self._pending_out.shape[0] < x.shape[0]:
+            out = np.pad(self._pending_out, (0, x.shape[0] - self._pending_out.shape[0]))
+            self._pending_out = np.zeros((0,), dtype=np.float32)
+        else:
+            out = self._pending_out[: x.shape[0]]
+            self._pending_out = self._pending_out[x.shape[0] :]
         wet = float(np.clip(self.cfg.rnnoise_wet_mix, 0.0, 1.0))
         return (((wet * out) + ((1.0 - wet) * x))).astype(np.float32, copy=False)
 
@@ -947,6 +1204,24 @@ class _CoherenceWienerPostFilter:
         return out.astype(np.float32, copy=False)
 
 
+class _VoiceBandpassPostFilter:
+    def __init__(self, cfg: PipelineConfig):
+        self.cfg = cfg
+
+    def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
+        del speech_activity
+        x = np.asarray(frame, dtype=np.float32).reshape(-1)
+        n = int(x.shape[0])
+        if n <= 1:
+            return x.astype(np.float32, copy=False)
+        x_fft = np.fft.rfft(x, n=n)
+        freqs = np.fft.rfftfreq(n, d=1.0 / float(self.cfg.sample_rate_hz))
+        # Cheap speech-focused band limit for quick real-data sanity checks.
+        mask = (freqs >= 180.0) & (freqs <= 3600.0)
+        y = np.fft.irfft(x_fft * mask.astype(np.float32), n=n).real
+        return y.astype(np.float32, copy=False)
+
+
 class _HybridPostFilter:
     def __init__(self, first, second):
         self._first = first
@@ -964,42 +1239,109 @@ class _PostFilterRouter:
         self._wiener = _PostFilterState(frame_samples=frame_samples, cfg=cfg)
         self._rnnoise = None
         self._coherence = None
-        if self.method in {"rnnoise", "wiener_then_rnnoise"}:
+        self._voice_bandpass = None
+        if self.method in {"rnnoise", "wiener_then_rnnoise", "rnnoise_then_voice_bandpass"}:
             self._rnnoise = _RNNoisePostFilter(cfg)
         if self.method == "coherence_wiener":
             self._coherence = _CoherenceWienerPostFilter(cfg, mic_geometry_xyz)
+        if self.method in {"voice_bandpass", "wiener_then_voice_bandpass", "rnnoise_then_voice_bandpass"}:
+            self._voice_bandpass = _VoiceBandpassPostFilter(cfg)
         if self.method == "wiener_then_rnnoise":
             self._hybrid = _HybridPostFilter(self._wiener, self._rnnoise)
+        elif self.method == "wiener_then_voice_bandpass":
+            self._hybrid = _HybridPostFilter(self._wiener, self._voice_bandpass)
+        elif self.method == "rnnoise_then_voice_bandpass":
+            self._hybrid = _HybridPostFilter(self._rnnoise, self._voice_bandpass)
         else:
             self._hybrid = None
         self._last_noise_model_update: dict = _inactive_noise_model_update()
 
-    def process(self, beamformed: np.ndarray, *, speech_activity: float, frame_mc: np.ndarray | None = None, doa_deg: float | None = None) -> np.ndarray:
+    def process_with_stages(
+        self,
+        beamformed: np.ndarray,
+        *,
+        speech_activity: float,
+        frame_mc: np.ndarray | None = None,
+        doa_deg: float | None = None,
+    ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+        stages: dict[str, np.ndarray] = {}
         if not bool(self.cfg.postfilter_enabled) or self.method == "off":
             self._last_noise_model_update = _inactive_noise_model_update()
-            return np.asarray(beamformed, dtype=np.float32)
+            out = np.asarray(beamformed, dtype=np.float32)
+            stages["postfilter_output"] = out
+            return out, stages
         if self.method == "wiener_dd":
             out = self._wiener.process(beamformed, speech_activity=speech_activity)
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
-            return out
+            stages["post_wiener"] = np.asarray(out, dtype=np.float32)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
         if self.method == "rnnoise":
             if self._rnnoise is None:
                 raise RuntimeError("RNNoise postfilter not initialized.")
             self._last_noise_model_update = _inactive_noise_model_update()
-            return self._rnnoise.process(beamformed, speech_activity=speech_activity)
+            out = self._rnnoise.process(beamformed, speech_activity=speech_activity)
+            stages["post_rnnoise"] = np.asarray(out, dtype=np.float32)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
         if self.method == "coherence_wiener":
             if self._coherence is None or frame_mc is None or doa_deg is None:
                 raise RuntimeError("coherence_wiener postfilter requires frame_mc and doa_deg.")
             self._last_noise_model_update = _inactive_noise_model_update()
-            return self._coherence.process(frame_mc, beamformed, doa_deg)
-        if self.method == "wiener_then_rnnoise":
-            if self._hybrid is None:
-                raise RuntimeError("Hybrid postfilter not initialized.")
-            out = self._hybrid.process(beamformed, speech_activity=speech_activity)
+            out = self._coherence.process(frame_mc, beamformed, doa_deg)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
+        if self.method == "voice_bandpass":
+            if self._voice_bandpass is None:
+                raise RuntimeError("voice_bandpass postfilter not initialized.")
+            self._last_noise_model_update = _inactive_noise_model_update()
+            out = self._voice_bandpass.process(beamformed, speech_activity=speech_activity)
+            stages["post_bandpass"] = np.asarray(out, dtype=np.float32)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
+        if self.method == "wiener_then_voice_bandpass":
+            if self._wiener is None or self._voice_bandpass is None:
+                raise RuntimeError("Wiener->voice_bandpass postfilter not initialized.")
+            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity)
+            out = self._voice_bandpass.process(post_wiener, speech_activity=speech_activity)
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
-            return out
+            stages["post_wiener"] = np.asarray(post_wiener, dtype=np.float32)
+            stages["post_bandpass"] = np.asarray(out, dtype=np.float32)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
+        if self.method == "rnnoise_then_voice_bandpass":
+            if self._rnnoise is None or self._voice_bandpass is None:
+                raise RuntimeError("RNNoise->voice_bandpass postfilter not initialized.")
+            post_rnnoise = self._rnnoise.process(beamformed, speech_activity=speech_activity)
+            out = self._voice_bandpass.process(post_rnnoise, speech_activity=speech_activity)
+            self._last_noise_model_update = _inactive_noise_model_update()
+            stages["post_rnnoise"] = np.asarray(post_rnnoise, dtype=np.float32)
+            stages["post_bandpass"] = np.asarray(out, dtype=np.float32)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
+        if self.method == "wiener_then_rnnoise":
+            if self._wiener is None or self._rnnoise is None:
+                raise RuntimeError("Hybrid postfilter not initialized.")
+            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity)
+            out = self._rnnoise.process(post_wiener, speech_activity=speech_activity)
+            self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
+            stages["post_wiener"] = np.asarray(post_wiener, dtype=np.float32)
+            stages["post_rnnoise"] = np.asarray(out, dtype=np.float32)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
         self._last_noise_model_update = _inactive_noise_model_update()
-        return np.asarray(beamformed, dtype=np.float32)
+        out = np.asarray(beamformed, dtype=np.float32)
+        stages["postfilter_output"] = out
+        return out, stages
+
+    def process(self, beamformed: np.ndarray, *, speech_activity: float, frame_mc: np.ndarray | None = None, doa_deg: float | None = None) -> np.ndarray:
+        out, _stages = self.process_with_stages(
+            beamformed,
+            speech_activity=speech_activity,
+            frame_mc=frame_mc,
+            doa_deg=doa_deg,
+        )
+        return out
 
     def get_last_noise_model_update(self) -> dict:
         return _normalize_noise_model_update(self._last_noise_model_update)
@@ -1028,14 +1370,32 @@ class _PostFilterStageCore:
     def process_packet(self, packet: FastPathAudioPacket) -> tuple[float, float, float]:
         t0 = perf_counter()
         out = np.asarray(packet.beamformed_audio, dtype=np.float32).reshape(-1)
+        postfilter_stages: dict[str, np.ndarray] = {"post_beamforming": out.copy()}
         if bool(self._cfg.postfilter_enabled):
-            out = self._postfilter.process(
+            out, postfilter_stages = self._postfilter.process_with_stages(
                 out,
                 speech_activity=float(packet.speech_activity),
                 frame_mc=None if packet.frame_mc is None else np.asarray(packet.frame_mc, dtype=np.float32),
                 doa_deg=None if packet.target_doa_deg is None else float(packet.target_doa_deg),
             )
+            postfilter_stages["post_beamforming"] = np.asarray(packet.beamformed_audio, dtype=np.float32).reshape(-1).copy()
         postfilter_noise_update = self._postfilter.get_last_noise_model_update()
+        packet.postfilter_wiener_audio = (
+            None
+            if postfilter_stages.get("post_wiener") is None
+            else np.asarray(postfilter_stages["post_wiener"], dtype=np.float32).reshape(-1).copy()
+        )
+        packet.postfilter_rnnoise_audio = (
+            None
+            if postfilter_stages.get("post_rnnoise") is None
+            else np.asarray(postfilter_stages["post_rnnoise"], dtype=np.float32).reshape(-1).copy()
+        )
+        packet.postfilter_bandpass_audio = (
+            None
+            if postfilter_stages.get("post_bandpass") is None
+            else np.asarray(postfilter_stages["post_bandpass"], dtype=np.float32).reshape(-1).copy()
+        )
+        packet.postfilter_output_audio = np.asarray(postfilter_stages.get("postfilter_output", out), dtype=np.float32).reshape(-1).copy()
         combined_noise_update = _merge_noise_model_updates(
             {
                 "active": bool(packet.noise_model_update_active),
@@ -1331,16 +1691,19 @@ class FastPathWorker(threading.Thread):
 
         mode = self._target_activity_mode()
         beamforming_mode = str(self._cfg.beamforming_mode).strip().lower()
-        if beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked"} and mode is None:
+        if beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked", "lcmv_target_band"} and mode is None:
             raise ValueError("Covariance beamforming requires target_activity_rnn_update_mode to be configured.")
         if mode == "oracle_target_activity" and self._target_activity_override_provider is None:
             raise ValueError("oracle_target_activity mode requires a target activity override provider.")
         if (
-            beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked"}
+            beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked", "lcmv_target_band"}
             and str(getattr(self._cfg, "fd_noise_covariance_mode", "estimated_target_subtractive")).strip().lower() == "oracle_non_target_residual"
             and self._oracle_noise_frame_provider is None
         ):
             raise ValueError("oracle_non_target_residual mode requires an oracle noise frame provider.")
+
+    def get_beamformer_snapshot_trace(self) -> list[dict]:
+        return self._fd.get_beamformer_snapshot_trace()
 
     def _suppression_mode(self) -> str:
         return str(self._cfg.own_voice_suppression_mode).strip().lower()
@@ -1984,6 +2347,14 @@ class FastPathWorker(threading.Thread):
             )
         if mode == "gsc_fd":
             return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
+        if mode == "lcmv_target_band":
+            return self._fd.lcmv_target_band(
+                x,
+                target_doa_deg=doa_deg,
+                covariance_alpha=covariance_alpha,
+                target_active=bool(target_active),
+                oracle_noise_frame=oracle_noise_frame,
+            )
         return self._fd.mvdr(
             x,
             doa_deg=doa_deg,
@@ -2053,7 +2424,7 @@ class FastPathWorker(threading.Thread):
 
     def _current_beamformer_noise_model_update(self) -> dict:
         mode = str(self._cfg.beamforming_mode).strip().lower()
-        if mode in {"mvdr_fd", "gsc_fd"}:
+        if mode in {"mvdr_fd", "gsc_fd", "lcmv_target_band", "lcmv_top2_tracked"}:
             return self._fd.get_last_noise_model_update()
         return _inactive_noise_model_update()
 
@@ -2518,6 +2889,8 @@ class FastPathWorker(threading.Thread):
                         packet.postfilter_start_t = perf_counter()
                         postfilter_ms, safety_ms_local, sink_ms_local = self._postfilter_stage.process_packet(packet)
                         packet.postfilter_end_t = perf_counter()
+                        if self._frame_packet_sink is not None:
+                            self._frame_packet_sink(packet)
                         safety_ms += float(safety_ms_local)
                         sink_ms += float(sink_ms_local)
                         self._state.record_postfilter_stage(float(postfilter_ms + safety_ms_local + sink_ms_local))

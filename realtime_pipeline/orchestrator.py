@@ -98,7 +98,7 @@ class RealtimeSpeakerPipeline:
                 target_activity_override_provider=target_activity_override_provider,
                 oracle_noise_frame_provider=oracle_noise_frame_provider,
                 postfilter_queue=self._postfilter_q if split_mode == "pipelined" else None,
-                frame_packet_sink=self._frame_packet_sink if split_mode == "beamforming_only" else None,
+                frame_packet_sink=self._frame_packet_sink,
             )
         if split_mode in {"pipelined", "postfilter_only"}:
             packet_source = self._next_packet if split_mode == "postfilter_only" else None

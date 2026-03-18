@@ -27,6 +27,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
 
 try:
     from scipy.optimize import linear_sum_assignment
+    from scipy.signal import welch
 except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific dependency guard
     missing = exc.name or "scipy"
     raise SystemExit(
@@ -48,6 +49,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
 
 from mic_array_forwarder.models import SessionStartRequest
 from realtime_pipeline.contracts import SRPPeakSnapshot
+from realtime_pipeline.fast_path import _steering_vector_f_domain
 from realtime_pipeline.session_runtime import run_offline_session_pipeline
 from realtime_pipeline.tracking_modes import TRACKING_MODE_CHOICES, validate_tracking_mode
 from simulation.mic_array_profiles import mic_positions_xyz
@@ -257,6 +259,172 @@ def _plot_spectrogram_compare(raw: np.ndarray, proc: np.ndarray, fs: int, out_pa
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
     plt.close(fig)
+
+
+def _plot_psd_compare(raw: np.ndarray, proc: np.ndarray, fs: int, out_path: Path, title: str) -> None:
+    n = min(raw.size, proc.size)
+    if n <= 1:
+        return
+    seg = min(4096, max(256, n))
+    freqs_raw, psd_raw = welch(np.asarray(raw[:n], dtype=np.float64), fs=int(fs), nperseg=seg)
+    freqs_proc, psd_proc = welch(np.asarray(proc[:n], dtype=np.float64), fs=int(fs), nperseg=seg)
+    fig, ax = plt.subplots(figsize=(12, 4.5))
+    ax.semilogx(freqs_raw[1:], 10.0 * np.log10(np.maximum(psd_raw[1:], 1e-12)), color="#666666", linewidth=1.3, label="raw")
+    ax.semilogx(freqs_proc[1:], 10.0 * np.log10(np.maximum(psd_proc[1:], 1e-12)), color="#005f73", linewidth=1.3, label="processed")
+    ax.set_title(f"{title} PSD")
+    ax.set_xlabel("frequency (Hz)")
+    ax.set_ylabel("PSD (dB/Hz)")
+    ax.grid(True, alpha=0.25, which="both")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_psd_stages(stage_signals: list[tuple[str, np.ndarray]], fs: int, out_path: Path, title: str) -> None:
+    valid: list[tuple[str, np.ndarray]] = []
+    for name, signal in stage_signals:
+        arr = np.asarray(signal, dtype=np.float64).reshape(-1)
+        if arr.size > 1:
+            valid.append((str(name), arr))
+    if not valid:
+        return
+    fig, ax = plt.subplots(figsize=(12, 5))
+    colors = ["#666666", "#005f73", "#0a9396", "#ee9b00", "#bb3e03"]
+    for idx, (name, signal) in enumerate(valid):
+        seg = min(4096, max(256, signal.size))
+        freqs, psd = welch(signal, fs=int(fs), nperseg=seg)
+        ax.semilogx(
+            freqs[1:],
+            10.0 * np.log10(np.maximum(psd[1:], 1e-12)),
+            color=colors[idx % len(colors)],
+            linewidth=1.3,
+            label=name,
+        )
+    ax.set_title(f"{title} Stage PSD")
+    ax.set_xlabel("frequency (Hz)")
+    ax.set_ylabel("PSD (dB/Hz)")
+    ax.grid(True, alpha=0.25, which="both")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_single_psd(signal: np.ndarray, fs: int, out_path: Path, title: str, *, color: str = "#005f73") -> None:
+    arr = np.asarray(signal, dtype=np.float64).reshape(-1)
+    if arr.size <= 1:
+        return
+    seg = min(4096, max(256, arr.size))
+    freqs, psd = welch(arr, fs=int(fs), nperseg=seg)
+    fig, ax = plt.subplots(figsize=(12, 4.5))
+    ax.semilogx(freqs[1:], 10.0 * np.log10(np.maximum(psd[1:], 1e-12)), color=color, linewidth=1.3)
+    ax.set_title(title)
+    ax.set_xlabel("frequency (Hz)")
+    ax.set_ylabel("PSD (dB/Hz)")
+    ax.grid(True, alpha=0.25, which="both")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def _snapshot_clip_bounds(center_sample: int, total_samples: int, fs: int, clip_duration_s: float = 2.0) -> tuple[int, int]:
+    half = max(1, int(round(0.5 * clip_duration_s * max(fs, 1))))
+    start = max(0, int(center_sample) - half)
+    end = min(int(total_samples), int(center_sample) + half)
+    return start, max(start + 1, end)
+
+
+def _plot_beam_pattern_from_snapshot(
+    *,
+    snapshot: dict,
+    mic_geometry_xyz: np.ndarray,
+    sample_rate_hz: int,
+    out_path: Path,
+    title: str,
+) -> None:
+    weights_real = np.asarray(snapshot.get("weights_real", []), dtype=np.float64)
+    weights_imag = np.asarray(snapshot.get("weights_imag", []), dtype=np.float64)
+    if weights_real.size == 0 or weights_imag.size == 0:
+        return
+    weights = weights_real + 1j * weights_imag
+    if weights.ndim != 2:
+        return
+    angles = np.linspace(0.0, 360.0, 361, endpoint=True)
+    freqs = np.fft.rfftfreq((weights.shape[0] - 1) * 2, d=1.0 / float(sample_rate_hz))
+    freq_mask = np.asarray((freqs >= 300.0) & (freqs <= 3000.0), dtype=bool)
+    if not np.any(freq_mask):
+        freq_mask = np.ones_like(freqs, dtype=bool)
+    response = np.zeros(angles.shape[0], dtype=np.float64)
+    for idx, angle_deg in enumerate(angles):
+        steering = _steering_vector_f_domain(
+            doa_deg=float(angle_deg),
+            n_fft=int((weights.shape[0] - 1) * 2),
+            fs=int(sample_rate_hz),
+            mic_geometry_xyz=np.asarray(mic_geometry_xyz, dtype=np.float64),
+            sound_speed_m_s=343.0,
+        )
+        gain = np.abs(np.einsum("fm,fm->f", np.conj(weights), steering))
+        response[idx] = float(np.mean(gain[freq_mask]))
+    max_resp = float(np.max(response))
+    if max_resp > 0.0:
+        response = response / max_resp
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.add_subplot(111, projection="polar")
+    ax.plot(np.deg2rad(angles), response, color="#0a9396", linewidth=1.5)
+    target = snapshot.get("target_doa_deg")
+    if target is not None:
+        ax.scatter([np.deg2rad(float(target))], [1.0], color="#ae2012", s=40)
+    ax.set_title(title)
+    ax.set_theta_zero_location("E")
+    ax.set_theta_direction(1)
+    ax.set_rlim(0.0, 1.05)
+    ax.grid(alpha=0.3)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def _emit_beamformer_snapshot_artifacts(
+    *,
+    summary: dict,
+    proc: np.ndarray,
+    fs: int,
+    run_dir: Path,
+    mic_geometry_xyz: np.ndarray,
+) -> None:
+    snapshots = list(summary.get("beamformer_snapshot_trace", []))
+    if not snapshots:
+        return
+    artifact_dir = run_dir / "beamformer_snapshots"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    total_samples = int(proc.size)
+    fast_frame_ms = float(summary.get("fast_frame_ms", 10.0))
+    frame_samples = max(1, int(round((fast_frame_ms / 1000.0) * max(fs, 1))))
+    for idx, snapshot in enumerate(snapshots[:3], start=1):
+        center_sample = int(max(0, int(snapshot.get("frame_index", 1)) - 1) * frame_samples)
+        start, end = _snapshot_clip_bounds(center_sample, total_samples, fs)
+        clip_path = artifact_dir / f"snapshot_{idx:02d}.wav"
+        sf.write(clip_path, np.asarray(proc[start:end], dtype=np.float32), fs)
+        target = snapshot.get("target_doa_deg")
+        title = (
+            f"{summary.get('beamforming_mode', 'beamformer')} snapshot {idx} | "
+            f"frame {int(snapshot.get('frame_index', -1))} | "
+            f"target {float(target):.1f} deg"
+            if target is not None
+            else f"{summary.get('beamforming_mode', 'beamformer')} snapshot {idx}"
+        )
+        _plot_beam_pattern_from_snapshot(
+            snapshot=snapshot,
+            mic_geometry_xyz=np.asarray(mic_geometry_xyz, dtype=np.float64),
+            sample_rate_hz=int(fs),
+            out_path=artifact_dir / f"snapshot_{idx:02d}_polar.png",
+            title=title,
+        )
 def _load_ground_truth_tracks(recording_dir: Path, *, duration_s: float, mic_array_profile: str) -> list[dict]:
     metadata_path = recording_dir / "metadata.json"
     if not metadata_path.exists():
@@ -828,6 +996,14 @@ def _run_recording_method_job(
     output_enhancer_mode: str,
     postfilter_enabled: bool,
     postfilter_method: str,
+    postfilter_noise_ema_alpha: float,
+    postfilter_speech_ema_alpha: float,
+    postfilter_gain_floor: float,
+    postfilter_gain_ema_alpha: float,
+    postfilter_dd_alpha: float,
+    postfilter_noise_update_speech_scale: float,
+    postfilter_gain_max_step_db: float,
+    rnnoise_wet_mix: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -844,6 +1020,9 @@ def _run_recording_method_job(
     use_ground_truth_doa_override: bool,
     mvdr_hop_ms: int | None,
     fd_analysis_window_ms: float,
+    robust_target_band_width_deg: float,
+    robust_target_band_max_freq_hz: float,
+    robust_target_band_condition_limit: float,
     fd_noise_covariance_mode: str,
     target_activity_rnn_update_mode: str,
     target_activity_detector_mode: str,
@@ -851,6 +1030,8 @@ def _run_recording_method_job(
     target_activity_update_every_n_fast_frames: int,
     fd_cov_ema_alpha: float,
     fd_diag_load: float,
+    fd_trace_diagonal_loading_factor: float,
+    fd_identity_blend_alpha: float,
     target_activity_low_threshold: float,
     target_activity_high_threshold: float,
     target_activity_enter_frames: int,
@@ -864,7 +1045,7 @@ def _run_recording_method_job(
 
     method_slug = _slug(method)
     run_dir = out_dir / "runs" / _slug(recording_id) / method_slug
-    is_mvdr = str(method).strip().lower() == "mvdr_fd"
+    is_mvdr = str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band"}
     if str(fd_noise_covariance_mode) == "oracle_non_target_residual":
         raise ValueError(
             "fd_noise_covariance_mode=oracle_non_target_residual is not supported for real-data benchmarks "
@@ -890,6 +1071,14 @@ def _run_recording_method_job(
             "output_enhancer_mode": str(output_enhancer_mode),
             "postfilter_enabled": bool(postfilter_enabled),
             "postfilter_method": str(postfilter_method),
+            "postfilter_noise_ema_alpha": float(postfilter_noise_ema_alpha),
+            "postfilter_speech_ema_alpha": float(postfilter_speech_ema_alpha),
+            "postfilter_gain_floor": float(postfilter_gain_floor),
+            "postfilter_gain_ema_alpha": float(postfilter_gain_ema_alpha),
+            "postfilter_dd_alpha": float(postfilter_dd_alpha),
+            "postfilter_noise_update_speech_scale": float(postfilter_noise_update_speech_scale),
+            "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
+            "rnnoise_wet_mix": float(rnnoise_wet_mix),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
             "suppressed_user_voice_doa_deg": (
                 None if suppressed_user_voice_doa_deg is None else float(suppressed_user_voice_doa_deg)
@@ -902,6 +1091,9 @@ def _run_recording_method_job(
             "assume_single_speaker": bool(assume_single_speaker),
             "localization_backend": str(localization_backend),
             "beamforming_mode": str(method),
+            "robust_target_band_width_deg": float(robust_target_band_width_deg),
+            "robust_target_band_max_freq_hz": float(robust_target_band_max_freq_hz),
+            "robust_target_band_condition_limit": float(robust_target_band_condition_limit),
             "mvdr_hop_ms": (None if mvdr_hop_ms is None else int(mvdr_hop_ms)),
             "fd_analysis_window_ms": float(fd_analysis_window_ms),
             "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
@@ -911,6 +1103,8 @@ def _run_recording_method_job(
             "target_activity_update_every_n_fast_frames": int(target_activity_update_every_n_fast_frames),
             "fd_cov_ema_alpha": float(fd_cov_ema_alpha),
             "fd_diag_load": float(fd_diag_load),
+            "fd_trace_diagonal_loading_factor": float(fd_trace_diagonal_loading_factor),
+            "fd_identity_blend_alpha": float(fd_identity_blend_alpha),
             "target_activity_low_threshold": float(target_activity_low_threshold),
             "target_activity_high_threshold": float(target_activity_high_threshold),
             "target_activity_enter_frames": int(target_activity_enter_frames),
@@ -968,6 +1162,26 @@ def _run_recording_method_job(
     proc, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
     proc = np.asarray(proc, dtype=np.float32).reshape(-1)
     fs = int(proc_sr if proc_sr > 0 else sample_rate_hz)
+    stage_paths = {
+        "post_beamforming": run_dir / "post_beamforming.wav",
+        "post_wiener": run_dir / "post_wiener.wav",
+        "post_rnnoise": run_dir / "post_rnnoise.wav",
+        "post_bandpass": run_dir / "post_bandpass.wav",
+    }
+    stage_audio: dict[str, np.ndarray] = {}
+    for stage_name, stage_path in stage_paths.items():
+        if not stage_path.exists():
+            continue
+        stage_sig, _stage_sr = sf.read(stage_path, dtype="float32", always_2d=False)
+        stage_audio[stage_name] = np.asarray(stage_sig, dtype=np.float32).reshape(-1)
+    if str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band"}:
+        _emit_beamformer_snapshot_artifacts(
+            summary=summary,
+            proc=proc,
+            fs=fs,
+            run_dir=run_dir,
+            mic_geometry_xyz=np.asarray(mic_geometry_xyz, dtype=np.float64),
+        )
     n = min(raw_mix.size, proc.size)
     trace_metrics = _trace_metrics(summary)
     duration_s = float(n / max(fs, 1))
@@ -1001,13 +1215,23 @@ def _run_recording_method_job(
         "enhancement_tier": str(summary.get("enhancement_tier", enhancement_tier)),
         "output_enhancer_mode": str(summary.get("output_enhancer_mode", output_enhancer_mode)),
         "postfilter_method": str(postfilter_method),
+        "rnnoise_wet_mix": float(rnnoise_wet_mix),
         "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
         "fd_analysis_window_ms": float(fd_analysis_window_ms),
+        "robust_target_band_width_deg": float(robust_target_band_width_deg),
+        "robust_target_band_max_freq_hz": float(robust_target_band_max_freq_hz),
+        "robust_target_band_condition_limit": float(robust_target_band_condition_limit),
         "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
         "target_activity_rnn_update_mode": str(target_activity_rnn_update_mode) if is_mvdr else "",
         "target_activity_detector_mode": str(target_activity_detector_mode) if is_mvdr else "",
         "target_activity_detector_backend": str(target_activity_detector_backend) if is_mvdr else "",
         "target_activity_update_every_n_fast_frames": int(target_activity_update_every_n_fast_frames) if is_mvdr else 0,
+        "fd_cov_ema_alpha": float(fd_cov_ema_alpha) if is_mvdr else float("nan"),
+        "fd_diag_load": float(fd_diag_load) if is_mvdr else float("nan"),
+        "fd_trace_diagonal_loading_factor": float(fd_trace_diagonal_loading_factor) if is_mvdr else float("nan"),
+        "fd_identity_blend_alpha": float(fd_identity_blend_alpha) if is_mvdr else float("nan"),
+        "fd_cov_update_scale_target_active": float(fd_cov_update_scale_target_active) if is_mvdr else float("nan"),
+        "fd_cov_update_scale_target_inactive": float(fd_cov_update_scale_target_inactive) if is_mvdr else float("nan"),
         "fast_rtf": float(summary["fast_rtf"]),
         "slow_rtf": float(summary["slow_rtf"]),
         "fast_avg_ms": float(summary["fast_avg_ms"]),
@@ -1033,6 +1257,53 @@ def _run_recording_method_job(
     viz_dir = run_dir / "visualizations"
     _plot_waveform_compare(raw_mix[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
     _plot_spectrogram_compare(raw_mix[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
+    _plot_psd_compare(raw_mix[:n], proc[:n], fs, viz_dir / "psd.png", label)
+    _plot_psd_stages(
+        [
+            ("raw", raw_mix[:n]),
+            ("post_beamforming", stage_audio.get("post_beamforming", proc)[:n]),
+            *([("post_wiener", stage_audio["post_wiener"][:n])] if "post_wiener" in stage_audio else []),
+            *([("post_rnnoise", stage_audio["post_rnnoise"][:n])] if "post_rnnoise" in stage_audio else []),
+            *([("post_bandpass", stage_audio["post_bandpass"][:n])] if "post_bandpass" in stage_audio else []),
+            ("final", proc[:n]),
+        ],
+        fs,
+        viz_dir / "psd_stages.png",
+        label,
+    )
+    _plot_single_psd(raw_mix[:n], fs, viz_dir / "psd_raw.png", f"{label} raw PSD", color="#666666")
+    _plot_single_psd(
+        stage_audio.get("post_beamforming", proc)[:n],
+        fs,
+        viz_dir / "psd_post_beamforming.png",
+        f"{label} post beamforming PSD",
+        color="#005f73",
+    )
+    if "post_wiener" in stage_audio:
+        _plot_single_psd(
+            stage_audio["post_wiener"][:n],
+            fs,
+            viz_dir / "psd_post_wiener.png",
+            f"{label} post wiener PSD",
+            color="#0a9396",
+        )
+    if "post_rnnoise" in stage_audio:
+        _plot_single_psd(
+            stage_audio["post_rnnoise"][:n],
+            fs,
+            viz_dir / "psd_post_rnnoise.png",
+            f"{label} post rnnoise PSD",
+            color="#ee9b00",
+        )
+    if "post_bandpass" in stage_audio:
+        _plot_single_psd(
+            stage_audio["post_bandpass"][:n],
+            fs,
+            viz_dir / "psd_post_bandpass.png",
+            f"{label} post bandpass PSD",
+            color="#94d2bd",
+        )
+    _plot_single_psd(proc[:n], fs, viz_dir / "psd_final.png", f"{label} final PSD", color="#bb3e03")
     _plot_speaker_timeline(
         summary,
         viz_dir / "speaker_directions.png",
@@ -1048,7 +1319,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run realtime beamforming over Data Collection raw-channel recordings.")
     parser.add_argument("--input-path", required=True, help="Data Collection export root/zip, recording dir, or raw WAV dir")
     parser.add_argument("--out-dir", required=True, help="Directory for benchmark outputs")
-    parser.add_argument("--methods", nargs="+", choices=["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum"], default=["mvdr_fd"])
+    parser.add_argument("--methods", nargs="+", choices=["mvdr_fd", "lcmv_target_band", "sd_mvdr_fd", "gsc_fd", "delay_sum"], default=["mvdr_fd"])
     parser.add_argument(
         "--separation-mode",
         choices=["single_dominant_no_separator", "mock", "auto"],
@@ -1090,9 +1361,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enhancement-tier", choices=["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"], default="custom")
     parser.add_argument("--output-enhancer-mode", choices=["off", "wiener"], default="off")
     parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise"], default="off")
+    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"], default="off")
+    parser.add_argument("--postfilter-noise-ema-alpha", type=float, default=0.08)
+    parser.add_argument("--postfilter-speech-ema-alpha", type=float, default=0.12)
+    parser.add_argument("--postfilter-gain-floor", type=float, default=0.22)
+    parser.add_argument("--postfilter-gain-ema-alpha", type=float, default=0.3)
+    parser.add_argument("--postfilter-dd-alpha", type=float, default=0.92)
+    parser.add_argument("--postfilter-noise-update-speech-scale", type=float, default=0.2)
+    parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
+    parser.add_argument("--rnnoise-wet-mix", type=float, default=1.0)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
+    parser.add_argument("--robust-target-band-width-deg", type=float, default=10.0)
+    parser.add_argument("--robust-target-band-max-freq-hz", type=float, default=0.0)
+    parser.add_argument("--robust-target-band-condition-limit", type=float, default=1e3)
     parser.add_argument(
         "--fd-noise-covariance-mode",
         choices=["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"],
@@ -1116,6 +1398,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-activity-update-every-n-fast-frames", type=int, default=2)
     parser.add_argument("--fd-cov-ema-alpha", type=float, default=0.6)
     parser.add_argument("--fd-diag-load", type=float, default=0.01)
+    parser.add_argument("--fd-trace-diagonal-loading-factor", type=float, default=0.0)
+    parser.add_argument("--fd-identity-blend-alpha", type=float, default=0.0)
     parser.add_argument("--target-activity-low-threshold", type=float, default=0.35)
     parser.add_argument("--target-activity-high-threshold", type=float, default=0.55)
     parser.add_argument("--target-activity-enter-frames", type=int, default=2)
@@ -1239,6 +1523,14 @@ def main() -> None:
                 output_enhancer_mode=str(args.output_enhancer_mode),
                 postfilter_enabled=bool(args.postfilter_enabled),
                 postfilter_method=str(args.postfilter_method),
+                postfilter_noise_ema_alpha=float(args.postfilter_noise_ema_alpha),
+                postfilter_speech_ema_alpha=float(args.postfilter_speech_ema_alpha),
+                postfilter_gain_floor=float(args.postfilter_gain_floor),
+                postfilter_gain_ema_alpha=float(args.postfilter_gain_ema_alpha),
+                postfilter_dd_alpha=float(args.postfilter_dd_alpha),
+                postfilter_noise_update_speech_scale=float(args.postfilter_noise_update_speech_scale),
+                postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
+                rnnoise_wet_mix=float(args.rnnoise_wet_mix),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -1255,6 +1547,9 @@ def main() -> None:
                 use_ground_truth_doa_override=bool(args.use_ground_truth_doa_override),
                 mvdr_hop_ms=(None if args.mvdr_hop_ms is None else int(args.mvdr_hop_ms)),
                 fd_analysis_window_ms=float(args.fd_analysis_window_ms),
+                robust_target_band_width_deg=float(args.robust_target_band_width_deg),
+                robust_target_band_max_freq_hz=float(args.robust_target_band_max_freq_hz),
+                robust_target_band_condition_limit=float(args.robust_target_band_condition_limit),
                 fd_noise_covariance_mode=str(args.fd_noise_covariance_mode),
                 target_activity_rnn_update_mode=str(args.target_activity_rnn_update_mode),
                 target_activity_detector_mode=str(args.target_activity_detector_mode),
@@ -1262,6 +1557,8 @@ def main() -> None:
                 target_activity_update_every_n_fast_frames=int(args.target_activity_update_every_n_fast_frames),
                 fd_cov_ema_alpha=float(args.fd_cov_ema_alpha),
                 fd_diag_load=float(args.fd_diag_load),
+                fd_trace_diagonal_loading_factor=float(args.fd_trace_diagonal_loading_factor),
+                fd_identity_blend_alpha=float(args.fd_identity_blend_alpha),
                 target_activity_low_threshold=float(args.target_activity_low_threshold),
                 target_activity_high_threshold=float(args.target_activity_high_threshold),
                 target_activity_enter_frames=int(args.target_activity_enter_frames),
@@ -1361,6 +1658,7 @@ def main() -> None:
             "output_enhancer_mode": str(args.output_enhancer_mode),
             "postfilter_enabled": bool(args.postfilter_enabled),
             "postfilter_method": str(args.postfilter_method),
+            "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),
             "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
             "fd_noise_covariance_mode": str(args.fd_noise_covariance_mode),
@@ -1370,6 +1668,8 @@ def main() -> None:
             "target_activity_update_every_n_fast_frames": int(args.target_activity_update_every_n_fast_frames),
             "fd_cov_ema_alpha": float(args.fd_cov_ema_alpha),
             "fd_diag_load": float(args.fd_diag_load),
+            "fd_trace_diagonal_loading_factor": float(args.fd_trace_diagonal_loading_factor),
+            "fd_identity_blend_alpha": float(args.fd_identity_blend_alpha),
             "target_activity_low_threshold": float(args.target_activity_low_threshold),
             "target_activity_high_threshold": float(args.target_activity_high_threshold),
             "target_activity_enter_frames": int(args.target_activity_enter_frames),
