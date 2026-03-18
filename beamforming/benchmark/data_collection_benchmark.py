@@ -1066,6 +1066,8 @@ def _run_recording_method_job(
     postfilter_gain_max_step_db: float,
     rnnoise_wet_mix: float,
     rnnoise_output_lowpass_cutoff_hz: float,
+    rnnoise_output_notch_freq_hz: float,
+    rnnoise_output_notch_q: float,
     rnnoise_residual_ema_enabled: bool,
     rnnoise_residual_ema_alpha: float,
     beamformer_snapshot_frame_indices: tuple[int, ...] | None,
@@ -1165,6 +1167,8 @@ def _run_recording_method_job(
             "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
             "rnnoise_wet_mix": float(rnnoise_wet_mix),
             "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
+            "rnnoise_output_notch_freq_hz": float(rnnoise_output_notch_freq_hz),
+            "rnnoise_output_notch_q": float(rnnoise_output_notch_q),
             "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
@@ -1535,6 +1539,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
     parser.add_argument("--rnnoise-wet-mix", type=float, default=0.9)
     parser.add_argument("--rnnoise-output-lowpass-cutoff-hz", type=float, default=7500.0)
+    parser.add_argument("--rnnoise-output-notch-freq-hz", type=float, default=500.0)
+    parser.add_argument("--rnnoise-output-notch-q", type=float, default=20.0)
     parser.add_argument("--rnnoise-residual-ema-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--rnnoise-residual-ema-alpha", type=float, default=0.0)
     parser.add_argument("--beamformer-snapshot-frame-indices", type=int, nargs="*", default=None)
@@ -1720,6 +1726,8 @@ def main() -> None:
                 postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
                 rnnoise_wet_mix=float(args.rnnoise_wet_mix),
                 rnnoise_output_lowpass_cutoff_hz=float(args.rnnoise_output_lowpass_cutoff_hz),
+                rnnoise_output_notch_freq_hz=float(args.rnnoise_output_notch_freq_hz),
+                rnnoise_output_notch_q=float(args.rnnoise_output_notch_q),
                 rnnoise_residual_ema_enabled=bool(args.rnnoise_residual_ema_enabled),
                 rnnoise_residual_ema_alpha=float(args.rnnoise_residual_ema_alpha),
                 beamformer_snapshot_frame_indices=(
@@ -1879,6 +1887,8 @@ def main() -> None:
             "postfilter_spectral_floor_beta": float(args.postfilter_spectral_floor_beta),
             "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
             "rnnoise_output_lowpass_cutoff_hz": float(args.rnnoise_output_lowpass_cutoff_hz),
+            "rnnoise_output_notch_freq_hz": float(args.rnnoise_output_notch_freq_hz),
+            "rnnoise_output_notch_q": float(args.rnnoise_output_notch_q),
             "rnnoise_residual_ema_enabled": bool(args.rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(args.rnnoise_residual_ema_alpha),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),

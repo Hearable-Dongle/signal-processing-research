@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Callable
 
 import numpy as np
-from scipy.signal import butter, resample_poly, sosfiltfilt
+from scipy.signal import butter, iirnotch, resample_poly, sosfilt, sosfiltfilt, tf2sos
 from scipy.special import exp1
 
 try:
@@ -1432,6 +1432,15 @@ class _RNNoisePostFilter:
             if cutoff_hz <= 0.0 or cutoff_hz >= 0.5 * float(self._input_sample_rate_hz)
             else butter(6, cutoff_hz, btype="lowpass", fs=float(self._input_sample_rate_hz), output="sos")
         )
+        notch_freq_hz = float(max(getattr(cfg, "rnnoise_output_notch_freq_hz", 0.0), 0.0))
+        notch_q = float(max(getattr(cfg, "rnnoise_output_notch_q", 0.0), 0.0))
+        if 0.0 < notch_freq_hz < 0.5 * float(self._input_sample_rate_hz) and notch_q > 0.0:
+            b_notch, a_notch = iirnotch(notch_freq_hz, notch_q, fs=float(self._input_sample_rate_hz))
+            self._output_notch_sos = tf2sos(b_notch, a_notch)
+            self._output_notch_zi = np.zeros((self._output_notch_sos.shape[0], 2), dtype=np.float32)
+        else:
+            self._output_notch_sos = None
+            self._output_notch_zi = None
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
@@ -1489,6 +1498,9 @@ class _RNNoisePostFilter:
         mixed = ((wet * out) + ((1.0 - wet) * x)).astype(np.float32, copy=False)
         if self._output_lowpass_sos is not None and mixed.shape[0] > 8:
             mixed = np.asarray(sosfiltfilt(self._output_lowpass_sos, mixed), dtype=np.float32)
+        if self._output_notch_sos is not None and self._output_notch_zi is not None and mixed.shape[0] > 0:
+            mixed, self._output_notch_zi = sosfilt(self._output_notch_sos, mixed, zi=self._output_notch_zi)
+            mixed = np.asarray(mixed, dtype=np.float32)
         return mixed.astype(np.float32, copy=False)
 
 
