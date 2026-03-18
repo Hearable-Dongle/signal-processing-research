@@ -40,6 +40,17 @@ class FastPathConfig(BaseModel):
     fd_diag_load: float = 0.012141307774357374
     fd_trace_diagonal_loading_factor: float = 0.0
     fd_identity_blend_alpha: float = 0.0
+    beamformer_rnn_skip_refresh_when_clean: bool = False
+    beamformer_rnn_dirty_threshold: float = 0.0
+    beamformer_rnn_dirty_eps: float = 1e-8
+    beamformer_rnn_dirty_stat: Literal["max", "mean"] = "max"
+    beamformer_sparse_solve_enabled: bool = False
+    beamformer_sparse_solve_stride: int = 1
+    beamformer_sparse_solve_min_freq_hz: float = 200.0
+    beamformer_sparse_solve_interp: Literal["linear_complex"] = "linear_complex"
+    beamformer_weight_reuse_enabled: bool = True
+    beamformer_weight_smoothing_alpha: float = 1.0
+    beamformer_doa_refresh_tolerance_deg: float = 5.0
     fd_noise_covariance_mode: Literal["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"] = "estimated_target_subtractive"
     target_activity_rnn_update_mode: Literal["oracle_target_activity", "estimated_target_activity"] | None = (
         "estimated_target_activity"
@@ -400,6 +411,50 @@ class SessionStartRequest(BaseModel):
     @property
     def postfilter_input_source(self) -> str:
         return str(self.fast_path.postfilter_input_source)
+
+    @property
+    def beamformer_rnn_skip_refresh_when_clean(self) -> bool:
+        return bool(self.fast_path.beamformer_rnn_skip_refresh_when_clean)
+
+    @property
+    def beamformer_rnn_dirty_threshold(self) -> float:
+        return float(self.fast_path.beamformer_rnn_dirty_threshold)
+
+    @property
+    def beamformer_rnn_dirty_eps(self) -> float:
+        return float(self.fast_path.beamformer_rnn_dirty_eps)
+
+    @property
+    def beamformer_rnn_dirty_stat(self) -> str:
+        return str(self.fast_path.beamformer_rnn_dirty_stat)
+
+    @property
+    def beamformer_sparse_solve_enabled(self) -> bool:
+        return bool(self.fast_path.beamformer_sparse_solve_enabled)
+
+    @property
+    def beamformer_sparse_solve_stride(self) -> int:
+        return int(self.fast_path.beamformer_sparse_solve_stride)
+
+    @property
+    def beamformer_sparse_solve_min_freq_hz(self) -> float:
+        return float(self.fast_path.beamformer_sparse_solve_min_freq_hz)
+
+    @property
+    def beamformer_sparse_solve_interp(self) -> str:
+        return str(self.fast_path.beamformer_sparse_solve_interp)
+
+    @property
+    def beamformer_weight_reuse_enabled(self) -> bool:
+        return bool(self.fast_path.beamformer_weight_reuse_enabled)
+
+    @property
+    def beamformer_weight_smoothing_alpha(self) -> float:
+        return float(self.fast_path.beamformer_weight_smoothing_alpha)
+
+    @property
+    def beamformer_doa_refresh_tolerance_deg(self) -> float:
+        return float(self.fast_path.beamformer_doa_refresh_tolerance_deg)
 
     @property
     def postfilter_noise_ema_alpha(self) -> float:

@@ -67,6 +67,17 @@ def build_pipeline_config_from_request(
         fd_diag_load=float(req.fd_diag_load),
         fd_trace_diagonal_loading_factor=float(req.fd_trace_diagonal_loading_factor),
         fd_identity_blend_alpha=float(req.fd_identity_blend_alpha),
+        beamformer_rnn_skip_refresh_when_clean=bool(req.beamformer_rnn_skip_refresh_when_clean),
+        beamformer_rnn_dirty_threshold=float(req.beamformer_rnn_dirty_threshold),
+        beamformer_rnn_dirty_eps=float(req.beamformer_rnn_dirty_eps),
+        beamformer_rnn_dirty_stat=str(req.beamformer_rnn_dirty_stat),
+        beamformer_sparse_solve_enabled=bool(req.beamformer_sparse_solve_enabled),
+        beamformer_sparse_solve_stride=int(req.beamformer_sparse_solve_stride),
+        beamformer_sparse_solve_min_freq_hz=float(req.beamformer_sparse_solve_min_freq_hz),
+        beamformer_sparse_solve_interp=str(req.beamformer_sparse_solve_interp),
+        beamformer_weight_reuse_enabled=bool(req.beamformer_weight_reuse_enabled),
+        beamformer_weight_smoothing_alpha=float(req.beamformer_weight_smoothing_alpha),
+        beamformer_doa_refresh_tolerance_deg=float(req.beamformer_doa_refresh_tolerance_deg),
         fd_noise_covariance_mode=str(req.fd_noise_covariance_mode),
         target_activity_rnn_update_mode=target_activity_mode,
         target_activity_low_threshold=float(req.target_activity_low_threshold),
@@ -495,6 +506,17 @@ def run_offline_session_pipeline(
         "fd_analysis_window_ms": float(cfg.fd_analysis_window_ms),
         "fd_cov_ema_alpha": float(cfg.fd_cov_ema_alpha),
         "fd_diag_load": float(cfg.fd_diag_load),
+        "beamformer_rnn_skip_refresh_when_clean": bool(cfg.beamformer_rnn_skip_refresh_when_clean),
+        "beamformer_rnn_dirty_threshold": float(cfg.beamformer_rnn_dirty_threshold),
+        "beamformer_rnn_dirty_eps": float(cfg.beamformer_rnn_dirty_eps),
+        "beamformer_rnn_dirty_stat": str(cfg.beamformer_rnn_dirty_stat),
+        "beamformer_sparse_solve_enabled": bool(cfg.beamformer_sparse_solve_enabled),
+        "beamformer_sparse_solve_stride": int(cfg.beamformer_sparse_solve_stride),
+        "beamformer_sparse_solve_min_freq_hz": float(cfg.beamformer_sparse_solve_min_freq_hz),
+        "beamformer_sparse_solve_interp": str(cfg.beamformer_sparse_solve_interp),
+        "beamformer_weight_reuse_enabled": bool(cfg.beamformer_weight_reuse_enabled),
+        "beamformer_weight_smoothing_alpha": float(cfg.beamformer_weight_smoothing_alpha),
+        "beamformer_doa_refresh_tolerance_deg": float(cfg.beamformer_doa_refresh_tolerance_deg),
         "fd_noise_covariance_mode": str(cfg.fd_noise_covariance_mode),
         "target_activity_rnn_update_mode": None if cfg.target_activity_rnn_update_mode is None else str(cfg.target_activity_rnn_update_mode),
         "target_activity_low_threshold": float(cfg.target_activity_low_threshold),
@@ -583,6 +605,7 @@ def run_offline_session_pipeline(
         summary["noise_model_update_trace"] = noise_model_update_trace
         if pipe._fast is not None:
             summary["beamformer_snapshot_trace"] = pipe._fast.get_beamformer_snapshot_trace()
+            summary.update(pipe._fast.get_beamformer_runtime_stats())
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)

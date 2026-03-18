@@ -327,6 +327,17 @@ class PipelineConfig:
     fd_diag_load: float = 0.012141307774357374
     fd_trace_diagonal_loading_factor: float = 0.0
     fd_identity_blend_alpha: float = 0.0
+    beamformer_rnn_skip_refresh_when_clean: bool = False
+    beamformer_rnn_dirty_threshold: float = 0.0
+    beamformer_rnn_dirty_eps: float = 1e-8
+    beamformer_rnn_dirty_stat: str = "max"  # one of: max, mean
+    beamformer_sparse_solve_enabled: bool = False
+    beamformer_sparse_solve_stride: int = 1
+    beamformer_sparse_solve_min_freq_hz: float = 200.0
+    beamformer_sparse_solve_interp: str = "linear_complex"  # one of: linear_complex
+    beamformer_weight_reuse_enabled: bool = True
+    beamformer_weight_smoothing_alpha: float = 1.0
+    beamformer_doa_refresh_tolerance_deg: float = 5.0
     fd_noise_covariance_mode: str = "estimated_target_subtractive"  # one of: estimated_target_subtractive, estimated_target_subtractive_frozen, oracle_non_target_residual
     target_activity_rnn_update_mode: str | None = None  # one of: oracle_target_activity, estimated_target_activity
     target_activity_low_threshold: float = 0.10544774305969414

@@ -234,7 +234,14 @@ class _FDBufferedBeamformer:
         self._cached_secondary_target_doa_deg: float | None = None
         self._cached_null_doa_deg: float | None = None
         self._cached_last_target_active: bool | None = None
+        self._cached_last_solved_rnn: np.ndarray | None = None
         self._last_weights_reused: bool = False
+        self._beamformer_refresh_requests: int = 0
+        self._beamformer_refresh_executed: int = 0
+        self._beamformer_refresh_skipped_clean: int = 0
+        self._beamformer_weights_reused_frames: int = 0
+        self._beamformer_last_dirty_stat: float = 0.0
+        self._beamformer_dirty_stats: list[float] = []
         self._last_noise_model_update: dict = _inactive_noise_model_update()
         self._frozen_bootstrap_frames = max(1, int(np.ceil(1000.0 / max(float(cfg.fast_frame_ms), 1.0))))
         self._beamformer_snapshot_targets = tuple(
@@ -248,6 +255,18 @@ class _FDBufferedBeamformer:
 
     def get_beamformer_snapshot_trace(self) -> list[dict]:
         return [dict(item) for item in self._beamformer_snapshot_trace]
+
+    def get_beamformer_runtime_stats(self) -> dict[str, float | int]:
+        dirty = np.asarray(self._beamformer_dirty_stats, dtype=np.float64)
+        return {
+            "beamformer_refresh_requests": int(self._beamformer_refresh_requests),
+            "beamformer_refresh_executed": int(self._beamformer_refresh_executed),
+            "beamformer_refresh_skipped_clean": int(self._beamformer_refresh_skipped_clean),
+            "beamformer_weights_reused_frames": int(self._beamformer_weights_reused_frames),
+            "beamformer_dirty_stat_last": float(self._beamformer_last_dirty_stat),
+            "beamformer_dirty_stat_mean": float(np.mean(dirty)) if dirty.size else 0.0,
+            "beamformer_dirty_stat_p95": float(np.percentile(dirty, 95.0)) if dirty.size else 0.0,
+        }
 
     def get_output_noise_psd_for_fft(self, target_n_fft: int) -> np.ndarray | None:
         if self.rnn_mvdr_noise is None:
@@ -296,39 +315,86 @@ class _FDBufferedBeamformer:
             }
         )
 
-    def _should_refresh_weights(
+    def _refresh_reason(
         self,
         *,
         doa_deg: float,
         target_active: bool,
         null_doa_deg: float | None = None,
         secondary_doa_deg: float | None = None,
-    ) -> bool:
-        if null_doa_deg is None:
-            if self._cached_mvdr_weights is None:
-                return True
-        else:
+        requires_lcmv_weights: bool = False,
+    ) -> str | None:
+        if requires_lcmv_weights:
             if self._cached_lcmv_weights is None:
-                return True
+                return "uninitialized"
+        elif self._cached_mvdr_weights is None:
+            return "uninitialized"
         if self._cached_mvdr_weights is None and self._cached_lcmv_weights is None:
-            return True
-        if self._mvdr_frame_counter % max(self.solve_interval_frames, 1) == 0:
-            return True
-        if self._cached_target_doa_deg is None or _angular_dist_deg(self._cached_target_doa_deg, doa_deg) >= 1.0:
-            return True
+            return "uninitialized"
+        doa_tolerance_deg = float(max(getattr(self.cfg, "beamformer_doa_refresh_tolerance_deg", 5.0), 0.1))
+        if self._cached_target_doa_deg is None or _angular_dist_deg(self._cached_target_doa_deg, doa_deg) >= doa_tolerance_deg:
+            return "target_doa_changed"
         if secondary_doa_deg is not None:
             if self._cached_secondary_target_doa_deg is None:
-                return True
-            if _angular_dist_deg(self._cached_secondary_target_doa_deg, secondary_doa_deg) >= 1.0:
-                return True
+                return "secondary_doa_changed"
+            if _angular_dist_deg(self._cached_secondary_target_doa_deg, secondary_doa_deg) >= doa_tolerance_deg:
+                return "secondary_doa_changed"
         if self._cached_last_target_active is None or bool(self._cached_last_target_active) != bool(target_active):
-            return True
+            return "target_activity_flip"
         if null_doa_deg is not None:
             if self._cached_lcmv_weights is None:
-                return True
-            if self._cached_null_doa_deg is None or _angular_dist_deg(self._cached_null_doa_deg, null_doa_deg) >= 1.0:
-                return True
-        return False
+                return "null_doa_changed"
+            if self._cached_null_doa_deg is None or _angular_dist_deg(self._cached_null_doa_deg, null_doa_deg) >= doa_tolerance_deg:
+                return "null_doa_changed"
+        if self._mvdr_frame_counter % max(self.solve_interval_frames, 1) == 0:
+            return "hop"
+        return None
+
+    def _rnn_dirty_stat(self, candidate_rnn: np.ndarray | None) -> float:
+        if candidate_rnn is None or self._cached_last_solved_rnn is None:
+            stat = float("inf")
+            self._beamformer_last_dirty_stat = stat
+            return stat
+        eps = float(max(getattr(self.cfg, "beamformer_rnn_dirty_eps", 1e-8), 1e-12))
+        prev = np.asarray(self._cached_last_solved_rnn, dtype=np.complex128)
+        cur = np.asarray(candidate_rnn, dtype=np.complex128)
+        if prev.shape != cur.shape:
+            stat = float("inf")
+            self._beamformer_last_dirty_stat = stat
+            return stat
+        deltas: list[float] = []
+        for f in range(cur.shape[0]):
+            num = float(np.linalg.norm((cur[f] - prev[f]).reshape(-1), ord=2))
+            den = max(float(np.linalg.norm(prev[f].reshape(-1), ord=2)), eps)
+            deltas.append(num / den)
+        values = np.asarray(deltas, dtype=np.float64)
+        mode = str(getattr(self.cfg, "beamformer_rnn_dirty_stat", "max")).strip().lower()
+        stat = float(np.mean(values)) if mode == "mean" else float(np.max(values))
+        self._beamformer_last_dirty_stat = stat
+        self._beamformer_dirty_stats.append(stat)
+        return stat
+
+    def _should_execute_refresh(
+        self,
+        *,
+        refresh_reason: str | None,
+        candidate_rnn: np.ndarray | None,
+    ) -> tuple[bool, str | None]:
+        if refresh_reason is None:
+            return False, None
+        self._beamformer_refresh_requests += 1
+        if refresh_reason != "hop":
+            return True, refresh_reason
+        if not bool(getattr(self.cfg, "beamformer_rnn_skip_refresh_when_clean", False)):
+            return True, refresh_reason
+        threshold = float(max(getattr(self.cfg, "beamformer_rnn_dirty_threshold", 0.0), 0.0))
+        if threshold <= 0.0:
+            return True, refresh_reason
+        dirty = self._rnn_dirty_stat(candidate_rnn)
+        if np.isfinite(dirty) and dirty <= threshold:
+            self._beamformer_refresh_skipped_clean += 1
+            return False, "hop_clean_skip"
+        return True, refresh_reason
 
     def _solve_mvdr_weights(self, steering: np.ndarray) -> np.ndarray:
         f_bins = steering.shape[0]
@@ -375,13 +441,12 @@ class _FDBufferedBeamformer:
     def _solve_lcmv_target_band_weights(self, steerings: list[np.ndarray]) -> np.ndarray:
         max_freq_hz = float(max(0.0, getattr(self.cfg, "robust_target_band_max_freq_hz", 0.0)))
         freq_axis = np.fft.rfftfreq(self.analysis_n, d=1.0 / float(self.cfg.sample_rate_hz))
-        if not bool(getattr(self.cfg, "robust_target_band_conditioning_enabled", False)) and max_freq_hz <= 0.0:
-            constraints = np.stack(steerings, axis=2)
-            response = np.ones((constraints.shape[2], 1), dtype=np.complex128)
-            return self._solve_lcmv_constraint_weights(constraints, response)
         constraints = np.stack(steerings, axis=2)
         f_bins = constraints.shape[0]
         weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
+        sparse_enabled = bool(getattr(self.cfg, "beamformer_sparse_solve_enabled", False))
+        sparse_stride = max(1, int(getattr(self.cfg, "beamformer_sparse_solve_stride", 1)))
+        sparse_min_freq_hz = float(max(0.0, getattr(self.cfg, "beamformer_sparse_solve_min_freq_hz", 200.0)))
         condition_limit = float(max(1.0, getattr(self.cfg, "robust_target_band_condition_limit", 1e3)))
         self._last_target_band_conditioning = {
             "full_band_frames": 0,
@@ -390,7 +455,29 @@ class _FDBufferedBeamformer:
             "high_freq_fallback_frames": 0,
             "max_selected_cond": 0.0,
         }
-        for f in range(f_bins):
+        if (not sparse_enabled) or sparse_stride <= 1:
+            solve_bins = list(range(f_bins))
+            interp_bins: list[int] = []
+        else:
+            solve_bins = []
+            interp_bins = []
+            for f in range(f_bins):
+                freq_hz = float(freq_axis[f])
+                if max_freq_hz > 0.0 and freq_hz > max_freq_hz:
+                    continue
+                if freq_hz < sparse_min_freq_hz:
+                    solve_bins.append(f)
+                    continue
+                interp_bins.append(f)
+            sampled_interp = interp_bins[::sparse_stride]
+            if interp_bins and interp_bins[-1] not in sampled_interp:
+                sampled_interp.append(interp_bins[-1])
+            solve_bins.extend(sampled_interp)
+            solve_bins = sorted(set(solve_bins))
+        solved_mask = np.zeros((f_bins,), dtype=bool)
+        center_steering = constraints[:, :, constraints.shape[2] // 2]
+
+        for f in solve_bins:
             full_constraints = constraints[f]
             full_response = np.ones((full_constraints.shape[1], 1), dtype=np.complex128)
             center_idx = full_constraints.shape[1] // 2
@@ -401,6 +488,7 @@ class _FDBufferedBeamformer:
                 denom = (af.conj().T @ af)[0, 0]
                 wf = af / (denom + 1e-10)
                 weights[f, :] = wf.reshape(-1)
+                solved_mask[f] = True
                 self._last_target_band_conditioning["high_freq_fallback_frames"] += 1
                 continue
             else:
@@ -434,6 +522,8 @@ class _FDBufferedBeamformer:
             except np.linalg.LinAlgError:
                 mid = np.linalg.pinv(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128)) @ selected_response
             weights[f, :] = (r_inv_constraint @ mid).reshape(-1)
+            weights[f, :] = self._renormalize_weights_to_target(weights[f, :], center_steering[f])
+            solved_mask[f] = True
             if selected_label == "full_band":
                 self._last_target_band_conditioning["full_band_frames"] += 1
             elif selected_label == "high_freq_center_only":
@@ -444,7 +534,69 @@ class _FDBufferedBeamformer:
                 float(self._last_target_band_conditioning["max_selected_cond"]),
                 float(selected_cond if np.isfinite(selected_cond) else 0.0),
             )
+        if sparse_enabled and sparse_stride > 1 and np.any(solved_mask):
+            weights = self._interpolate_sparse_lcmv_weights(
+                weights=weights,
+                solved_mask=solved_mask,
+                center_steering=center_steering,
+                freq_axis=freq_axis,
+                max_freq_hz=max_freq_hz,
+                min_freq_hz=sparse_min_freq_hz,
+            )
         return weights
+
+    def _renormalize_weights_to_target(self, weights: np.ndarray, target_steering: np.ndarray) -> np.ndarray:
+        wf = np.asarray(weights, dtype=np.complex128).reshape(-1)
+        af = np.asarray(target_steering, dtype=np.complex128).reshape(-1)
+        denom = np.vdot(af, wf)
+        if not np.isfinite(np.real(denom)) or abs(denom) < 1e-10:
+            denom = np.vdot(af, af) + 1e-10
+            return (af / denom).reshape(-1)
+        return (wf / denom).reshape(-1)
+
+    def _interpolate_sparse_lcmv_weights(
+        self,
+        *,
+        weights: np.ndarray,
+        solved_mask: np.ndarray,
+        center_steering: np.ndarray,
+        freq_axis: np.ndarray,
+        max_freq_hz: float,
+        min_freq_hz: float,
+    ) -> np.ndarray:
+        interp_mode = str(getattr(self.cfg, "beamformer_sparse_solve_interp", "linear_complex")).strip().lower()
+        if interp_mode != "linear_complex":
+            return weights
+        out = np.asarray(weights, dtype=np.complex128).copy()
+        solved_idx = np.flatnonzero(solved_mask)
+        if solved_idx.size < 2:
+            return out
+        upper_hz = max_freq_hz if max_freq_hz > 0.0 else float(freq_axis[-1])
+        for f in range(out.shape[0]):
+            freq_hz = float(freq_axis[f])
+            if solved_mask[f]:
+                continue
+            if freq_hz < min_freq_hz:
+                continue
+            if freq_hz > upper_hz:
+                continue
+            for m in range(self.n_mics):
+                out[f, m] = np.interp(freq_hz, freq_axis[solved_idx], np.real(out[solved_idx, m])) + (
+                    1j * np.interp(freq_hz, freq_axis[solved_idx], np.imag(out[solved_idx, m]))
+                )
+            out[f, :] = self._renormalize_weights_to_target(out[f, :], center_steering[f])
+        return out
+
+    def _apply_lcmv_weight_smoothing(self, new_weights: np.ndarray, target_steering: np.ndarray) -> np.ndarray:
+        if not bool(getattr(self.cfg, "beamformer_weight_reuse_enabled", True)):
+            return new_weights
+        alpha = float(np.clip(getattr(self.cfg, "beamformer_weight_smoothing_alpha", 1.0), 0.0, 1.0))
+        if alpha >= 0.999 or self._cached_lcmv_weights is None or self._cached_lcmv_weights.shape != new_weights.shape:
+            return new_weights
+        blended = ((1.0 - alpha) * np.asarray(self._cached_lcmv_weights, dtype=np.complex128)) + (alpha * np.asarray(new_weights, dtype=np.complex128))
+        for f in range(blended.shape[0]):
+            blended[f, :] = self._renormalize_weights_to_target(blended[f, :], target_steering[f])
+        return blended
 
     def _loaded_noise_covariance(self, rnn_bin: np.ndarray) -> np.ndarray:
         r = np.asarray(rnn_bin, dtype=np.complex128)
@@ -654,6 +806,17 @@ class _FDBufferedBeamformer:
             return base * scale
         return base
 
+    def _noise_update_reason(self, *, target_active: bool, multi_target: bool = False) -> str:
+        if self._noise_covariance_mode() == "oracle_non_target_residual":
+            return "oracle_non_target_residual"
+        if self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
+            return "estimated_target_subtractive_frozen_bootstrap"
+        if self._noise_covariance_is_frozen():
+            return "estimated_target_subtractive_frozen_hold"
+        if bool(target_active):
+            return "estimated_multitarget_subtractive" if multi_target else "estimated_target_subtractive"
+        return "target_inactive_direct_mix"
+
     def mvdr(
         self,
         frame_mc: np.ndarray,
@@ -670,17 +833,17 @@ class _FDBufferedBeamformer:
         if oracle_noise_frame is not None:
             oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
             self._prev_noise_mc = next_prev_noise
-        refresh = self._should_refresh_weights(doa_deg=float(doa_deg), target_active=bool(target_active))
-        self._last_weights_reused = bool(not refresh)
-        a = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
+        refresh_reason = self._refresh_reason(doa_deg=float(doa_deg), target_active=bool(target_active))
+        a = self._cached_steering if (refresh_reason is None and self._cached_steering is not None) else _steering_vector_f_domain(
             doa_deg=doa_deg,
             n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )  # (F, M)
-        if refresh:
-            self.rnn_mvdr_noise = self._update_noise_covariance(
+        candidate_rnn = None
+        if refresh_reason is not None:
+            candidate_rnn = self._update_noise_covariance(
                 self.rnn_mvdr_noise,
                 x_fft,
                 a,
@@ -688,7 +851,15 @@ class _FDBufferedBeamformer:
                 target_active=bool(target_active),
                 oracle_noise_fft=oracle_noise_fft,
             )
+            self.rnn_mvdr_noise = candidate_rnn
+        refresh, refresh_reason = self._should_execute_refresh(refresh_reason=refresh_reason, candidate_rnn=candidate_rnn)
+        self._last_weights_reused = bool(not refresh)
+        if not refresh:
+            self._beamformer_weights_reused_frames += 1
+        if refresh:
             self._cached_mvdr_weights = self._solve_mvdr_weights(a)
+            self._cached_last_solved_rnn = None if self.rnn_mvdr_noise is None else np.asarray(self.rnn_mvdr_noise, dtype=np.complex128).copy()
+            self._beamformer_refresh_executed += 1
             self._maybe_record_beamformer_snapshot(
                 beamforming_mode="mvdr_fd",
                 target_doa_deg=float(doa_deg),
@@ -698,24 +869,29 @@ class _FDBufferedBeamformer:
             self._cached_target_doa_deg = float(doa_deg)
             self._cached_null_doa_deg = None
             self._cached_last_target_active = bool(target_active)
-            if self._noise_covariance_mode() == "oracle_non_target_residual":
-                reason = "oracle_non_target_residual"
-            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
-                reason = "estimated_target_subtractive_frozen_bootstrap"
-            elif self._noise_covariance_is_frozen():
-                reason = "estimated_target_subtractive_frozen_hold"
-            elif bool(target_active):
-                reason = "estimated_target_subtractive"
-            else:
-                reason = "target_inactive_direct_mix"
             self._last_noise_model_update = {
                 "active": True,
                 "sources": ("beamformer_rnn",),
-                "reasons": (reason,),
+                "reasons": (self._noise_update_reason(target_active=bool(target_active)),),
                 "debug": {
                     "beamforming_mode": "mvdr_fd",
                     "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
                     "target_active": bool(target_active),
+                    "refresh_reason": str(refresh_reason),
+                    "rnn_dirty_stat": float(self._beamformer_last_dirty_stat),
+                },
+            }
+        elif candidate_rnn is not None:
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (self._noise_update_reason(target_active=bool(target_active)), str(refresh_reason)),
+                "debug": {
+                    "beamforming_mode": "mvdr_fd",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                    "refresh_reason": str(refresh_reason),
+                    "rnn_dirty_stat": float(self._beamformer_last_dirty_stat),
                 },
             }
         else:
@@ -744,26 +920,41 @@ class _FDBufferedBeamformer:
         if oracle_noise_frame is not None:
             oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
             self._prev_noise_mc = next_prev_noise
-        refresh = self._should_refresh_weights(
+        refresh_reason = self._refresh_reason(
             doa_deg=float(target_doa_deg),
             target_active=bool(target_active),
             null_doa_deg=float(null_doa_deg),
+            requires_lcmv_weights=True,
         )
-        self._last_weights_reused = bool(not refresh)
-        a_target = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
+        a_target = self._cached_steering if (refresh_reason is None and self._cached_steering is not None) else _steering_vector_f_domain(
             doa_deg=target_doa_deg,
             n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )
-        a_null = None if (not refresh and self._cached_null_doa_deg is not None and self._cached_lcmv_weights is not None) else _steering_vector_f_domain(
+        a_null = None if (refresh_reason is None and self._cached_null_doa_deg is not None and self._cached_lcmv_weights is not None) else _steering_vector_f_domain(
             doa_deg=null_doa_deg,
             n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )
+        candidate_rnn = None
+        if refresh_reason is not None:
+            candidate_rnn = self._update_noise_covariance(
+                self.rnn_mvdr_noise,
+                x_fft,
+                a_target,
+                float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                target_active=bool(target_active),
+                oracle_noise_fft=oracle_noise_fft,
+            )
+            self.rnn_mvdr_noise = candidate_rnn
+        refresh, refresh_reason = self._should_execute_refresh(refresh_reason=refresh_reason, candidate_rnn=candidate_rnn)
+        self._last_weights_reused = bool(not refresh)
+        if not refresh:
+            self._beamformer_weights_reused_frames += 1
         if refresh:
             if a_null is None:
                 a_null = _steering_vector_f_domain(
@@ -773,15 +964,9 @@ class _FDBufferedBeamformer:
                     mic_geometry_xyz=self.mic_geometry_xyz,
                     sound_speed_m_s=self.cfg.sound_speed_m_s,
                 )
-            self.rnn_mvdr_noise = self._update_noise_covariance(
-                self.rnn_mvdr_noise,
-                x_fft,
-                a_target,
-                float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
-                target_active=bool(target_active),
-                oracle_noise_fft=oracle_noise_fft,
-            )
             self._cached_lcmv_weights = self._solve_lcmv_weights(a_target, a_null)
+            self._cached_last_solved_rnn = None if self.rnn_mvdr_noise is None else np.asarray(self.rnn_mvdr_noise, dtype=np.complex128).copy()
+            self._beamformer_refresh_executed += 1
             self._maybe_record_beamformer_snapshot(
                 beamforming_mode="lcmv_null",
                 target_doa_deg=float(target_doa_deg),
@@ -792,25 +977,31 @@ class _FDBufferedBeamformer:
             self._cached_target_doa_deg = float(target_doa_deg)
             self._cached_null_doa_deg = float(null_doa_deg)
             self._cached_last_target_active = bool(target_active)
-            if self._noise_covariance_mode() == "oracle_non_target_residual":
-                reason = "oracle_non_target_residual"
-            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
-                reason = "estimated_target_subtractive_frozen_bootstrap"
-            elif self._noise_covariance_is_frozen():
-                reason = "estimated_target_subtractive_frozen_hold"
-            elif bool(target_active):
-                reason = "estimated_target_subtractive"
-            else:
-                reason = "target_inactive_direct_mix"
             self._last_noise_model_update = {
                 "active": True,
                 "sources": ("beamformer_rnn",),
-                "reasons": (reason, "lcmv_active"),
+                "reasons": (self._noise_update_reason(target_active=bool(target_active)), "lcmv_active"),
                 "debug": {
                     "beamforming_mode": "lcmv_null",
                     "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
                     "target_active": bool(target_active),
                     "null_doa_deg": float(null_doa_deg),
+                    "refresh_reason": str(refresh_reason),
+                    "rnn_dirty_stat": float(self._beamformer_last_dirty_stat),
+                },
+            }
+        elif candidate_rnn is not None:
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (self._noise_update_reason(target_active=bool(target_active)), "lcmv_active", str(refresh_reason)),
+                "debug": {
+                    "beamforming_mode": "lcmv_null",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                    "null_doa_deg": float(null_doa_deg),
+                    "refresh_reason": str(refresh_reason),
+                    "rnn_dirty_stat": float(self._beamformer_last_dirty_stat),
                 },
             }
         else:
@@ -839,13 +1030,13 @@ class _FDBufferedBeamformer:
         if oracle_noise_frame is not None:
             oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
             self._prev_noise_mc = next_prev_noise
-        refresh = self._should_refresh_weights(
+        refresh_reason = self._refresh_reason(
             doa_deg=float(primary_doa_deg),
             target_active=bool(target_active),
             secondary_doa_deg=float(secondary_doa_deg),
+            requires_lcmv_weights=True,
         )
-        self._last_weights_reused = bool(not refresh)
-        a_primary = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
+        a_primary = self._cached_steering if (refresh_reason is None and self._cached_steering is not None) else _steering_vector_f_domain(
             doa_deg=primary_doa_deg,
             n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
@@ -859,8 +1050,9 @@ class _FDBufferedBeamformer:
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )
-        if refresh:
-            self.rnn_mvdr_noise = self._update_noise_covariance_multi(
+        candidate_rnn = None
+        if refresh_reason is not None:
+            candidate_rnn = self._update_noise_covariance_multi(
                 self.rnn_mvdr_noise,
                 x_fft,
                 [a_primary, a_secondary],
@@ -868,7 +1060,15 @@ class _FDBufferedBeamformer:
                 target_active=bool(target_active),
                 oracle_noise_fft=oracle_noise_fft,
             )
+            self.rnn_mvdr_noise = candidate_rnn
+        refresh, refresh_reason = self._should_execute_refresh(refresh_reason=refresh_reason, candidate_rnn=candidate_rnn)
+        self._last_weights_reused = bool(not refresh)
+        if not refresh:
+            self._beamformer_weights_reused_frames += 1
+        if refresh:
             self._cached_lcmv_weights = self._solve_lcmv_top2_weights(a_primary, a_secondary)
+            self._cached_last_solved_rnn = None if self.rnn_mvdr_noise is None else np.asarray(self.rnn_mvdr_noise, dtype=np.complex128).copy()
+            self._beamformer_refresh_executed += 1
             self._maybe_record_beamformer_snapshot(
                 beamforming_mode="lcmv_top2_tracked",
                 target_doa_deg=float(primary_doa_deg),
@@ -880,26 +1080,33 @@ class _FDBufferedBeamformer:
             self._cached_secondary_target_doa_deg = float(secondary_doa_deg)
             self._cached_null_doa_deg = None
             self._cached_last_target_active = bool(target_active)
-            if self._noise_covariance_mode() == "oracle_non_target_residual":
-                reason = "oracle_non_target_residual"
-            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
-                reason = "estimated_target_subtractive_frozen_bootstrap"
-            elif self._noise_covariance_is_frozen():
-                reason = "estimated_target_subtractive_frozen_hold"
-            elif bool(target_active):
-                reason = "estimated_multitarget_subtractive"
-            else:
-                reason = "target_inactive_direct_mix"
             self._last_noise_model_update = {
                 "active": True,
                 "sources": ("beamformer_rnn",),
-                "reasons": (reason, "lcmv_top2_active"),
+                "reasons": (self._noise_update_reason(target_active=bool(target_active), multi_target=True), "lcmv_top2_active"),
                 "debug": {
                     "beamforming_mode": "lcmv_top2_tracked",
                     "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
                     "target_active": bool(target_active),
                     "primary_doa_deg": float(primary_doa_deg),
                     "secondary_doa_deg": float(secondary_doa_deg),
+                    "refresh_reason": str(refresh_reason),
+                    "rnn_dirty_stat": float(self._beamformer_last_dirty_stat),
+                },
+            }
+        elif candidate_rnn is not None:
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (self._noise_update_reason(target_active=bool(target_active), multi_target=True), "lcmv_top2_active", str(refresh_reason)),
+                "debug": {
+                    "beamforming_mode": "lcmv_top2_tracked",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                    "primary_doa_deg": float(primary_doa_deg),
+                    "secondary_doa_deg": float(secondary_doa_deg),
+                    "refresh_reason": str(refresh_reason),
+                    "rnn_dirty_stat": float(self._beamformer_last_dirty_stat),
                 },
             }
         else:
@@ -926,21 +1133,22 @@ class _FDBufferedBeamformer:
         if oracle_noise_frame is not None:
             oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
             self._prev_noise_mc = next_prev_noise
-        refresh = self._should_refresh_weights(
+        refresh_reason = self._refresh_reason(
             doa_deg=float(target_doa_deg),
             target_active=bool(target_active),
+            requires_lcmv_weights=True,
         )
-        self._last_weights_reused = bool(not refresh)
         band_width_deg = float(max(0.0, getattr(self.cfg, "robust_target_band_width_deg", 10.0)))
-        target_steering = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
+        target_steering = self._cached_steering if (refresh_reason is None and self._cached_steering is not None) else _steering_vector_f_domain(
             doa_deg=target_doa_deg,
             n_fft=self.analysis_n,
             fs=self.cfg.sample_rate_hz,
             mic_geometry_xyz=self.mic_geometry_xyz,
             sound_speed_m_s=self.cfg.sound_speed_m_s,
         )
-        if refresh:
-            self.rnn_mvdr_noise = self._update_noise_covariance(
+        candidate_rnn = None
+        if refresh_reason is not None:
+            candidate_rnn = self._update_noise_covariance(
                 self.rnn_mvdr_noise,
                 x_fft,
                 target_steering,
@@ -948,8 +1156,14 @@ class _FDBufferedBeamformer:
                 target_active=bool(target_active),
                 oracle_noise_fft=oracle_noise_fft,
             )
+            self.rnn_mvdr_noise = candidate_rnn
+        refresh, refresh_reason = self._should_execute_refresh(refresh_reason=refresh_reason, candidate_rnn=candidate_rnn)
+        self._last_weights_reused = bool(not refresh)
+        if not refresh:
+            self._beamformer_weights_reused_frames += 1
+        if refresh:
             if band_width_deg <= 0.0:
-                self._cached_lcmv_weights = self._solve_lcmv_target_band_weights([target_steering])
+                solved_weights = self._solve_lcmv_target_band_weights([target_steering])
             else:
                 offsets = (-band_width_deg, 0.0, band_width_deg)
                 steerings = [
@@ -962,7 +1176,10 @@ class _FDBufferedBeamformer:
                     )
                     for offset in offsets
                 ]
-                self._cached_lcmv_weights = self._solve_lcmv_target_band_weights(steerings)
+                solved_weights = self._solve_lcmv_target_band_weights(steerings)
+            self._cached_lcmv_weights = self._apply_lcmv_weight_smoothing(solved_weights, target_steering)
+            self._cached_last_solved_rnn = None if self.rnn_mvdr_noise is None else np.asarray(self.rnn_mvdr_noise, dtype=np.complex128).copy()
+            self._beamformer_refresh_executed += 1
             self._maybe_record_beamformer_snapshot(
                 beamforming_mode="lcmv_target_band",
                 target_doa_deg=float(target_doa_deg),
@@ -974,26 +1191,33 @@ class _FDBufferedBeamformer:
             self._cached_null_doa_deg = None
             self._cached_secondary_target_doa_deg = None
             self._cached_last_target_active = bool(target_active)
-            if self._noise_covariance_mode() == "oracle_non_target_residual":
-                reason = "oracle_non_target_residual"
-            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
-                reason = "estimated_target_subtractive_frozen_bootstrap"
-            elif self._noise_covariance_is_frozen():
-                reason = "estimated_target_subtractive_frozen_hold"
-            elif bool(target_active):
-                reason = "estimated_target_subtractive"
-            else:
-                reason = "target_inactive_direct_mix"
             self._last_noise_model_update = {
                 "active": True,
                 "sources": ("beamformer_rnn",),
-                "reasons": (reason, "lcmv_target_band_active"),
+                "reasons": (self._noise_update_reason(target_active=bool(target_active)), "lcmv_target_band_active"),
                 "debug": {
                     "beamforming_mode": "lcmv_target_band",
                     "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
                     "target_active": bool(target_active),
                     "target_doa_deg": float(target_doa_deg),
                     "target_band_width_deg": float(band_width_deg),
+                    "refresh_reason": str(refresh_reason),
+                    "rnn_dirty_stat": float(self._beamformer_last_dirty_stat),
+                },
+            }
+        elif candidate_rnn is not None:
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (self._noise_update_reason(target_active=bool(target_active)), "lcmv_target_band_active", str(refresh_reason)),
+                "debug": {
+                    "beamforming_mode": "lcmv_target_band",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                    "target_doa_deg": float(target_doa_deg),
+                    "target_band_width_deg": float(band_width_deg),
+                    "refresh_reason": str(refresh_reason),
+                    "rnn_dirty_stat": float(self._beamformer_last_dirty_stat),
                 },
             }
         else:
@@ -1863,6 +2087,9 @@ class FastPathWorker(threading.Thread):
 
     def get_beamformer_snapshot_trace(self) -> list[dict]:
         return self._fd.get_beamformer_snapshot_trace()
+
+    def get_beamformer_runtime_stats(self) -> dict[str, float | int]:
+        return self._fd.get_beamformer_runtime_stats()
 
     def _suppression_mode(self) -> str:
         return str(self._cfg.own_voice_suppression_mode).strip().lower()
