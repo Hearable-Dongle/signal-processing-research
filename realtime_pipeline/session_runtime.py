@@ -118,6 +118,8 @@ def build_pipeline_config_from_request(
         output_allow_amplification=bool(req.output_allow_amplification),
         robust_target_band_width_deg=float(req.robust_target_band_width_deg),
         robust_target_band_conditioning_enabled=bool(req.robust_target_band_conditioning_enabled),
+        robust_target_band_max_freq_hz=float(req.robust_target_band_max_freq_hz),
+        robust_target_band_condition_limit=float(req.robust_target_band_condition_limit),
         srp_overlap=float(req.overlap),
         srp_freq_min_hz=int(req.freq_low_hz),
         srp_freq_max_hz=int(req.freq_high_hz),

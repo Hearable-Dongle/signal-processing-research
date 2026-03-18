@@ -353,52 +353,54 @@ class _FDBufferedBeamformer:
         return self._solve_lcmv_constraint_weights(constraints, response)
 
     def _solve_lcmv_target_band_weights(self, steerings: list[np.ndarray]) -> np.ndarray:
-        if not bool(getattr(self.cfg, "robust_target_band_conditioning_enabled", False)):
+        max_freq_hz = float(max(0.0, getattr(self.cfg, "robust_target_band_max_freq_hz", 0.0)))
+        freq_axis = np.fft.rfftfreq(self.analysis_n, d=1.0 / float(self.cfg.sample_rate_hz))
+        if not bool(getattr(self.cfg, "robust_target_band_conditioning_enabled", False)) and max_freq_hz <= 0.0:
             constraints = np.stack(steerings, axis=2)
             response = np.ones((constraints.shape[2], 1), dtype=np.complex128)
             return self._solve_lcmv_constraint_weights(constraints, response)
         constraints = np.stack(steerings, axis=2)
         f_bins = constraints.shape[0]
         weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
-        condition_limit = 1e5
+        condition_limit = float(max(1.0, getattr(self.cfg, "robust_target_band_condition_limit", 1e3)))
         self._last_target_band_conditioning = {
             "full_band_frames": 0,
             "edge_only_frames": 0,
             "center_only_frames": 0,
+            "high_freq_fallback_frames": 0,
             "max_selected_cond": 0.0,
         }
         for f in range(f_bins):
             full_constraints = constraints[f]
             full_response = np.ones((full_constraints.shape[1], 1), dtype=np.complex128)
-            candidates: list[tuple[str, np.ndarray, np.ndarray]] = [("full_band", full_constraints, full_response)]
-            if full_constraints.shape[1] >= 3:
-                edge_constraints = full_constraints[:, [0, -1]]
-                edge_response = np.ones((2, 1), dtype=np.complex128)
-                center_idx = full_constraints.shape[1] // 2
-                center_constraints = full_constraints[:, [center_idx]]
-                center_response = np.ones((1, 1), dtype=np.complex128)
-                candidates.extend(
-                    [
-                        ("edge_only", edge_constraints, edge_response),
-                        ("center_only", center_constraints, center_response),
-                    ]
-                )
-            selected_label, selected_constraints, selected_response = candidates[-1]
-            selected_cond = float("inf")
-            for label, candidate_constraints, candidate_response in candidates:
-                gram = candidate_constraints.conj().T @ candidate_constraints
-                cond = _safe_condition_number(gram)
-                if np.isfinite(cond) and cond <= condition_limit:
-                    selected_label = label
-                    selected_constraints = candidate_constraints
-                    selected_response = candidate_response
-                    selected_cond = cond
-                    break
-                if label == candidates[-1][0]:
-                    selected_label = label
-                    selected_constraints = candidate_constraints
-                    selected_response = candidate_response
-                    selected_cond = cond
+            center_idx = full_constraints.shape[1] // 2
+            center_constraints = full_constraints[:, [center_idx]]
+            center_response = np.ones((1, 1), dtype=np.complex128)
+            if max_freq_hz > 0.0 and float(freq_axis[f]) > max_freq_hz:
+                selected_label = "high_freq_center_only"
+                selected_constraints = center_constraints
+                selected_response = center_response
+                selected_cond = 1.0
+            else:
+                candidates: list[tuple[str, np.ndarray, np.ndarray]] = [("full_band", full_constraints, full_response)]
+                if full_constraints.shape[1] >= 3:
+                    candidates.append(("center_only", center_constraints, center_response))
+                selected_label, selected_constraints, selected_response = candidates[-1]
+                selected_cond = float("inf")
+                for label, candidate_constraints, candidate_response in candidates:
+                    gram = candidate_constraints.conj().T @ candidate_constraints
+                    cond = _safe_condition_number(gram)
+                    if np.isfinite(cond) and cond <= condition_limit:
+                        selected_label = label
+                        selected_constraints = candidate_constraints
+                        selected_response = candidate_response
+                        selected_cond = cond
+                        break
+                    if label == candidates[-1][0]:
+                        selected_label = label
+                        selected_constraints = candidate_constraints
+                        selected_response = candidate_response
+                        selected_cond = cond
             r = self._loaded_noise_covariance(self.rnn_mvdr_noise[f])
             try:
                 r_inv_constraint = np.linalg.solve(r, selected_constraints)
@@ -412,8 +414,8 @@ class _FDBufferedBeamformer:
             weights[f, :] = (r_inv_constraint @ mid).reshape(-1)
             if selected_label == "full_band":
                 self._last_target_band_conditioning["full_band_frames"] += 1
-            elif selected_label == "edge_only":
-                self._last_target_band_conditioning["edge_only_frames"] += 1
+            elif selected_label == "high_freq_center_only":
+                self._last_target_band_conditioning["high_freq_fallback_frames"] += 1
             else:
                 self._last_target_band_conditioning["center_only_frames"] += 1
             self._last_target_band_conditioning["max_selected_cond"] = max(

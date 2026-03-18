@@ -372,4 +372,6 @@ class PipelineConfig:
     output_allow_amplification: bool = False
     robust_target_band_width_deg: float = 10.0
     robust_target_band_conditioning_enabled: bool = False
+    robust_target_band_max_freq_hz: float = 0.0
+    robust_target_band_condition_limit: float = 1e3
     beamformer_snapshot_frame_indices: tuple[int, ...] = ()

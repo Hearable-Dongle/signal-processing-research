@@ -107,6 +107,8 @@ class FastPathConfig(BaseModel):
     output_allow_amplification: bool = False
     robust_target_band_width_deg: float = 10.0
     robust_target_band_conditioning_enabled: bool = False
+    robust_target_band_max_freq_hz: float = 0.0
+    robust_target_band_condition_limit: float = 1e3
 
 
 class SlowPathConfig(BaseModel):
@@ -497,6 +499,14 @@ class SessionStartRequest(BaseModel):
     @property
     def robust_target_band_conditioning_enabled(self) -> bool:
         return bool(self.fast_path.robust_target_band_conditioning_enabled)
+
+    @property
+    def robust_target_band_max_freq_hz(self) -> float:
+        return float(self.fast_path.robust_target_band_max_freq_hz)
+
+    @property
+    def robust_target_band_condition_limit(self) -> float:
+        return float(self.fast_path.robust_target_band_condition_limit)
 
     @property
     def tracking_mode(self) -> str:
