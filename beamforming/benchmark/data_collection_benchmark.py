@@ -1074,6 +1074,11 @@ def _run_recording_method_job(
     delay_sum_update_min_delta_deg: float,
     delay_sum_crossfade_frames: int,
     delay_sum_use_smoothed_doa: bool,
+    delay_sum_subtractive_alpha: float,
+    delay_sum_subtractive_interferer_doa_deg: float | None,
+    delay_sum_subtractive_multi_offset_deg: float,
+    delay_sum_subtractive_use_suppressed_user_doa: bool,
+    delay_sum_subtractive_output_clip_guard: bool,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -1191,6 +1196,13 @@ def _run_recording_method_job(
             "delay_sum_update_min_delta_deg": float(delay_sum_update_min_delta_deg),
             "delay_sum_crossfade_frames": int(delay_sum_crossfade_frames),
             "delay_sum_use_smoothed_doa": bool(delay_sum_use_smoothed_doa),
+            "delay_sum_subtractive_alpha": float(delay_sum_subtractive_alpha),
+            "delay_sum_subtractive_interferer_doa_deg": (
+                None if delay_sum_subtractive_interferer_doa_deg is None else float(delay_sum_subtractive_interferer_doa_deg)
+            ),
+            "delay_sum_subtractive_multi_offset_deg": float(delay_sum_subtractive_multi_offset_deg),
+            "delay_sum_subtractive_use_suppressed_user_doa": bool(delay_sum_subtractive_use_suppressed_user_doa),
+            "delay_sum_subtractive_output_clip_guard": bool(delay_sum_subtractive_output_clip_guard),
             "fd_analysis_window_ms": float(fd_analysis_window_ms),
             "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
             "target_activity_rnn_update_mode": (str(target_activity_rnn_update_mode) if is_mvdr else None),
@@ -1284,6 +1296,7 @@ def _run_recording_method_job(
         "post_beamforming": run_dir / "post_beamforming.wav",
         "post_wiener": run_dir / "post_wiener.wav",
         "post_rnnoise": run_dir / "post_rnnoise.wav",
+        "inverse_rnnoise": run_dir / "inverse_rnnoise.wav",
         "post_bandpass": run_dir / "post_bandpass.wav",
     }
     stage_audio: dict[str, np.ndarray] = {}
@@ -1292,7 +1305,7 @@ def _run_recording_method_job(
             continue
         stage_sig, _stage_sr = sf.read(stage_path, dtype="float32", always_2d=False)
         stage_audio[stage_name] = np.asarray(stage_sig, dtype=np.float32).reshape(-1)
-    if str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band", "delay_sum"}:
+    if str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band", "delay_sum", "delay_sum_subtractive", "delay_sum_subtractive_multi", "delay_sum_differential"}:
         _emit_beamformer_snapshot_artifacts(
             summary=summary,
             proc=proc,
@@ -1340,6 +1353,13 @@ def _run_recording_method_job(
         "postfilter_input_source": str(postfilter_input_source),
         "postfilter_oversubtraction_alpha": float(postfilter_oversubtraction_alpha),
         "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
+        "delay_sum_subtractive_alpha": float(delay_sum_subtractive_alpha),
+        "delay_sum_subtractive_interferer_doa_deg": (
+            float("nan") if delay_sum_subtractive_interferer_doa_deg is None else float(delay_sum_subtractive_interferer_doa_deg)
+        ),
+        "delay_sum_subtractive_multi_offset_deg": float(delay_sum_subtractive_multi_offset_deg),
+        "delay_sum_subtractive_use_suppressed_user_doa": bool(delay_sum_subtractive_use_suppressed_user_doa),
+        "delay_sum_subtractive_output_clip_guard": bool(delay_sum_subtractive_output_clip_guard),
         "rnnoise_wet_mix": float(rnnoise_wet_mix),
         "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
         "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
@@ -1427,6 +1447,7 @@ def _run_recording_method_job(
             ("post_beamforming", stage_audio.get("post_beamforming", proc)[:n]),
             *([("post_wiener", stage_audio["post_wiener"][:n])] if "post_wiener" in stage_audio else []),
             *([("post_rnnoise", stage_audio["post_rnnoise"][:n])] if "post_rnnoise" in stage_audio else []),
+            *([("inverse_rnnoise", stage_audio["inverse_rnnoise"][:n])] if "inverse_rnnoise" in stage_audio else []),
             *([("post_bandpass", stage_audio["post_bandpass"][:n])] if "post_bandpass" in stage_audio else []),
             ("final", proc[:n]),
         ],
@@ -1482,7 +1503,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run realtime beamforming over Data Collection raw-channel recordings.")
     parser.add_argument("--input-path", required=True, help="Data Collection export root/zip, recording dir, or raw WAV dir")
     parser.add_argument("--out-dir", required=True, help="Directory for benchmark outputs")
-    parser.add_argument("--methods", nargs="+", choices=["mvdr_fd", "lcmv_target_band", "sd_mvdr_fd", "gsc_fd", "delay_sum"], default=["mvdr_fd"])
+    parser.add_argument("--methods", nargs="+", choices=["mvdr_fd", "lcmv_target_band", "sd_mvdr_fd", "gsc_fd", "delay_sum", "delay_sum_subtractive", "delay_sum_subtractive_multi", "delay_sum_differential"], default=["mvdr_fd"])
     parser.add_argument(
         "--separation-mode",
         choices=["single_dominant_no_separator", "mock", "auto"],
@@ -1548,6 +1569,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--delay-sum-update-min-delta-deg", type=float, default=3.0)
     parser.add_argument("--delay-sum-crossfade-frames", type=int, default=1)
     parser.add_argument("--delay-sum-use-smoothed-doa", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--delay-sum-subtractive-alpha", type=float, default=0.5)
+    parser.add_argument("--delay-sum-subtractive-interferer-doa-deg", type=float, default=None)
+    parser.add_argument("--delay-sum-subtractive-multi-offset-deg", type=float, default=10.0)
+    parser.add_argument("--delay-sum-subtractive-use-suppressed-user-doa", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--delay-sum-subtractive-output-clip-guard", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
     parser.add_argument("--robust-target-band-width-deg", type=float, default=10.0)
     parser.add_argument("--robust-target-band-max-freq-hz", type=float, default=0.0)
@@ -1736,6 +1762,13 @@ def main() -> None:
                 delay_sum_update_min_delta_deg=float(args.delay_sum_update_min_delta_deg),
                 delay_sum_crossfade_frames=int(args.delay_sum_crossfade_frames),
                 delay_sum_use_smoothed_doa=bool(args.delay_sum_use_smoothed_doa),
+                delay_sum_subtractive_alpha=float(args.delay_sum_subtractive_alpha),
+                delay_sum_subtractive_interferer_doa_deg=(
+                    None if args.delay_sum_subtractive_interferer_doa_deg is None else float(args.delay_sum_subtractive_interferer_doa_deg)
+                ),
+                delay_sum_subtractive_multi_offset_deg=float(args.delay_sum_subtractive_multi_offset_deg),
+                delay_sum_subtractive_use_suppressed_user_doa=bool(args.delay_sum_subtractive_use_suppressed_user_doa),
+                delay_sum_subtractive_output_clip_guard=bool(args.delay_sum_subtractive_output_clip_guard),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),

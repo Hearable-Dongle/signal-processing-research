@@ -1438,9 +1438,27 @@ class _RNNoisePostFilter:
             b_notch, a_notch = iirnotch(notch_freq_hz, notch_q, fs=float(self._input_sample_rate_hz))
             self._output_notch_sos = tf2sos(b_notch, a_notch)
             self._output_notch_zi = np.zeros((self._output_notch_sos.shape[0], 2), dtype=np.float32)
+            self._inverse_notch_zi = np.zeros((self._output_notch_sos.shape[0], 2), dtype=np.float32)
         else:
             self._output_notch_sos = None
             self._output_notch_zi = None
+            self._inverse_notch_zi = None
+        inverse_band_low_hz = 300.0
+        inverse_band_high_hz = 3400.0
+        nyquist_hz = 0.5 * float(self._input_sample_rate_hz)
+        if 0.0 < inverse_band_low_hz < inverse_band_high_hz < nyquist_hz:
+            self._inverse_bandstop_sos = butter(
+                6,
+                [inverse_band_low_hz, inverse_band_high_hz],
+                btype="bandstop",
+                fs=float(self._input_sample_rate_hz),
+                output="sos",
+            )
+            self._inverse_bandstop_zi = np.zeros((self._inverse_bandstop_sos.shape[0], 2), dtype=np.float32)
+        else:
+            self._inverse_bandstop_sos = None
+            self._inverse_bandstop_zi = None
+        self._last_inverse_output = np.zeros((0,), dtype=np.float32)
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
@@ -1501,7 +1519,18 @@ class _RNNoisePostFilter:
         if self._output_notch_sos is not None and self._output_notch_zi is not None and mixed.shape[0] > 0:
             mixed, self._output_notch_zi = sosfilt(self._output_notch_sos, mixed, zi=self._output_notch_zi)
             mixed = np.asarray(mixed, dtype=np.float32)
+        inverse = np.asarray(x - mixed, dtype=np.float32)
+        if self._inverse_bandstop_sos is not None and self._inverse_bandstop_zi is not None and inverse.shape[0] > 0:
+            inverse, self._inverse_bandstop_zi = sosfilt(self._inverse_bandstop_sos, inverse, zi=self._inverse_bandstop_zi)
+            inverse = np.asarray(inverse, dtype=np.float32)
+        if self._output_notch_sos is not None and self._inverse_notch_zi is not None and inverse.shape[0] > 0:
+            inverse, self._inverse_notch_zi = sosfilt(self._output_notch_sos, inverse, zi=self._inverse_notch_zi)
+            inverse = np.asarray(inverse, dtype=np.float32)
+        self._last_inverse_output = inverse
         return mixed.astype(np.float32, copy=False)
+
+    def get_last_inverse_output(self) -> np.ndarray:
+        return np.asarray(self._last_inverse_output, dtype=np.float32).copy()
 
 
 class _CoherenceWienerPostFilter:
@@ -1645,6 +1674,7 @@ class _PostFilterRouter:
             self._last_noise_model_update = _inactive_noise_model_update()
             out = self._rnnoise.process(beamformed, speech_activity=speech_activity)
             stages["post_rnnoise"] = np.asarray(out, dtype=np.float32)
+            stages["inverse_rnnoise"] = np.asarray(self._rnnoise.get_last_inverse_output(), dtype=np.float32)
             stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
             return out, stages
         if self.method == "coherence_wiener":
@@ -1684,6 +1714,7 @@ class _PostFilterRouter:
             out = self._voice_bandpass.process(post_rnnoise, speech_activity=speech_activity)
             self._last_noise_model_update = _inactive_noise_model_update()
             stages["post_rnnoise"] = np.asarray(post_rnnoise, dtype=np.float32)
+            stages["inverse_rnnoise"] = np.asarray(self._rnnoise.get_last_inverse_output(), dtype=np.float32)
             stages["post_bandpass"] = np.asarray(out, dtype=np.float32)
             stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
             return out, stages
@@ -1700,6 +1731,7 @@ class _PostFilterRouter:
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
             stages["post_wiener"] = np.asarray(post_wiener, dtype=np.float32)
             stages["post_rnnoise"] = np.asarray(out, dtype=np.float32)
+            stages["inverse_rnnoise"] = np.asarray(self._rnnoise.get_last_inverse_output(), dtype=np.float32)
             stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
             return out, stages
         self._last_noise_model_update = _inactive_noise_model_update()
@@ -1784,6 +1816,11 @@ class _PostFilterStageCore:
             None
             if postfilter_stages.get("post_rnnoise") is None
             else np.asarray(postfilter_stages["post_rnnoise"], dtype=np.float32).reshape(-1).copy()
+        )
+        packet.postfilter_inverse_rnnoise_audio = (
+            None
+            if postfilter_stages.get("inverse_rnnoise") is None
+            else np.asarray(postfilter_stages["inverse_rnnoise"], dtype=np.float32).reshape(-1).copy()
         )
         packet.postfilter_bandpass_audio = (
             None
@@ -2105,7 +2142,7 @@ class FastPathWorker(threading.Thread):
 
     def get_beamformer_snapshot_trace(self) -> list[dict]:
         mode = str(self._cfg.beamforming_mode).strip().lower()
-        if mode == "delay_sum":
+        if mode in {"delay_sum", "delay_sum_subtractive"}:
             return [dict(item) for item in self._delay_sum_snapshot_trace]
         return self._fd.get_beamformer_snapshot_trace()
 
@@ -2251,6 +2288,74 @@ class FastPathWorker(threading.Thread):
             fs=self._cfg.sample_rate_hz,
             sound_speed_m_s=self._cfg.sound_speed_m_s,
         )
+
+    def _delay_sum_subtractive_interferer_doa(self) -> float | None:
+        if bool(getattr(self._cfg, "delay_sum_subtractive_use_suppressed_user_doa", True)):
+            suppressed = getattr(self._cfg, "suppressed_user_voice_doa_deg", None)
+            if suppressed is not None:
+                return float(suppressed)
+        explicit = getattr(self._cfg, "delay_sum_subtractive_interferer_doa_deg", None)
+        if explicit is None:
+            return None
+        return float(explicit)
+
+    def _delay_sum_subtractive(self, x: np.ndarray, *, target_doa_deg: float) -> np.ndarray:
+        target = self._delay_sum_with_state(x, doa_deg=float(target_doa_deg), state_key="subtractive_target")
+        interferer_doa = self._delay_sum_subtractive_interferer_doa()
+        if interferer_doa is None:
+            return target.astype(np.float32, copy=False)
+        interferer = self._delay_sum_with_state(x, doa_deg=float(interferer_doa), state_key="subtractive_interferer")
+        alpha = float(max(0.0, getattr(self._cfg, "delay_sum_subtractive_alpha", 0.5)))
+        out = np.asarray(target, dtype=np.float32) - (alpha * np.asarray(interferer, dtype=np.float32))
+        if bool(getattr(self._cfg, "delay_sum_subtractive_output_clip_guard", True)):
+            peak = float(np.max(np.abs(out))) if out.size else 0.0
+            if peak > 1.0:
+                out = out / peak
+        frame_idx = int(self._frame_idx) + 1
+        if frame_idx in self._beamformer_snapshot_target_set:
+            if not any(int(item.get("frame_index", -1)) == frame_idx for item in self._delay_sum_snapshot_trace):
+                self._maybe_record_delay_sum_snapshot(state_key="subtractive_target", doa_deg=float(target_doa_deg))
+        return np.asarray(out, dtype=np.float32)
+
+    def _delay_sum_subtractive_multi(self, x: np.ndarray, *, target_doa_deg: float) -> np.ndarray:
+        target = self._delay_sum_with_state(x, doa_deg=float(target_doa_deg), state_key="subtractive_multi_target")
+        interferer_doa = self._delay_sum_subtractive_interferer_doa()
+        if interferer_doa is None:
+            return target.astype(np.float32, copy=False)
+        spread = float(max(0.0, getattr(self._cfg, "delay_sum_subtractive_multi_offset_deg", 10.0)))
+        interferer_beams = [
+            self._delay_sum_with_state(x, doa_deg=float(interferer_doa + offset), state_key=f"subtractive_multi_interferer_{idx}")
+            for idx, offset in enumerate((-spread, 0.0, spread))
+        ]
+        interferer = np.mean(np.stack(interferer_beams, axis=0), axis=0).astype(np.float32, copy=False)
+        alpha = float(max(0.0, getattr(self._cfg, "delay_sum_subtractive_alpha", 0.5)))
+        out = np.asarray(target, dtype=np.float32) - (alpha * interferer)
+        if bool(getattr(self._cfg, "delay_sum_subtractive_output_clip_guard", True)):
+            peak = float(np.max(np.abs(out))) if out.size else 0.0
+            if peak > 1.0:
+                out = out / peak
+        frame_idx = int(self._frame_idx) + 1
+        if frame_idx in self._beamformer_snapshot_target_set:
+            if not any(int(item.get("frame_index", -1)) == frame_idx for item in self._delay_sum_snapshot_trace):
+                self._maybe_record_delay_sum_snapshot(state_key="subtractive_multi_target", doa_deg=float(target_doa_deg))
+        return np.asarray(out, dtype=np.float32)
+
+    def _delay_sum_differential(self, x: np.ndarray, *, target_doa_deg: float) -> np.ndarray:
+        target = self._delay_sum_with_state(x, doa_deg=float(target_doa_deg), state_key="differential_target")
+        interferer_doa = self._delay_sum_subtractive_interferer_doa()
+        if interferer_doa is None:
+            return target.astype(np.float32, copy=False)
+        interferer = self._delay_sum_with_state(x, doa_deg=float(interferer_doa), state_key="differential_interferer")
+        out = np.asarray(target, dtype=np.float32) - np.asarray(interferer, dtype=np.float32)
+        if bool(getattr(self._cfg, "delay_sum_subtractive_output_clip_guard", True)):
+            peak = float(np.max(np.abs(out))) if out.size else 0.0
+            if peak > 1.0:
+                out = out / peak
+        frame_idx = int(self._frame_idx) + 1
+        if frame_idx in self._beamformer_snapshot_target_set:
+            if not any(int(item.get("frame_index", -1)) == frame_idx for item in self._delay_sum_snapshot_trace):
+                self._maybe_record_delay_sum_snapshot(state_key="differential_target", doa_deg=float(target_doa_deg))
+        return np.asarray(out, dtype=np.float32)
 
     def _suppression_mode(self) -> str:
         return str(self._cfg.own_voice_suppression_mode).strip().lower()
@@ -2886,6 +2991,12 @@ class FastPathWorker(threading.Thread):
         mode = str(self._cfg.beamforming_mode).strip().lower()
         if mode == "delay_sum":
             return self._delay_sum_with_state(x, doa_deg=doa_deg, state_key="primary")
+        if mode == "delay_sum_subtractive":
+            return self._delay_sum_subtractive(x, target_doa_deg=doa_deg)
+        if mode == "delay_sum_subtractive_multi":
+            return self._delay_sum_subtractive_multi(x, target_doa_deg=doa_deg)
+        if mode == "delay_sum_differential":
+            return self._delay_sum_differential(x, target_doa_deg=doa_deg)
         if mode == "gsc_fd":
             return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
         if mode == "lcmv_target_band":
@@ -2929,6 +3040,12 @@ class FastPathWorker(threading.Thread):
         if mode == "delay_sum":
             aligned = [self._delay_sum_with_state(x, doa_deg=float(doa), state_key=f"target_{idx}") for idx, doa in enumerate(target_doas_deg[:2])]
             return np.mean(np.stack(aligned, axis=0), axis=0).astype(np.float32, copy=False)
+        if mode == "delay_sum_subtractive":
+            return self._delay_sum_subtractive(x, target_doa_deg=float(target_doas_deg[0]))
+        if mode == "delay_sum_subtractive_multi":
+            return self._delay_sum_subtractive_multi(x, target_doa_deg=float(target_doas_deg[0]))
+        if mode == "delay_sum_differential":
+            return self._delay_sum_differential(x, target_doa_deg=float(target_doas_deg[0]))
         return self._fd.lcmv_top2(
             x,
             primary_doa_deg=float(target_doas_deg[0]),

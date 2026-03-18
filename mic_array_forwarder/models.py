@@ -30,13 +30,18 @@ class FastPathConfig(BaseModel):
         "capon_mvdr_refine_1src",
         "music_1src",
     ] = "srp_phat_localization"
-    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "lcmv_top2_tracked", "lcmv_target_band"] = "mvdr_fd"
+    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "delay_sum_subtractive", "delay_sum_subtractive_multi", "delay_sum_differential", "lcmv_top2_tracked", "lcmv_target_band"] = "mvdr_fd"
     mvdr_hop_ms: int | None = None
     beamformer_snapshot_frame_indices: tuple[int, ...] = ()
     fd_analysis_window_ms: float = 20.0
     delay_sum_update_min_delta_deg: float = 3.0
     delay_sum_crossfade_frames: int = 1
     delay_sum_use_smoothed_doa: bool = True
+    delay_sum_subtractive_alpha: float = 0.5
+    delay_sum_subtractive_interferer_doa_deg: float | None = None
+    delay_sum_subtractive_multi_offset_deg: float = 10.0
+    delay_sum_subtractive_use_suppressed_user_doa: bool = True
+    delay_sum_subtractive_output_clip_guard: bool = True
     # Defaults track the sensitivity-tuned Silero preset from
     # `beamforming/benchmark/run_optuna_babble_bootstrap_mvdr.py`
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
@@ -265,6 +270,27 @@ class SessionStartRequest(BaseModel):
     @property
     def delay_sum_use_smoothed_doa(self) -> bool:
         return bool(self.fast_path.delay_sum_use_smoothed_doa)
+
+    @property
+    def delay_sum_subtractive_alpha(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_alpha)
+
+    @property
+    def delay_sum_subtractive_interferer_doa_deg(self) -> float | None:
+        value = self.fast_path.delay_sum_subtractive_interferer_doa_deg
+        return None if value is None else float(value)
+
+    @property
+    def delay_sum_subtractive_multi_offset_deg(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_multi_offset_deg)
+
+    @property
+    def delay_sum_subtractive_use_suppressed_user_doa(self) -> bool:
+        return bool(self.fast_path.delay_sum_subtractive_use_suppressed_user_doa)
+
+    @property
+    def delay_sum_subtractive_output_clip_guard(self) -> bool:
+        return bool(self.fast_path.delay_sum_subtractive_output_clip_guard)
 
     @property
     def fd_cov_ema_alpha(self) -> float:

@@ -64,6 +64,7 @@ class FastPathAudioPacket:
     beamformed_audio: np.ndarray
     postfilter_wiener_audio: np.ndarray | None = None
     postfilter_rnnoise_audio: np.ndarray | None = None
+    postfilter_inverse_rnnoise_audio: np.ndarray | None = None
     postfilter_bandpass_audio: np.ndarray | None = None
     postfilter_output_audio: np.ndarray | None = None
     beamformer_output_noise_psd: np.ndarray | None = None
@@ -126,6 +127,7 @@ class FastPathAudioPacket:
             beamformed_audio=np.asarray(beamformed_audio, dtype=np.float32).reshape(-1).copy(),
             postfilter_wiener_audio=None,
             postfilter_rnnoise_audio=None,
+            postfilter_inverse_rnnoise_audio=None,
             postfilter_bandpass_audio=None,
             postfilter_output_audio=None,
             beamformer_output_noise_psd=(
@@ -313,7 +315,7 @@ class PipelineConfig:
     speaker_map_confidence_decay: float = 0.9
     speaker_map_activity_decay: float = 0.92
     # Beamformer mode
-    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum, lcmv_top2_tracked, lcmv_target_band
+    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum, delay_sum_subtractive, delay_sum_subtractive_multi, delay_sum_differential, lcmv_top2_tracked, lcmv_target_band
     mvdr_hop_ms: int | None = None
     # DOA/gain smoothing to reduce steering chatter
     doa_ema_alpha: float = 0.2
@@ -322,6 +324,11 @@ class PipelineConfig:
     delay_sum_update_min_delta_deg: float = 3.0
     delay_sum_crossfade_frames: int = 1
     delay_sum_use_smoothed_doa: bool = True
+    delay_sum_subtractive_alpha: float = 0.5
+    delay_sum_subtractive_interferer_doa_deg: float | None = None
+    delay_sum_subtractive_multi_offset_deg: float = 10.0
+    delay_sum_subtractive_use_suppressed_user_doa: bool = True
+    delay_sum_subtractive_output_clip_guard: bool = True
     # Frequency-domain covariance smoothing
     fd_analysis_window_ms: float = 20.0
     # Defaults track the sensitivity-tuned Silero preset from
