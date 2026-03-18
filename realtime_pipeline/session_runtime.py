@@ -71,6 +71,7 @@ def build_pipeline_config_from_request(
         delay_sum_subtractive_interferer_doa_deg=(
             None if req.delay_sum_subtractive_interferer_doa_deg is None else float(req.delay_sum_subtractive_interferer_doa_deg)
         ),
+        delay_sum_subtractive_multi_offset_deg=float(req.delay_sum_subtractive_multi_offset_deg),
         delay_sum_subtractive_use_suppressed_user_doa=bool(req.delay_sum_subtractive_use_suppressed_user_doa),
         delay_sum_subtractive_output_clip_guard=bool(req.delay_sum_subtractive_output_clip_guard),
         fd_cov_ema_alpha=float(req.fd_cov_ema_alpha),
@@ -450,6 +451,18 @@ def run_offline_session_pipeline(
                 axis=0,
             )[: audio.shape[0]]
             sf.write(out_root / "post_rnnoise.wav", post_rnnoise, int(cfg.sample_rate_hz))
+        if any(packet.postfilter_inverse_rnnoise_audio is not None for packet in captured_packets):
+            inverse_rnnoise = np.concatenate(
+                [
+                    np.asarray(
+                        np.zeros_like(packet.beamformed_audio) if packet.postfilter_inverse_rnnoise_audio is None else packet.postfilter_inverse_rnnoise_audio,
+                        dtype=np.float32,
+                    ).reshape(-1)
+                    for packet in captured_packets
+                ],
+                axis=0,
+            )[: audio.shape[0]]
+            sf.write(out_root / "inverse_rnnoise.wav", inverse_rnnoise, int(cfg.sample_rate_hz))
         if any(packet.postfilter_bandpass_audio is not None for packet in captured_packets):
             post_bandpass = np.concatenate(
                 [
@@ -595,6 +608,7 @@ def run_offline_session_pipeline(
         "delay_sum_subtractive_interferer_doa_deg": (
             None if cfg.delay_sum_subtractive_interferer_doa_deg is None else float(cfg.delay_sum_subtractive_interferer_doa_deg)
         ),
+        "delay_sum_subtractive_multi_offset_deg": float(cfg.delay_sum_subtractive_multi_offset_deg),
         "delay_sum_subtractive_use_suppressed_user_doa": bool(cfg.delay_sum_subtractive_use_suppressed_user_doa),
         "delay_sum_subtractive_output_clip_guard": bool(cfg.delay_sum_subtractive_output_clip_guard),
         "coherence_wiener_gain_floor": float(cfg.coherence_wiener_gain_floor),

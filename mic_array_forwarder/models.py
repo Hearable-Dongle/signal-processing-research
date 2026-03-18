@@ -30,7 +30,7 @@ class FastPathConfig(BaseModel):
         "capon_mvdr_refine_1src",
         "music_1src",
     ] = "srp_phat_localization"
-    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "delay_sum_subtractive", "lcmv_top2_tracked", "lcmv_target_band"] = "mvdr_fd"
+    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "delay_sum_subtractive", "delay_sum_subtractive_multi", "delay_sum_differential", "lcmv_top2_tracked", "lcmv_target_band"] = "mvdr_fd"
     mvdr_hop_ms: int | None = None
     beamformer_snapshot_frame_indices: tuple[int, ...] = ()
     fd_analysis_window_ms: float = 20.0
@@ -39,6 +39,7 @@ class FastPathConfig(BaseModel):
     delay_sum_use_smoothed_doa: bool = True
     delay_sum_subtractive_alpha: float = 0.5
     delay_sum_subtractive_interferer_doa_deg: float | None = None
+    delay_sum_subtractive_multi_offset_deg: float = 10.0
     delay_sum_subtractive_use_suppressed_user_doa: bool = True
     delay_sum_subtractive_output_clip_guard: bool = True
     # Defaults track the sensitivity-tuned Silero preset from
@@ -278,6 +279,10 @@ class SessionStartRequest(BaseModel):
     def delay_sum_subtractive_interferer_doa_deg(self) -> float | None:
         value = self.fast_path.delay_sum_subtractive_interferer_doa_deg
         return None if value is None else float(value)
+
+    @property
+    def delay_sum_subtractive_multi_offset_deg(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_multi_offset_deg)
 
     @property
     def delay_sum_subtractive_use_suppressed_user_doa(self) -> bool:
