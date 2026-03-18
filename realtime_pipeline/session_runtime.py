@@ -329,7 +329,7 @@ def run_offline_session_pipeline(
         srp_override_provider=srp_override_provider,
         target_activity_override_provider=target_activity_override_provider,
         oracle_noise_frame_provider=oracle_noise_frame_provider,
-        frame_packet_sink=_packet_sink if split_mode == "beamforming_only" else None,
+        frame_packet_sink=_packet_sink if (capture_trace or split_mode == "beamforming_only") else None,
     )
     pipe_holder["pipe"] = pipe
     if initial_focus_direction_deg is not None or initial_focus_speaker_ids:
@@ -348,6 +348,36 @@ def run_offline_session_pipeline(
     raw_mix_mean = np.mean(np.asarray(audio, dtype=np.float64), axis=1).astype(np.float32, copy=False)
     sf.write(out_root / "enhanced_fast_path.wav", enhanced, int(cfg.sample_rate_hz))
     sf.write(out_root / "raw_mix_mean.wav", raw_mix_mean, int(cfg.sample_rate_hz))
+    if captured_packets:
+        beamformed_stage = np.concatenate(
+            [np.asarray(packet.beamformed_audio, dtype=np.float32).reshape(-1) for packet in captured_packets],
+            axis=0,
+        )[: audio.shape[0]]
+        sf.write(out_root / "post_beamforming.wav", beamformed_stage, int(cfg.sample_rate_hz))
+        if any(packet.postfilter_wiener_audio is not None for packet in captured_packets):
+            post_wiener = np.concatenate(
+                [
+                    np.asarray(
+                        packet.beamformed_audio if packet.postfilter_wiener_audio is None else packet.postfilter_wiener_audio,
+                        dtype=np.float32,
+                    ).reshape(-1)
+                    for packet in captured_packets
+                ],
+                axis=0,
+            )[: audio.shape[0]]
+            sf.write(out_root / "post_wiener.wav", post_wiener, int(cfg.sample_rate_hz))
+        if any(packet.postfilter_rnnoise_audio is not None for packet in captured_packets):
+            post_rnnoise = np.concatenate(
+                [
+                    np.asarray(
+                        packet.beamformed_audio if packet.postfilter_rnnoise_audio is None else packet.postfilter_rnnoise_audio,
+                        dtype=np.float32,
+                    ).reshape(-1)
+                    for packet in captured_packets
+                ],
+                axis=0,
+            )[: audio.shape[0]]
+            sf.write(out_root / "post_rnnoise.wav", post_rnnoise, int(cfg.sample_rate_hz))
 
     final_rows = public_speaker_rows(
         pipe.shared_state.get_speaker_map_snapshot(),

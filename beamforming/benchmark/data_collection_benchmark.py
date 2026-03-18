@@ -27,6 +27,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
 
 try:
     from scipy.optimize import linear_sum_assignment
+    from scipy.signal import welch
 except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific dependency guard
     missing = exc.name or "scipy"
     raise SystemExit(
@@ -254,6 +255,76 @@ def _plot_spectrogram_compare(raw: np.ndarray, proc: np.ndarray, fs: int, out_pa
     axes[1].set_ylabel("proc Hz")
     axes[1].set_xlabel("time (s)")
     fig.suptitle(title)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_psd_compare(raw: np.ndarray, proc: np.ndarray, fs: int, out_path: Path, title: str) -> None:
+    n = min(raw.size, proc.size)
+    if n <= 1:
+        return
+    seg = min(4096, max(256, n))
+    freqs_raw, psd_raw = welch(np.asarray(raw[:n], dtype=np.float64), fs=int(fs), nperseg=seg)
+    freqs_proc, psd_proc = welch(np.asarray(proc[:n], dtype=np.float64), fs=int(fs), nperseg=seg)
+    fig, ax = plt.subplots(figsize=(12, 4.5))
+    ax.semilogx(freqs_raw[1:], 10.0 * np.log10(np.maximum(psd_raw[1:], 1e-12)), color="#666666", linewidth=1.3, label="raw")
+    ax.semilogx(freqs_proc[1:], 10.0 * np.log10(np.maximum(psd_proc[1:], 1e-12)), color="#005f73", linewidth=1.3, label="processed")
+    ax.set_title(f"{title} PSD")
+    ax.set_xlabel("frequency (Hz)")
+    ax.set_ylabel("PSD (dB/Hz)")
+    ax.grid(True, alpha=0.25, which="both")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_psd_stages(stage_signals: list[tuple[str, np.ndarray]], fs: int, out_path: Path, title: str) -> None:
+    valid: list[tuple[str, np.ndarray]] = []
+    for name, signal in stage_signals:
+        arr = np.asarray(signal, dtype=np.float64).reshape(-1)
+        if arr.size > 1:
+            valid.append((str(name), arr))
+    if not valid:
+        return
+    fig, ax = plt.subplots(figsize=(12, 5))
+    colors = ["#666666", "#005f73", "#0a9396", "#ee9b00", "#bb3e03"]
+    for idx, (name, signal) in enumerate(valid):
+        seg = min(4096, max(256, signal.size))
+        freqs, psd = welch(signal, fs=int(fs), nperseg=seg)
+        ax.semilogx(
+            freqs[1:],
+            10.0 * np.log10(np.maximum(psd[1:], 1e-12)),
+            color=colors[idx % len(colors)],
+            linewidth=1.3,
+            label=name,
+        )
+    ax.set_title(f"{title} Stage PSD")
+    ax.set_xlabel("frequency (Hz)")
+    ax.set_ylabel("PSD (dB/Hz)")
+    ax.grid(True, alpha=0.25, which="both")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_single_psd(signal: np.ndarray, fs: int, out_path: Path, title: str, *, color: str = "#005f73") -> None:
+    arr = np.asarray(signal, dtype=np.float64).reshape(-1)
+    if arr.size <= 1:
+        return
+    seg = min(4096, max(256, arr.size))
+    freqs, psd = welch(arr, fs=int(fs), nperseg=seg)
+    fig, ax = plt.subplots(figsize=(12, 4.5))
+    ax.semilogx(freqs[1:], 10.0 * np.log10(np.maximum(psd[1:], 1e-12)), color=color, linewidth=1.3)
+    ax.set_title(title)
+    ax.set_xlabel("frequency (Hz)")
+    ax.set_ylabel("PSD (dB/Hz)")
+    ax.grid(True, alpha=0.25, which="both")
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
@@ -925,6 +996,13 @@ def _run_recording_method_job(
     output_enhancer_mode: str,
     postfilter_enabled: bool,
     postfilter_method: str,
+    postfilter_noise_ema_alpha: float,
+    postfilter_speech_ema_alpha: float,
+    postfilter_gain_floor: float,
+    postfilter_gain_ema_alpha: float,
+    postfilter_dd_alpha: float,
+    postfilter_noise_update_speech_scale: float,
+    postfilter_gain_max_step_db: float,
     rnnoise_wet_mix: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
@@ -991,6 +1069,13 @@ def _run_recording_method_job(
             "output_enhancer_mode": str(output_enhancer_mode),
             "postfilter_enabled": bool(postfilter_enabled),
             "postfilter_method": str(postfilter_method),
+            "postfilter_noise_ema_alpha": float(postfilter_noise_ema_alpha),
+            "postfilter_speech_ema_alpha": float(postfilter_speech_ema_alpha),
+            "postfilter_gain_floor": float(postfilter_gain_floor),
+            "postfilter_gain_ema_alpha": float(postfilter_gain_ema_alpha),
+            "postfilter_dd_alpha": float(postfilter_dd_alpha),
+            "postfilter_noise_update_speech_scale": float(postfilter_noise_update_speech_scale),
+            "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
             "rnnoise_wet_mix": float(rnnoise_wet_mix),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
             "suppressed_user_voice_doa_deg": (
@@ -1073,6 +1158,17 @@ def _run_recording_method_job(
     proc, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
     proc = np.asarray(proc, dtype=np.float32).reshape(-1)
     fs = int(proc_sr if proc_sr > 0 else sample_rate_hz)
+    stage_paths = {
+        "post_beamforming": run_dir / "post_beamforming.wav",
+        "post_wiener": run_dir / "post_wiener.wav",
+        "post_rnnoise": run_dir / "post_rnnoise.wav",
+    }
+    stage_audio: dict[str, np.ndarray] = {}
+    for stage_name, stage_path in stage_paths.items():
+        if not stage_path.exists():
+            continue
+        stage_sig, _stage_sr = sf.read(stage_path, dtype="float32", always_2d=False)
+        stage_audio[stage_name] = np.asarray(stage_sig, dtype=np.float32).reshape(-1)
     if str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band"}:
         _emit_beamformer_snapshot_artifacts(
             summary=summary,
@@ -1154,6 +1250,44 @@ def _run_recording_method_job(
     viz_dir = run_dir / "visualizations"
     _plot_waveform_compare(raw_mix[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
     _plot_spectrogram_compare(raw_mix[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
+    _plot_psd_compare(raw_mix[:n], proc[:n], fs, viz_dir / "psd.png", label)
+    _plot_psd_stages(
+        [
+            ("raw", raw_mix[:n]),
+            ("post_beamforming", stage_audio.get("post_beamforming", proc)[:n]),
+            *([("post_wiener", stage_audio["post_wiener"][:n])] if "post_wiener" in stage_audio else []),
+            *([("post_rnnoise", stage_audio["post_rnnoise"][:n])] if "post_rnnoise" in stage_audio else []),
+            ("final", proc[:n]),
+        ],
+        fs,
+        viz_dir / "psd_stages.png",
+        label,
+    )
+    _plot_single_psd(raw_mix[:n], fs, viz_dir / "psd_raw.png", f"{label} raw PSD", color="#666666")
+    _plot_single_psd(
+        stage_audio.get("post_beamforming", proc)[:n],
+        fs,
+        viz_dir / "psd_post_beamforming.png",
+        f"{label} post beamforming PSD",
+        color="#005f73",
+    )
+    if "post_wiener" in stage_audio:
+        _plot_single_psd(
+            stage_audio["post_wiener"][:n],
+            fs,
+            viz_dir / "psd_post_wiener.png",
+            f"{label} post wiener PSD",
+            color="#0a9396",
+        )
+    if "post_rnnoise" in stage_audio:
+        _plot_single_psd(
+            stage_audio["post_rnnoise"][:n],
+            fs,
+            viz_dir / "psd_post_rnnoise.png",
+            f"{label} post rnnoise PSD",
+            color="#ee9b00",
+        )
+    _plot_single_psd(proc[:n], fs, viz_dir / "psd_final.png", f"{label} final PSD", color="#bb3e03")
     _plot_speaker_timeline(
         summary,
         viz_dir / "speaker_directions.png",
@@ -1211,7 +1345,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enhancement-tier", choices=["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"], default="custom")
     parser.add_argument("--output-enhancer-mode", choices=["off", "wiener"], default="off")
     parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass"], default="off")
+    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass"], default="off")
+    parser.add_argument("--postfilter-noise-ema-alpha", type=float, default=0.08)
+    parser.add_argument("--postfilter-speech-ema-alpha", type=float, default=0.12)
+    parser.add_argument("--postfilter-gain-floor", type=float, default=0.22)
+    parser.add_argument("--postfilter-gain-ema-alpha", type=float, default=0.3)
+    parser.add_argument("--postfilter-dd-alpha", type=float, default=0.92)
+    parser.add_argument("--postfilter-noise-update-speech-scale", type=float, default=0.2)
+    parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
     parser.add_argument("--rnnoise-wet-mix", type=float, default=1.0)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
@@ -1364,6 +1505,13 @@ def main() -> None:
                 output_enhancer_mode=str(args.output_enhancer_mode),
                 postfilter_enabled=bool(args.postfilter_enabled),
                 postfilter_method=str(args.postfilter_method),
+                postfilter_noise_ema_alpha=float(args.postfilter_noise_ema_alpha),
+                postfilter_speech_ema_alpha=float(args.postfilter_speech_ema_alpha),
+                postfilter_gain_floor=float(args.postfilter_gain_floor),
+                postfilter_gain_ema_alpha=float(args.postfilter_gain_ema_alpha),
+                postfilter_dd_alpha=float(args.postfilter_dd_alpha),
+                postfilter_noise_update_speech_scale=float(args.postfilter_noise_update_speech_scale),
+                postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
                 rnnoise_wet_mix=float(args.rnnoise_wet_mix),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
