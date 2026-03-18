@@ -1450,7 +1450,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-oversubtraction-alpha", type=float, default=1.0)
     parser.add_argument("--postfilter-spectral-floor-beta", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
-    parser.add_argument("--rnnoise-wet-mix", type=float, default=1.0)
+    parser.add_argument("--rnnoise-wet-mix", type=float, default=0.8)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
     parser.add_argument("--robust-target-band-width-deg", type=float, default=10.0)
