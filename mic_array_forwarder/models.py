@@ -37,6 +37,7 @@ class FastPathConfig(BaseModel):
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
     fd_cov_ema_alpha: float = 0.2965906035161345
     fd_diag_load: float = 0.012141307774357374
+    fd_trace_diagonal_loading_factor: float = 0.0
     fd_noise_covariance_mode: Literal["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"] = "estimated_target_subtractive"
     target_activity_rnn_update_mode: Literal["oracle_target_activity", "estimated_target_activity"] | None = (
         "estimated_target_activity"
@@ -104,6 +105,7 @@ class FastPathConfig(BaseModel):
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
     robust_target_band_width_deg: float = 10.0
+    robust_target_band_conditioning_enabled: bool = False
 
 
 class SlowPathConfig(BaseModel):
@@ -221,6 +223,10 @@ class SessionStartRequest(BaseModel):
     @property
     def fd_diag_load(self) -> float:
         return float(self.fast_path.fd_diag_load)
+
+    @property
+    def fd_trace_diagonal_loading_factor(self) -> float:
+        return float(self.fast_path.fd_trace_diagonal_loading_factor)
 
     @property
     def fd_noise_covariance_mode(self) -> str:
@@ -482,6 +488,10 @@ class SessionStartRequest(BaseModel):
     @property
     def robust_target_band_width_deg(self) -> float:
         return float(self.fast_path.robust_target_band_width_deg)
+
+    @property
+    def robust_target_band_conditioning_enabled(self) -> bool:
+        return bool(self.fast_path.robust_target_band_conditioning_enabled)
 
     @property
     def tracking_mode(self) -> str:

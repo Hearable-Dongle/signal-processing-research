@@ -308,6 +308,7 @@ class PipelineConfig:
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
     fd_cov_ema_alpha: float = 0.2965906035161345
     fd_diag_load: float = 0.012141307774357374
+    fd_trace_diagonal_loading_factor: float = 0.0
     fd_noise_covariance_mode: str = "estimated_target_subtractive"  # one of: estimated_target_subtractive, estimated_target_subtractive_frozen, oracle_non_target_residual
     target_activity_rnn_update_mode: str | None = None  # one of: oracle_target_activity, estimated_target_activity
     target_activity_low_threshold: float = 0.10544774305969414
@@ -361,4 +362,5 @@ class PipelineConfig:
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
     robust_target_band_width_deg: float = 10.0
+    robust_target_band_conditioning_enabled: bool = False
     beamformer_snapshot_frame_indices: tuple[int, ...] = ()

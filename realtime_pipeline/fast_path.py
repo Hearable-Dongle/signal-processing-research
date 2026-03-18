@@ -94,6 +94,13 @@ def _rms_db(x: np.ndarray) -> float:
     return float(20.0 * np.log10(max(rms, 1e-12)))
 
 
+def _safe_condition_number(x: np.ndarray) -> float:
+    try:
+        return float(np.linalg.cond(np.asarray(x, dtype=np.complex128)))
+    except np.linalg.LinAlgError:
+        return float("inf")
+
+
 def _inactive_noise_model_update() -> dict:
     return {"active": False, "sources": (), "reasons": (), "debug": {}}
 
@@ -306,9 +313,8 @@ class _FDBufferedBeamformer:
     def _solve_mvdr_weights(self, steering: np.ndarray) -> np.ndarray:
         f_bins = steering.shape[0]
         weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
-        eye = np.eye(self.n_mics, dtype=np.complex128)
         for f in range(f_bins):
-            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
+            r = self._loaded_noise_covariance(self.rnn_mvdr_noise[f])
             af = steering[f].reshape(-1, 1)
             try:
                 rinv_a = np.linalg.solve(r, af)
@@ -322,9 +328,8 @@ class _FDBufferedBeamformer:
     def _solve_lcmv_constraint_weights(self, constraints: np.ndarray, response: np.ndarray) -> np.ndarray:
         f_bins = constraints.shape[0]
         weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
-        eye = np.eye(self.n_mics, dtype=np.complex128)
         for f in range(f_bins):
-            r = self.rnn_mvdr_noise[f] + (1e-8 * eye)
+            r = self._loaded_noise_covariance(self.rnn_mvdr_noise[f])
             try:
                 r_inv_constraint = np.linalg.solve(r, constraints[f])
             except np.linalg.LinAlgError:
@@ -348,9 +353,85 @@ class _FDBufferedBeamformer:
         return self._solve_lcmv_constraint_weights(constraints, response)
 
     def _solve_lcmv_target_band_weights(self, steerings: list[np.ndarray]) -> np.ndarray:
+        if not bool(getattr(self.cfg, "robust_target_band_conditioning_enabled", False)):
+            constraints = np.stack(steerings, axis=2)
+            response = np.ones((constraints.shape[2], 1), dtype=np.complex128)
+            return self._solve_lcmv_constraint_weights(constraints, response)
         constraints = np.stack(steerings, axis=2)
-        response = np.ones((constraints.shape[2], 1), dtype=np.complex128)
-        return self._solve_lcmv_constraint_weights(constraints, response)
+        f_bins = constraints.shape[0]
+        weights = np.zeros((f_bins, self.n_mics), dtype=np.complex128)
+        condition_limit = 1e5
+        self._last_target_band_conditioning = {
+            "full_band_frames": 0,
+            "edge_only_frames": 0,
+            "center_only_frames": 0,
+            "max_selected_cond": 0.0,
+        }
+        for f in range(f_bins):
+            full_constraints = constraints[f]
+            full_response = np.ones((full_constraints.shape[1], 1), dtype=np.complex128)
+            candidates: list[tuple[str, np.ndarray, np.ndarray]] = [("full_band", full_constraints, full_response)]
+            if full_constraints.shape[1] >= 3:
+                edge_constraints = full_constraints[:, [0, -1]]
+                edge_response = np.ones((2, 1), dtype=np.complex128)
+                center_idx = full_constraints.shape[1] // 2
+                center_constraints = full_constraints[:, [center_idx]]
+                center_response = np.ones((1, 1), dtype=np.complex128)
+                candidates.extend(
+                    [
+                        ("edge_only", edge_constraints, edge_response),
+                        ("center_only", center_constraints, center_response),
+                    ]
+                )
+            selected_label, selected_constraints, selected_response = candidates[-1]
+            selected_cond = float("inf")
+            for label, candidate_constraints, candidate_response in candidates:
+                gram = candidate_constraints.conj().T @ candidate_constraints
+                cond = _safe_condition_number(gram)
+                if np.isfinite(cond) and cond <= condition_limit:
+                    selected_label = label
+                    selected_constraints = candidate_constraints
+                    selected_response = candidate_response
+                    selected_cond = cond
+                    break
+                if label == candidates[-1][0]:
+                    selected_label = label
+                    selected_constraints = candidate_constraints
+                    selected_response = candidate_response
+                    selected_cond = cond
+            r = self._loaded_noise_covariance(self.rnn_mvdr_noise[f])
+            try:
+                r_inv_constraint = np.linalg.solve(r, selected_constraints)
+            except np.linalg.LinAlgError:
+                r_inv_constraint = np.linalg.pinv(r) @ selected_constraints
+            gram = selected_constraints.conj().T @ r_inv_constraint
+            try:
+                mid = np.linalg.solve(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128), selected_response)
+            except np.linalg.LinAlgError:
+                mid = np.linalg.pinv(gram + 1e-8 * np.eye(gram.shape[0], dtype=np.complex128)) @ selected_response
+            weights[f, :] = (r_inv_constraint @ mid).reshape(-1)
+            if selected_label == "full_band":
+                self._last_target_band_conditioning["full_band_frames"] += 1
+            elif selected_label == "edge_only":
+                self._last_target_band_conditioning["edge_only_frames"] += 1
+            else:
+                self._last_target_band_conditioning["center_only_frames"] += 1
+            self._last_target_band_conditioning["max_selected_cond"] = max(
+                float(self._last_target_band_conditioning["max_selected_cond"]),
+                float(selected_cond if np.isfinite(selected_cond) else 0.0),
+            )
+        return weights
+
+    def _loaded_noise_covariance(self, rnn_bin: np.ndarray) -> np.ndarray:
+        r = np.asarray(rnn_bin, dtype=np.complex128)
+        mics = r.shape[0]
+        eye = np.eye(mics, dtype=np.complex128)
+        static_load = float(max(getattr(self.cfg, "fd_diag_load", 0.0), 0.0))
+        trace_factor = float(max(getattr(self.cfg, "fd_trace_diagonal_loading_factor", 0.0), 0.0))
+        trace_scale = float(np.real(np.trace(r))) / float(max(1, mics))
+        adaptive_load = trace_factor * max(trace_scale, 0.0)
+        total_load = static_load + adaptive_load + 1e-8
+        return r + (total_load * eye)
 
     def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
