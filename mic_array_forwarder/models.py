@@ -76,14 +76,16 @@ class FastPathConfig(BaseModel):
     capon_hold_frames: int = 2
     enhancement_tier: Literal["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"] = "custom"
     output_enhancer_mode: Literal["off", "wiener"] = "off"
-    postfilter_method: Literal["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"] = "off"
+    postfilter_method: Literal["off", "wiener_dd", "log_mmse", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"] = "off"
     postfilter_enabled: bool = True
-    postfilter_noise_ema_alpha: float = 0.08
-    postfilter_speech_ema_alpha: float = 0.12
+    postfilter_noise_ema_alpha: float = 0.02
+    postfilter_speech_ema_alpha: float = 0.01
     postfilter_gain_floor: float = 0.22
     postfilter_gain_ema_alpha: float = 0.2
     postfilter_dd_alpha: float = 0.92
-    postfilter_noise_update_speech_scale: float = 0.2
+    postfilter_noise_update_speech_scale: float = 0.0
+    postfilter_oversubtraction_alpha: float = 1.0
+    postfilter_spectral_floor_beta: float = 0.01
     postfilter_freq_smoothing_bins: int = 2
     postfilter_gain_max_step_db: float = 2.5
     rnnoise_wet_mix: float = 1.0
@@ -409,6 +411,14 @@ class SessionStartRequest(BaseModel):
     @property
     def postfilter_noise_update_speech_scale(self) -> float:
         return float(self.fast_path.postfilter_noise_update_speech_scale)
+
+    @property
+    def postfilter_oversubtraction_alpha(self) -> float:
+        return float(self.fast_path.postfilter_oversubtraction_alpha)
+
+    @property
+    def postfilter_spectral_floor_beta(self) -> float:
+        return float(self.fast_path.postfilter_spectral_floor_beta)
 
     @property
     def postfilter_freq_smoothing_bins(self) -> int:

@@ -941,6 +941,45 @@ def _trace_metrics(summary: dict) -> dict[str, float]:
     }
 
 
+def _postfilter_noise_metrics(summary: dict) -> dict[str, float]:
+    trace = list(summary.get("noise_model_update_trace", []))
+    if not trace:
+        return {
+            "postfilter_noise_update_rate": float("nan"),
+            "postfilter_noise_alpha_eff_mean": float("nan"),
+            "postfilter_noise_bootstrap_rate": float("nan"),
+            "postfilter_noise_bootstrap_complete_rate": float("nan"),
+        }
+    relevant = []
+    for row in trace:
+        sources = {str(v) for v in row.get("sources", [])}
+        if "postfilter_noise" not in sources:
+            continue
+        debug = dict(row.get("debug", {}))
+        relevant.append(
+            {
+                "active": bool(debug.get("noise_update_applied", False)),
+                "alpha": float(debug.get("noise_alpha_eff", float("nan"))),
+                "bootstrap": str(next(iter(row.get("reasons", [])), "")) == "wiener_noise_psd_bootstrap",
+                "bootstrap_complete": bool(debug.get("noise_bootstrap_complete", False)),
+            }
+        )
+    if not relevant:
+        return {
+            "postfilter_noise_update_rate": float("nan"),
+            "postfilter_noise_alpha_eff_mean": float("nan"),
+            "postfilter_noise_bootstrap_rate": float("nan"),
+            "postfilter_noise_bootstrap_complete_rate": float("nan"),
+        }
+    alpha_vals = [item["alpha"] for item in relevant if not math.isnan(float(item["alpha"]))]
+    return {
+        "postfilter_noise_update_rate": float(np.mean([1.0 if item["active"] else 0.0 for item in relevant])),
+        "postfilter_noise_alpha_eff_mean": float(np.mean(alpha_vals)) if alpha_vals else float("nan"),
+        "postfilter_noise_bootstrap_rate": float(np.mean([1.0 if item["bootstrap"] else 0.0 for item in relevant])),
+        "postfilter_noise_bootstrap_complete_rate": float(np.mean([1.0 if item["bootstrap_complete"] else 0.0 for item in relevant])),
+    }
+
+
 def _plot_summary_bars(summary_rows: list[dict], out_dir: Path) -> None:
     if not summary_rows:
         return
@@ -1019,6 +1058,8 @@ def _run_recording_method_job(
     postfilter_gain_ema_alpha: float,
     postfilter_dd_alpha: float,
     postfilter_noise_update_speech_scale: float,
+    postfilter_oversubtraction_alpha: float,
+    postfilter_spectral_floor_beta: float,
     postfilter_gain_max_step_db: float,
     rnnoise_wet_mix: float,
     slow_chunk_ms: int,
@@ -1096,6 +1137,8 @@ def _run_recording_method_job(
             "postfilter_gain_ema_alpha": float(postfilter_gain_ema_alpha),
             "postfilter_dd_alpha": float(postfilter_dd_alpha),
             "postfilter_noise_update_speech_scale": float(postfilter_noise_update_speech_scale),
+            "postfilter_oversubtraction_alpha": float(postfilter_oversubtraction_alpha),
+            "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
             "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
             "rnnoise_wet_mix": float(rnnoise_wet_mix),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
@@ -1213,6 +1256,7 @@ def _run_recording_method_job(
         )
     n = min(raw_mix_for_metrics.size, proc.size)
     trace_metrics = _trace_metrics(summary)
+    postfilter_noise_metrics = _postfilter_noise_metrics(summary)
     duration_s = float(n / max(fs, 1))
     suppressed_user_tracks = _filter_tracks_by_speaker_name(ground_truth_tracks, suppressed_user_speaker_name)
     gt_metrics = _ground_truth_metrics(
@@ -1246,6 +1290,8 @@ def _run_recording_method_job(
         "enhancement_tier": str(summary.get("enhancement_tier", enhancement_tier)),
         "output_enhancer_mode": str(summary.get("output_enhancer_mode", output_enhancer_mode)),
         "postfilter_method": str(postfilter_method),
+        "postfilter_oversubtraction_alpha": float(postfilter_oversubtraction_alpha),
+        "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
         "rnnoise_wet_mix": float(rnnoise_wet_mix),
         "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
         "fd_analysis_window_ms": float(fd_analysis_window_ms),
@@ -1280,6 +1326,7 @@ def _run_recording_method_job(
         "max_confidence_final": float(max((float(speaker.get("confidence", 0.0)) for speaker in summary.get("speaker_map_final", [])), default=0.0)),
         "mean_gain_weight_final": float(np.mean([float(speaker.get("gain_weight", 0.0)) for speaker in summary.get("speaker_map_final", [])])) if summary.get("speaker_map_final") else 0.0,
         **trace_metrics,
+        **postfilter_noise_metrics,
         **gt_metrics,
         **suppression_metrics,
     }
@@ -1393,13 +1440,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enhancement-tier", choices=["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"], default="custom")
     parser.add_argument("--output-enhancer-mode", choices=["off", "wiener"], default="off")
     parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"], default="off")
-    parser.add_argument("--postfilter-noise-ema-alpha", type=float, default=0.08)
-    parser.add_argument("--postfilter-speech-ema-alpha", type=float, default=0.12)
+    parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "log_mmse", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"], default="off")
+    parser.add_argument("--postfilter-noise-ema-alpha", type=float, default=0.02)
+    parser.add_argument("--postfilter-speech-ema-alpha", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-floor", type=float, default=0.22)
     parser.add_argument("--postfilter-gain-ema-alpha", type=float, default=0.3)
     parser.add_argument("--postfilter-dd-alpha", type=float, default=0.92)
-    parser.add_argument("--postfilter-noise-update-speech-scale", type=float, default=0.2)
+    parser.add_argument("--postfilter-noise-update-speech-scale", type=float, default=0.0)
+    parser.add_argument("--postfilter-oversubtraction-alpha", type=float, default=1.0)
+    parser.add_argument("--postfilter-spectral-floor-beta", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
     parser.add_argument("--rnnoise-wet-mix", type=float, default=1.0)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
@@ -1561,6 +1610,8 @@ def main() -> None:
                 postfilter_gain_ema_alpha=float(args.postfilter_gain_ema_alpha),
                 postfilter_dd_alpha=float(args.postfilter_dd_alpha),
                 postfilter_noise_update_speech_scale=float(args.postfilter_noise_update_speech_scale),
+                postfilter_oversubtraction_alpha=float(args.postfilter_oversubtraction_alpha),
+                postfilter_spectral_floor_beta=float(args.postfilter_spectral_floor_beta),
                 postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
                 rnnoise_wet_mix=float(args.rnnoise_wet_mix),
                 slow_chunk_ms=int(args.slow_chunk_ms),
@@ -1632,9 +1683,15 @@ def main() -> None:
                     "active_speaker_count_final_mean": _mean_numeric(rows, "active_speaker_count_final"),
                     "dominant_confidence_avg_mean": _mean_numeric(rows, "dominant_confidence_avg"),
                     "dominant_direction_step_p95_deg_mean": _mean_numeric(rows, "dominant_direction_step_p95_deg"),
+                    "postfilter_noise_update_rate_mean": _mean_numeric(rows, "postfilter_noise_update_rate"),
+                    "postfilter_noise_alpha_eff_mean": _mean_numeric(rows, "postfilter_noise_alpha_eff_mean"),
+                    "postfilter_noise_bootstrap_rate_mean": _mean_numeric(rows, "postfilter_noise_bootstrap_rate"),
+                    "postfilter_noise_bootstrap_complete_rate_mean": _mean_numeric(rows, "postfilter_noise_bootstrap_complete_rate"),
                     "enhancement_tier": str(rows[0].get("enhancement_tier", "")) if rows else "",
                     "output_enhancer_mode": str(rows[0].get("output_enhancer_mode", "")) if rows else "",
                     "postfilter_method": str(rows[0].get("postfilter_method", "")) if rows else "",
+                    "postfilter_oversubtraction_alpha": _mean_numeric(rows, "postfilter_oversubtraction_alpha"),
+                    "postfilter_spectral_floor_beta": _mean_numeric(rows, "postfilter_spectral_floor_beta"),
                     "fd_noise_covariance_mode": str(rows[0].get("fd_noise_covariance_mode", "")) if rows else "",
                     "target_activity_detector_mode": str(rows[0].get("target_activity_detector_mode", "")) if rows else "",
                     "target_activity_detector_backend": str(rows[0].get("target_activity_detector_backend", "")) if rows else "",
@@ -1691,6 +1748,8 @@ def main() -> None:
             "output_enhancer_mode": str(args.output_enhancer_mode),
             "postfilter_enabled": bool(args.postfilter_enabled),
             "postfilter_method": str(args.postfilter_method),
+            "postfilter_oversubtraction_alpha": float(args.postfilter_oversubtraction_alpha),
+            "postfilter_spectral_floor_beta": float(args.postfilter_spectral_floor_beta),
             "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),
             "fd_analysis_window_ms": float(args.fd_analysis_window_ms),

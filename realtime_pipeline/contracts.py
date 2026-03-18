@@ -350,13 +350,15 @@ class PipelineConfig:
     fd_speech_cov_update_scale: float = 0.25
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True
-    postfilter_method: str = "off"  # one of: off, wiener_dd, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass, rnnoise_then_voice_bandpass, wiener_then_voice_bandpass
-    postfilter_noise_ema_alpha: float = 0.08
-    postfilter_speech_ema_alpha: float = 0.12
+    postfilter_method: str = "off"  # one of: off, wiener_dd, log_mmse, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass, rnnoise_then_voice_bandpass, wiener_then_voice_bandpass
+    postfilter_noise_ema_alpha: float = 0.02
+    postfilter_speech_ema_alpha: float = 0.01
     postfilter_gain_floor: float = 0.22
     postfilter_gain_ema_alpha: float = 0.2
     postfilter_dd_alpha: float = 0.92
-    postfilter_noise_update_speech_scale: float = 0.2
+    postfilter_noise_update_speech_scale: float = 0.0
+    postfilter_oversubtraction_alpha: float = 1.0
+    postfilter_spectral_floor_beta: float = 0.01
     postfilter_freq_smoothing_bins: int = 2
     postfilter_gain_max_step_db: float = 2.5
     rnnoise_wet_mix: float = 1.0

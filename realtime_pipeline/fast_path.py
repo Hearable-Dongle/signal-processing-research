@@ -6,6 +6,8 @@ from time import perf_counter
 from typing import Callable
 
 import numpy as np
+from scipy.signal import resample_poly
+from scipy.special import exp1
 
 try:
     from pyrnnoise import RNNoise as PyRNNoise  # type: ignore
@@ -1031,10 +1033,11 @@ class _FDBufferedBeamformer:
 
 
 class _PostFilterState:
-    def __init__(self, frame_samples: int, cfg: PipelineConfig):
+    def __init__(self, frame_samples: int, cfg: PipelineConfig, *, estimator: str = "wiener_dd"):
         self.n = int(frame_samples)
         self.fft_n = max(4, 2 * self.n)
         self.cfg = cfg
+        self.estimator = str(estimator).strip().lower()
         self._win = np.sqrt(np.hanning(self.fft_n)).astype(np.float64)
         self._prev_in = np.zeros(self.n, dtype=np.float64)
         self._ola_tail = np.zeros(self.n, dtype=np.float64)
@@ -1042,6 +1045,8 @@ class _PostFilterState:
         self.speech_psd: np.ndarray | None = None
         self.gain_prev: np.ndarray | None = None
         self.post_snr_prev: np.ndarray | None = None
+        self._noise_bootstrap_frames_seen = 0
+        self._noise_bootstrap_target_frames = 5
         self.last_noise_model_update: dict = _inactive_noise_model_update()
 
     def _smooth_gain_frequency(self, gain: np.ndarray) -> np.ndarray:
@@ -1054,7 +1059,7 @@ class _PostFilterState:
         kernel /= np.sum(kernel)
         return np.convolve(gain, kernel, mode="same")
 
-    def process(self, frame: np.ndarray, speech_activity: float) -> np.ndarray:
+    def process(self, frame: np.ndarray, speech_activity: float, *, target_activity_active: bool = False) -> np.ndarray:
         x = np.asarray(frame, dtype=np.float64).reshape(-1)
         block = np.concatenate([self._prev_in, x], axis=0)
         self._prev_in = x.copy()
@@ -1071,39 +1076,64 @@ class _PostFilterState:
         if self.post_snr_prev is None:
             self.post_snr_prev = np.maximum(psd / np.maximum(self.noise_psd, 1e-12) - 1.0, 0.0)
 
+        oversub_alpha = float(max(self.cfg.postfilter_oversubtraction_alpha, 0.0))
+        spectral_floor_beta = float(np.clip(self.cfg.postfilter_spectral_floor_beta, 1e-6, 1.0))
         n_alpha = float(np.clip(self.cfg.postfilter_noise_ema_alpha, 0.0, 1.0))
         s_alpha = float(np.clip(self.cfg.postfilter_speech_ema_alpha, 0.0, 1.0))
         g_alpha = float(np.clip(self.cfg.postfilter_gain_ema_alpha, 0.0, 1.0))
         dd_alpha = float(np.clip(self.cfg.postfilter_dd_alpha, 0.0, 0.999))
         floor = float(np.clip(self.cfg.postfilter_gain_floor, 0.05, 1.0))
-        speech_update_scale = float(np.clip(self.cfg.postfilter_noise_update_speech_scale, 0.0, 1.0))
         gain_max_step_db = float(max(0.0, self.cfg.postfilter_gain_max_step_db))
 
         output_rms = float(np.sqrt(np.mean(x**2) + 1e-12))
         output_activity = float(np.clip((output_rms - 0.003) / 0.02, 0.0, 1.0))
         posterior_snr_hint = float(np.clip(np.mean(psd / np.maximum(self.noise_psd, 1e-12) - 1.0) / 6.0, 0.0, 1.0))
         speech_presence = float(np.clip(max(float(speech_activity), output_activity, posterior_snr_hint), 0.0, 1.0))
-        noise_alpha_eff = n_alpha * ((1.0 - speech_presence) + (speech_presence * speech_update_scale))
-        noise_observation = np.minimum(psd, self.noise_psd * (1.0 + (2.5 * noise_alpha_eff)) + 1e-12)
-        self.noise_psd = (1.0 - noise_alpha_eff) * self.noise_psd + noise_alpha_eff * noise_observation
+        allow_noise_update = (not bool(target_activity_active)) and (float(speech_activity) < 0.2)
+        noise_alpha_eff = 0.0
+        update_reason = "wiener_noise_psd_hold_speech"
+        if allow_noise_update:
+            if self._noise_bootstrap_frames_seen < self._noise_bootstrap_target_frames:
+                if self._noise_bootstrap_frames_seen == 0:
+                    self.noise_psd = psd.copy()
+                else:
+                    self.noise_psd = np.minimum(self.noise_psd, psd)
+                self._noise_bootstrap_frames_seen += 1
+                update_reason = "wiener_noise_psd_bootstrap"
+            else:
+                noise_alpha_eff = n_alpha
+                noise_observation = np.minimum(psd, self.noise_psd * (1.0 + (2.5 * noise_alpha_eff)) + 1e-12)
+                self.noise_psd = (1.0 - noise_alpha_eff) * self.noise_psd + noise_alpha_eff * noise_observation
+                update_reason = "wiener_noise_psd_ema"
         self.last_noise_model_update = {
-            "active": True,
+            "active": bool(allow_noise_update),
             "sources": ("postfilter_noise",),
-            "reasons": ("wiener_noise_psd_ema",),
+            "reasons": (update_reason,),
             "debug": {
                 "speech_presence": float(speech_presence),
                 "noise_alpha_eff": float(noise_alpha_eff),
                 "speech_activity": float(speech_activity),
+                "target_activity_active": bool(target_activity_active),
+                "noise_update_applied": bool(allow_noise_update),
+                "noise_bootstrap_frames_seen": int(self._noise_bootstrap_frames_seen),
+                "noise_bootstrap_target_frames": int(self._noise_bootstrap_target_frames),
+                "noise_bootstrap_complete": bool(self._noise_bootstrap_frames_seen >= self._noise_bootstrap_target_frames),
             },
         }
 
-        post_snr = np.maximum(psd / np.maximum(self.noise_psd, 1e-12) - 1.0, 0.0)
+        effective_noise_psd = np.maximum(oversub_alpha * self.noise_psd, 1e-12)
+        post_snr = np.maximum(psd / effective_noise_psd - 1.0, 0.0)
         dd_prior = dd_alpha * (self.gain_prev**2) * self.post_snr_prev + (1.0 - dd_alpha) * post_snr
-        speech_observation = np.maximum(psd - self.noise_psd, 0.0)
+        speech_observation = np.maximum(psd - effective_noise_psd, spectral_floor_beta * self.noise_psd)
         self.speech_psd = (1.0 - s_alpha) * self.speech_psd + s_alpha * speech_observation
-        prior_snr = np.maximum(dd_prior, self.speech_psd / np.maximum(self.noise_psd, 1e-12))
-        gain = prior_snr / (1.0 + prior_snr)
-        gain = np.maximum(gain, floor)
+        prior_snr = np.maximum(dd_prior, self.speech_psd / effective_noise_psd)
+        if self.estimator == "log_mmse":
+            gamma = np.maximum(psd / effective_noise_psd, 1.0)
+            nu = np.clip((prior_snr / (1.0 + prior_snr)) * gamma, 1e-8, 1e6)
+            gain = (prior_snr / (1.0 + prior_snr)) * np.exp(0.5 * exp1(nu))
+        else:
+            gain = prior_snr / (1.0 + prior_snr)
+        gain = np.maximum(gain, max(floor, spectral_floor_beta))
         gain = self._smooth_gain_frequency(gain)
         if gain_max_step_db > 0.0:
             max_ratio = float(10.0 ** (gain_max_step_db / 20.0))
@@ -1125,7 +1155,9 @@ class _RNNoisePostFilter:
         if PyRNNoise is None:
             raise RuntimeError("RNNoise postfilter requested but pyrnnoise is unavailable.")
         self.cfg = cfg
-        self._backend = PyRNNoise(48000)
+        self._backend_sample_rate_hz = 48000
+        self._input_sample_rate_hz = int(cfg.sample_rate_hz)
+        self._backend = PyRNNoise(self._backend_sample_rate_hz)
         self._frame_size = 480
         self._pending_in = np.zeros((0,), dtype=np.float32)
         self._pending_out = np.zeros((0,), dtype=np.float32)
@@ -1137,6 +1169,12 @@ class _RNNoisePostFilter:
         x = np.asarray(frame, dtype=np.float32).reshape(-1)
         gain = float(10.0 ** (float(self.cfg.rnnoise_input_gain_db) / 20.0))
         x_in = (x * gain).astype(np.float32, copy=False)
+        if self._input_sample_rate_hz != self._backend_sample_rate_hz:
+            x_in = np.asarray(
+                resample_poly(x_in, up=self._backend_sample_rate_hz, down=self._input_sample_rate_hz),
+                dtype=np.float32,
+            )
+        expected_backend_samples = int(x_in.shape[0])
         self._pending_in = np.concatenate([self._pending_in, x_in], axis=0)
         parts: list[np.ndarray] = []
         while self._pending_in.shape[0] >= self._frame_size:
@@ -1150,12 +1188,21 @@ class _RNNoisePostFilter:
             parts.append(den_arr)
         if parts:
             self._pending_out = np.concatenate([self._pending_out, np.concatenate(parts, axis=0)], axis=0)
-        if self._pending_out.shape[0] < x.shape[0]:
-            out = np.pad(self._pending_out, (0, x.shape[0] - self._pending_out.shape[0]))
+        if self._pending_out.shape[0] < expected_backend_samples:
+            out = np.pad(self._pending_out, (0, expected_backend_samples - self._pending_out.shape[0]))
             self._pending_out = np.zeros((0,), dtype=np.float32)
         else:
-            out = self._pending_out[: x.shape[0]]
-            self._pending_out = self._pending_out[x.shape[0] :]
+            out = self._pending_out[: expected_backend_samples]
+            self._pending_out = self._pending_out[expected_backend_samples :]
+        if self._input_sample_rate_hz != self._backend_sample_rate_hz:
+            out = np.asarray(
+                resample_poly(out, up=self._input_sample_rate_hz, down=self._backend_sample_rate_hz),
+                dtype=np.float32,
+            )
+            if out.shape[0] > x.shape[0]:
+                out = out[: x.shape[0]]
+            elif out.shape[0] < x.shape[0]:
+                out = np.pad(out, (0, x.shape[0] - out.shape[0]))
         wet = float(np.clip(self.cfg.rnnoise_wet_mix, 0.0, 1.0))
         return (((wet * out) + ((1.0 - wet) * x))).astype(np.float32, copy=False)
 
@@ -1236,7 +1283,8 @@ class _PostFilterRouter:
     def __init__(self, frame_samples: int, cfg: PipelineConfig, mic_geometry_xyz: np.ndarray):
         self.cfg = cfg
         self.method = str(getattr(cfg, "postfilter_method", "off")).strip().lower()
-        self._wiener = _PostFilterState(frame_samples=frame_samples, cfg=cfg)
+        self._wiener = _PostFilterState(frame_samples=frame_samples, cfg=cfg, estimator="wiener_dd")
+        self._log_mmse = _PostFilterState(frame_samples=frame_samples, cfg=cfg, estimator="log_mmse")
         self._rnnoise = None
         self._coherence = None
         self._voice_bandpass = None
@@ -1261,6 +1309,7 @@ class _PostFilterRouter:
         beamformed: np.ndarray,
         *,
         speech_activity: float,
+        target_activity_active: bool = False,
         frame_mc: np.ndarray | None = None,
         doa_deg: float | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
@@ -1271,8 +1320,14 @@ class _PostFilterRouter:
             stages["postfilter_output"] = out
             return out, stages
         if self.method == "wiener_dd":
-            out = self._wiener.process(beamformed, speech_activity=speech_activity)
+            out = self._wiener.process(beamformed, speech_activity=speech_activity, target_activity_active=target_activity_active)
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
+            stages["post_wiener"] = np.asarray(out, dtype=np.float32)
+            stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
+            return out, stages
+        if self.method == "log_mmse":
+            out = self._log_mmse.process(beamformed, speech_activity=speech_activity, target_activity_active=target_activity_active)
+            self._last_noise_model_update = _normalize_noise_model_update(self._log_mmse.last_noise_model_update)
             stages["post_wiener"] = np.asarray(out, dtype=np.float32)
             stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
             return out, stages
@@ -1302,7 +1357,7 @@ class _PostFilterRouter:
         if self.method == "wiener_then_voice_bandpass":
             if self._wiener is None or self._voice_bandpass is None:
                 raise RuntimeError("Wiener->voice_bandpass postfilter not initialized.")
-            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity)
+            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity, target_activity_active=target_activity_active)
             out = self._voice_bandpass.process(post_wiener, speech_activity=speech_activity)
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
             stages["post_wiener"] = np.asarray(post_wiener, dtype=np.float32)
@@ -1322,7 +1377,7 @@ class _PostFilterRouter:
         if self.method == "wiener_then_rnnoise":
             if self._wiener is None or self._rnnoise is None:
                 raise RuntimeError("Hybrid postfilter not initialized.")
-            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity)
+            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity, target_activity_active=target_activity_active)
             out = self._rnnoise.process(post_wiener, speech_activity=speech_activity)
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
             stages["post_wiener"] = np.asarray(post_wiener, dtype=np.float32)
@@ -1334,10 +1389,11 @@ class _PostFilterRouter:
         stages["postfilter_output"] = out
         return out, stages
 
-    def process(self, beamformed: np.ndarray, *, speech_activity: float, frame_mc: np.ndarray | None = None, doa_deg: float | None = None) -> np.ndarray:
+    def process(self, beamformed: np.ndarray, *, speech_activity: float, target_activity_active: bool = False, frame_mc: np.ndarray | None = None, doa_deg: float | None = None) -> np.ndarray:
         out, _stages = self.process_with_stages(
             beamformed,
             speech_activity=speech_activity,
+            target_activity_active=target_activity_active,
             frame_mc=frame_mc,
             doa_deg=doa_deg,
         )
@@ -1375,6 +1431,7 @@ class _PostFilterStageCore:
             out, postfilter_stages = self._postfilter.process_with_stages(
                 out,
                 speech_activity=float(packet.speech_activity),
+                target_activity_active=bool(packet.target_activity_state),
                 frame_mc=None if packet.frame_mc is None else np.asarray(packet.frame_mc, dtype=np.float32),
                 doa_deg=None if packet.target_doa_deg is None else float(packet.target_doa_deg),
             )
