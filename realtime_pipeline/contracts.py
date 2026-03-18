@@ -319,6 +319,9 @@ class PipelineConfig:
     doa_ema_alpha: float = 0.2
     gain_ema_alpha: float = 0.2
     doa_max_step_deg_per_frame: float = 10.0
+    delay_sum_update_min_delta_deg: float = 3.0
+    delay_sum_crossfade_frames: int = 1
+    delay_sum_use_smoothed_doa: bool = True
     # Frequency-domain covariance smoothing
     fd_analysis_window_ms: float = 20.0
     # Defaults track the sensitivity-tuned Silero preset from
