@@ -258,6 +258,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--real-separation", action="store_true")
     p.add_argument("--disable-output-normalization", action="store_true")
     p.add_argument("--allow-output-amplification", action="store_true")
+    p.add_argument("--no-localization-vad-enabled", action="store_true")
     return p
 
 
@@ -292,6 +293,7 @@ def main() -> None:
                 beamforming_mode=method,
                 output_normalization_enabled=not args.disable_output_normalization,
                 output_allow_amplification=bool(args.allow_output_amplification),
+                localization_vad_enabled=not bool(args.no_localization_vad_enabled),
                 write_raw_mix_output=False,
             )
             proc, sr = load_audio_mono(str(run_dir / "enhanced_fast_path.wav"))

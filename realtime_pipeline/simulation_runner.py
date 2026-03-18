@@ -43,6 +43,7 @@ def run_simulation_pipeline(
     robust_mode: bool = True,
     capture_trace: bool = False,
     localization_backend: str = "srp_phat_localization",
+    localization_vad_enabled: bool = True,
     tracking_mode: str = "doa_centroid_v1",
     control_mode: str = "spatial_peak_mode",
     localization_window_ms: int = 160,
@@ -101,6 +102,7 @@ def run_simulation_pipeline(
             else float(default_cfg.identity_direction_mismatch_block_deg)
         ),
         localization_backend=str(localization_backend),
+        localization_vad_enabled=bool(localization_vad_enabled),
         tracking_mode=str(tracking_mode),
         control_mode=str(control_mode),
         direction_long_memory_enabled=bool(direction_long_memory_enabled),
@@ -423,6 +425,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ],
         default="srp_phat_localization",
     )
+    p.add_argument("--no-localization-vad-enabled", action="store_true")
     p.add_argument("--tracking-mode", choices=TRACKING_MODE_CHOICES, default="doa_centroid_v1")
     p.add_argument("--control-mode", choices=["spatial_peak_mode", "speaker_tracking_mode"], default="spatial_peak_mode")
     p.add_argument("--disable-direction-long-memory", action="store_true")
@@ -460,6 +463,7 @@ def main() -> None:
         output_allow_amplification=bool(args.allow_output_amplification),
         robust_mode=not bool(args.disable_robust_mode),
         localization_backend=str(args.localization_backend),
+        localization_vad_enabled=not bool(args.no_localization_vad_enabled),
         tracking_mode=str(args.tracking_mode),
         control_mode=str(args.control_mode),
         direction_long_memory_enabled=not bool(args.disable_direction_long_memory),

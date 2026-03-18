@@ -360,7 +360,17 @@ class JobResult:
 METHOD_SPECS: dict[str, MethodSpec] = {
     "delay_sum": MethodSpec("delay_sum", "delay_sum", None),
     "mvdr_fd_bootstrap_oracle_activity": MethodSpec("mvdr_fd_bootstrap_oracle_activity", "mvdr_fd", "oracle_target_activity"),
+    "lcmv_target_band_bootstrap_oracle_activity": MethodSpec(
+        "lcmv_target_band_bootstrap_oracle_activity",
+        "lcmv_target_band",
+        "oracle_target_activity",
+    ),
     "mvdr_fd_bootstrap_estimated_activity": MethodSpec("mvdr_fd_bootstrap_estimated_activity", "mvdr_fd", "estimated_target_activity"),
+    "lcmv_target_band_bootstrap_estimated_activity": MethodSpec(
+        "lcmv_target_band_bootstrap_estimated_activity",
+        "lcmv_target_band",
+        "estimated_target_activity",
+    ),
     "mvdr_fd_bootstrap_estimated_activity_silero": MethodSpec("mvdr_fd_bootstrap_estimated_activity_silero", "mvdr_fd", "estimated_target_activity"),
     "mvdr_fd_bootstrap_estimated_activity_localization": MethodSpec("mvdr_fd_bootstrap_estimated_activity_localization", "mvdr_fd", "estimated_target_activity"),
     "mvdr_fd_bootstrap_oracle_noise_mild": MethodSpec("mvdr_fd_bootstrap_oracle_noise_mild", "mvdr_fd", "oracle_target_activity", "oracle_non_target_residual", "mild"),
@@ -628,7 +638,11 @@ def _build_session_request(
             "localization_vad_enabled": False,
             "localization_backend": str(params["localization_backend"]),
             "beamforming_mode": str(method_spec.beamforming_mode),
-            "mvdr_hop_ms": None if method_spec.beamforming_mode != "mvdr_fd" else int(params["mvdr_hop_ms"]),
+            "mvdr_hop_ms": (
+                int(params["mvdr_hop_ms"])
+                if str(method_spec.beamforming_mode).strip().lower() in {"mvdr_fd", "lcmv_target_band"}
+                else None
+            ),
             "fd_analysis_window_ms": float(params["fd_analysis_window_ms"]),
             "fd_cov_ema_alpha": float(params["fd_cov_ema_alpha"]),
             "fd_diag_load": float(params["fd_diag_load"]),
