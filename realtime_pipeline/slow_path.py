@@ -33,6 +33,7 @@ class _CentroidState:
     last_observed_score: float
     observation_count: int
     velocity_deg_per_s: float = 0.0
+    accepted_observations: tuple[tuple[float, float, float], ...] = ()
 
 
 @dataclass(slots=True)
@@ -41,6 +42,7 @@ class _PendingSingleActiveSwitch:
     score: float
     count: int
     last_seen_ms: float
+    accepted_observations: tuple[tuple[float, float, float], ...] = ()
 
 
 class SlowPathWorker(threading.Thread):
@@ -74,9 +76,13 @@ class SlowPathWorker(threading.Thread):
         self._centroid_new_track_min_score = 0.35
         self._single_active_mode = bool(config.single_active or int(config.max_speakers_hint) <= 1)
         self._single_active_switch_jump_deg = 45.0
-        self._single_active_switch_confirm_frames = 2
+        self._single_active_switch_confirm_frames = 3
         self._single_active_switch_match_window_deg = 20.0
         self._single_active_switch_min_score = 0.6
+        self._single_active_smoothing_window_ms = 500.0
+        self._single_active_min_observation_score = float(
+            np.clip(config.single_active_min_observation_score, 0.0, 1.0)
+        )
         self._pending_single_active_switch: _PendingSingleActiveSwitch | None = None
 
     def _score_for_peak(self, idx: int, scores: tuple[float, ...] | None) -> float:
@@ -92,6 +98,42 @@ class SlowPathWorker(threading.Thread):
         y = ((1.0 - alpha) * float(np.sin(prev_rad))) + (alpha * float(np.sin(obs_rad)))
         if abs(x) < 1e-9 and abs(y) < 1e-9:
             return _normalize_angle_deg(observed_angle_deg)
+        return _normalize_angle_deg(float(np.rad2deg(np.arctan2(y, x))))
+
+    def _prune_recent_observations(
+        self,
+        observations: tuple[tuple[float, float, float], ...],
+        *,
+        ts_ms: float,
+        window_ms: float,
+    ) -> tuple[tuple[float, float, float], ...]:
+        min_ts_ms = float(ts_ms - window_ms)
+        return tuple(obs for obs in observations if float(obs[0]) >= min_ts_ms)
+
+    def _append_recent_observation(
+        self,
+        observations: tuple[tuple[float, float, float], ...],
+        *,
+        ts_ms: float,
+        angle_deg: float,
+        score: float,
+        window_ms: float,
+    ) -> tuple[tuple[float, float, float], ...]:
+        pruned = self._prune_recent_observations(observations, ts_ms=ts_ms, window_ms=window_ms)
+        return pruned + ((float(ts_ms), float(_normalize_angle_deg(angle_deg)), float(score)),)
+
+    def _weighted_circular_mean_deg(self, observations: tuple[tuple[float, float, float], ...]) -> float:
+        if not observations:
+            return 0.0
+        x = 0.0
+        y = 0.0
+        for _ts_ms, angle_deg, score in observations:
+            weight = float(max(score, 1e-6))
+            angle_rad = np.deg2rad(float(angle_deg))
+            x += weight * float(np.cos(angle_rad))
+            y += weight * float(np.sin(angle_rad))
+        if abs(x) < 1e-9 and abs(y) < 1e-9:
+            return float(observations[-1][1])
         return _normalize_angle_deg(float(np.rad2deg(np.arctan2(y, x))))
 
     def _build_speaker_map(self, timestamp_ms: float) -> dict[int, SpeakerGainDirection]:
@@ -154,15 +196,24 @@ class SlowPathWorker(threading.Thread):
                 score=float(score),
                 count=1,
                 last_seen_ms=float(ts_ms),
+                accepted_observations=((float(ts_ms), float(_normalize_angle_deg(angle_deg)), float(score)),),
             )
             return
         if _angular_dist_deg(float(angle_deg), float(pending.target_angle_deg)) <= self._single_active_switch_match_window_deg:
-            merged_angle = self._update_centroid_angle(float(pending.target_angle_deg), float(angle_deg))
+            accepted_observations = self._append_recent_observation(
+                pending.accepted_observations,
+                ts_ms=ts_ms,
+                angle_deg=angle_deg,
+                score=score,
+                window_ms=self._single_active_smoothing_window_ms,
+            )
+            merged_angle = self._weighted_circular_mean_deg(accepted_observations)
             self._pending_single_active_switch = _PendingSingleActiveSwitch(
                 target_angle_deg=float(merged_angle),
                 score=float(max(float(score), float(pending.score))),
                 count=int(pending.count) + 1,
                 last_seen_ms=float(ts_ms),
+                accepted_observations=accepted_observations,
             )
             return
         self._pending_single_active_switch = _PendingSingleActiveSwitch(
@@ -170,6 +221,7 @@ class SlowPathWorker(threading.Thread):
             score=float(score),
             count=1,
             last_seen_ms=float(ts_ms),
+            accepted_observations=((float(ts_ms), float(_normalize_angle_deg(angle_deg)), float(score)),),
         )
 
     def _maybe_commit_single_active_switch(self, *, ts_ms: float) -> int | None:
@@ -191,6 +243,7 @@ class SlowPathWorker(threading.Thread):
                 last_observed_score=float(pending.score),
                 observation_count=1,
                 velocity_deg_per_s=0.0,
+                accepted_observations=tuple(pending.accepted_observations),
             )
         }
         self._reset_pending_single_active_switch()
@@ -210,6 +263,8 @@ class SlowPathWorker(threading.Thread):
         with Timer() as t:
             assigned: set[int] = set()
             for angle_deg, score in observations:
+                if self._single_active_mode and float(score) < self._single_active_min_observation_score:
+                    continue
                 best_id: int | None = None
                 best_assoc_score = 0.0
                 for sid, centroid in self._centroids.items():
@@ -253,13 +308,25 @@ class SlowPathWorker(threading.Thread):
                         last_seen_ms=float(ts_ms),
                         last_observed_score=float(score),
                         observation_count=1,
+                        accepted_observations=((float(ts_ms), float(_normalize_angle_deg(angle_deg)), float(score)),),
                     )
                     assigned.add(int(sid))
                     continue
 
                 self._reset_pending_single_active_switch()
                 prev = self._centroids[int(best_id)]
-                updated_angle = self._update_centroid_angle(prev.direction_deg, angle_deg)
+                accepted_observations = prev.accepted_observations
+                if self._single_active_mode:
+                    accepted_observations = self._append_recent_observation(
+                        prev.accepted_observations,
+                        ts_ms=ts_ms,
+                        angle_deg=angle_deg,
+                        score=score,
+                        window_ms=self._single_active_smoothing_window_ms,
+                    )
+                    updated_angle = self._weighted_circular_mean_deg(accepted_observations)
+                else:
+                    updated_angle = self._update_centroid_angle(prev.direction_deg, angle_deg)
                 dt_s = max((float(ts_ms) - float(prev.last_seen_ms)) / 1000.0, 1e-3)
                 velocity_deg_per_s = _angular_diff_deg(updated_angle, prev.direction_deg) / dt_s
                 self._centroids[int(best_id)] = _CentroidState(
@@ -270,6 +337,7 @@ class SlowPathWorker(threading.Thread):
                     last_observed_score=float(score),
                     observation_count=int(prev.observation_count) + 1,
                     velocity_deg_per_s=float(velocity_deg_per_s),
+                    accepted_observations=accepted_observations,
                 )
                 assigned.add(int(best_id))
 

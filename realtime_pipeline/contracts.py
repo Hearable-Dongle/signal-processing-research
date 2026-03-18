@@ -214,6 +214,7 @@ class PipelineConfig:
     suppressed_user_gate_attenuation_db: float = 18.0
     suppressed_user_target_conflict_deg: float = 30.0
     speaker_match_window_deg: float = 25.0
+    single_active_min_observation_score: float = 0.65
     focus_direction_match_window_deg: float = 30.0
     focus_target_hold_frames: int = 8
     multi_target_max_speakers: int = 2

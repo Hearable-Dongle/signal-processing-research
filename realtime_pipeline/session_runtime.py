@@ -148,6 +148,7 @@ def build_pipeline_config_from_request(
         multi_target_min_confidence=float(req.multi_target_min_confidence),
         multi_target_min_activity=float(req.multi_target_min_activity),
         speaker_match_window_deg=float(req.speaker_match_window_deg),
+        single_active_min_observation_score=float(req.single_active_min_observation_score),
         centroid_association_mode=str(req.centroid_association_mode),
         centroid_association_sigma_deg=float(req.centroid_association_sigma_deg),
         centroid_association_min_score=float(req.centroid_association_min_score),

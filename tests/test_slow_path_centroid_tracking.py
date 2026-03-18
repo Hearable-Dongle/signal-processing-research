@@ -121,7 +121,70 @@ def test_single_active_centroid_switches_after_confirmed_large_jump() -> None:
     third_map = dict(state.get_speaker_map_snapshot())
     assert len(third_map) == 1
     assert next(iter(third_map)) == speaker_id
-    assert 80.0 <= third_map[speaker_id].direction_degrees <= 95.0
+    assert third_map[speaker_id].direction_degrees > 130.0
+
+    state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=600.0, peaks_deg=(90.0,), peak_scores=(0.91,)))
+    worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
+    fourth_map = dict(state.get_speaker_map_snapshot())
+    assert len(fourth_map) == 1
+    assert next(iter(fourth_map)) == speaker_id
+    assert 85.0 <= fourth_map[speaker_id].direction_degrees <= 95.0
+
+
+def test_single_active_centroid_smooths_over_recent_window() -> None:
+    state = SharedPipelineState()
+    worker = SlowPathWorker(
+        config=PipelineConfig(
+            tracking_mode="doa_centroid_v1",
+            max_speakers_hint=1,
+            single_active=True,
+        ),
+        shared_state=state,
+        slow_queue=queue.Queue(),
+        separation_backend=MockSeparationBackend(n_streams=2),
+        mic_geometry_xy=np.zeros((4, 2), dtype=np.float64),
+        stop_event=threading.Event(),
+    )
+    for timestamp_ms, angle_deg in [(0.0, 90.0), (200.0, 100.0), (400.0, 110.0)]:
+        state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=timestamp_ms, peaks_deg=(angle_deg,), peak_scores=(0.9,)))
+        worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
+    speaker_map = dict(state.get_speaker_map_snapshot())
+    speaker = next(iter(speaker_map.values()))
+    assert 98.0 <= speaker.direction_degrees <= 102.0
+
+    state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=1000.0, peaks_deg=(120.0,), peak_scores=(0.9,)))
+    worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
+    speaker_map = dict(state.get_speaker_map_snapshot())
+    speaker = next(iter(speaker_map.values()))
+    assert 118.0 <= speaker.direction_degrees <= 122.0
+
+
+def test_single_active_switch_drops_old_history_after_confirmed_new_direction() -> None:
+    state = SharedPipelineState()
+    worker = SlowPathWorker(
+        config=PipelineConfig(
+            tracking_mode="doa_centroid_v1",
+            max_speakers_hint=1,
+            single_active=True,
+        ),
+        shared_state=state,
+        slow_queue=queue.Queue(),
+        separation_backend=MockSeparationBackend(n_streams=2),
+        mic_geometry_xy=np.zeros((4, 2), dtype=np.float64),
+        stop_event=threading.Event(),
+    )
+    for timestamp_ms, angle_deg in [(0.0, 180.0), (200.0, 176.0), (400.0, 182.0)]:
+        state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=timestamp_ms, peaks_deg=(angle_deg,), peak_scores=(0.92,)))
+        worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
+
+    for timestamp_ms, angle_deg in [(600.0, 92.0), (800.0, 89.0), (1000.0, 91.0)]:
+        state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=timestamp_ms, peaks_deg=(angle_deg,), peak_scores=(0.92,)))
+        worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
+
+    speaker_map = dict(state.get_speaker_map_snapshot())
+    assert len(speaker_map) == 1
+    speaker = next(iter(speaker_map.values()))
+    assert 85.0 <= speaker.direction_degrees <= 95.0
 
 
 def test_single_active_centroid_does_not_switch_on_single_far_outlier() -> None:
@@ -141,6 +204,30 @@ def test_single_active_centroid_does_not_switch_on_single_far_outlier() -> None:
     state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=0.0, peaks_deg=(180.0,), peak_scores=(0.95,)))
     worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
     state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=200.0, peaks_deg=(90.0,), peak_scores=(0.91,)))
+    worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
+    speaker_map = dict(state.get_speaker_map_snapshot())
+    assert len(speaker_map) == 1
+    speaker = next(iter(speaker_map.values()))
+    assert speaker.direction_degrees > 130.0
+
+
+def test_single_active_ignores_low_confidence_observation() -> None:
+    state = SharedPipelineState()
+    worker = SlowPathWorker(
+        config=PipelineConfig(
+            tracking_mode="doa_centroid_v1",
+            max_speakers_hint=1,
+            single_active=True,
+        ),
+        shared_state=state,
+        slow_queue=queue.Queue(),
+        separation_backend=MockSeparationBackend(n_streams=2),
+        mic_geometry_xy=np.zeros((4, 2), dtype=np.float64),
+        stop_event=threading.Event(),
+    )
+    state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=0.0, peaks_deg=(180.0,), peak_scores=(0.95,)))
+    worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
+    state.publish_srp_snapshot(SRPPeakSnapshot(timestamp_ms=200.0, peaks_deg=(90.0,), peak_scores=(0.55,)))
     worker._process_centroid_frame(np.zeros((160, 4), dtype=np.float32))
     speaker_map = dict(state.get_speaker_map_snapshot())
     assert len(speaker_map) == 1
