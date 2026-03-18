@@ -401,6 +401,17 @@ def _detector_param_overrides(args: argparse.Namespace) -> dict[str, object]:
         "fd_diag_load",
         "fd_noise_covariance_mode",
         "mvdr_hop_ms",
+        "beamformer_rnn_skip_refresh_when_clean",
+        "beamformer_rnn_dirty_threshold",
+        "beamformer_rnn_dirty_eps",
+        "beamformer_rnn_dirty_stat",
+        "beamformer_sparse_solve_enabled",
+        "beamformer_sparse_solve_stride",
+        "beamformer_sparse_solve_min_freq_hz",
+        "beamformer_sparse_solve_interp",
+        "beamformer_weight_reuse_enabled",
+        "beamformer_weight_smoothing_alpha",
+        "beamformer_doa_refresh_tolerance_deg",
         "target_activity_low_threshold",
         "target_activity_high_threshold",
         "target_activity_enter_frames",
@@ -603,6 +614,13 @@ def _aggregate(rows: list[dict[str, object]], group_fields: list[str]) -> list[d
         "interstage_queue_depth_max",
         "trace_cov_alpha_active_mean",
         "trace_cov_alpha_inactive_mean",
+        "beamformer_refresh_requests",
+        "beamformer_refresh_executed",
+        "beamformer_refresh_skipped_clean",
+        "beamformer_weights_reused_frames",
+        "beamformer_dirty_stat_last",
+        "beamformer_dirty_stat_mean",
+        "beamformer_dirty_stat_p95",
     ]
     for key, items in sorted(grouped.items(), key=lambda pair: tuple(str(v) for v in pair[0])):
         out = {field: value for field, value in zip(group_fields, key)}
@@ -643,9 +661,21 @@ def _build_session_request(
                 if str(method_spec.beamforming_mode).strip().lower() in {"mvdr_fd", "lcmv_target_band"}
                 else None
             ),
+            "robust_target_band_max_freq_hz": float(params["robust_target_band_max_freq_hz"]),
             "fd_analysis_window_ms": float(params["fd_analysis_window_ms"]),
             "fd_cov_ema_alpha": float(params["fd_cov_ema_alpha"]),
             "fd_diag_load": float(params["fd_diag_load"]),
+            "beamformer_rnn_skip_refresh_when_clean": bool(params["beamformer_rnn_skip_refresh_when_clean"]),
+            "beamformer_rnn_dirty_threshold": float(params["beamformer_rnn_dirty_threshold"]),
+            "beamformer_rnn_dirty_eps": float(params["beamformer_rnn_dirty_eps"]),
+            "beamformer_rnn_dirty_stat": str(params["beamformer_rnn_dirty_stat"]),
+            "beamformer_sparse_solve_enabled": bool(params["beamformer_sparse_solve_enabled"]),
+            "beamformer_sparse_solve_stride": int(params["beamformer_sparse_solve_stride"]),
+            "beamformer_sparse_solve_min_freq_hz": float(params["beamformer_sparse_solve_min_freq_hz"]),
+            "beamformer_sparse_solve_interp": str(params["beamformer_sparse_solve_interp"]),
+            "beamformer_weight_reuse_enabled": bool(params["beamformer_weight_reuse_enabled"]),
+            "beamformer_weight_smoothing_alpha": float(params["beamformer_weight_smoothing_alpha"]),
+            "beamformer_doa_refresh_tolerance_deg": float(params["beamformer_doa_refresh_tolerance_deg"]),
             "fd_noise_covariance_mode": str(params["fd_noise_covariance_mode"]),
             "target_activity_rnn_update_mode": method_spec.target_activity_mode,
             "target_activity_low_threshold": float(params["target_activity_low_threshold"]),
@@ -1373,6 +1403,18 @@ def _run_job(
         "target_activity_detector_backend": str(params["target_activity_detector_backend"]),
         "split_runtime_mode": str(params["split_runtime_mode"]),
         "mvdr_hop_ms": int(params["mvdr_hop_ms"]),
+        "robust_target_band_max_freq_hz": float(params["robust_target_band_max_freq_hz"]),
+        "beamformer_rnn_skip_refresh_when_clean": bool(params["beamformer_rnn_skip_refresh_when_clean"]),
+        "beamformer_rnn_dirty_threshold": float(params["beamformer_rnn_dirty_threshold"]),
+        "beamformer_rnn_dirty_eps": float(params["beamformer_rnn_dirty_eps"]),
+        "beamformer_rnn_dirty_stat": str(params["beamformer_rnn_dirty_stat"]),
+        "beamformer_sparse_solve_enabled": bool(params["beamformer_sparse_solve_enabled"]),
+        "beamformer_sparse_solve_stride": int(params["beamformer_sparse_solve_stride"]),
+        "beamformer_sparse_solve_min_freq_hz": float(params["beamformer_sparse_solve_min_freq_hz"]),
+        "beamformer_sparse_solve_interp": str(params["beamformer_sparse_solve_interp"]),
+        "beamformer_weight_reuse_enabled": bool(params["beamformer_weight_reuse_enabled"]),
+        "beamformer_weight_smoothing_alpha": float(params["beamformer_weight_smoothing_alpha"]),
+        "beamformer_doa_refresh_tolerance_deg": float(params["beamformer_doa_refresh_tolerance_deg"]),
         "target_activity_update_every_n_fast_frames": int(params["target_activity_update_every_n_fast_frames"]),
         "main_angle_deg": scene_meta["main_angle_deg"],
         "secondary_angle_deg": scene_meta["secondary_angle_deg"],
@@ -1392,6 +1434,13 @@ def _run_job(
         "beamforming_rtf": float(runtime_summary.get("beamforming_rtf", float("nan"))),
         "postfilter_rtf": float(runtime_summary.get("postfilter_rtf", float("nan"))),
         "pipeline_rtf": float(runtime_summary.get("pipeline_rtf", float("nan"))),
+        "beamformer_refresh_requests": float(runtime_summary.get("beamformer_refresh_requests", float("nan"))),
+        "beamformer_refresh_executed": float(runtime_summary.get("beamformer_refresh_executed", float("nan"))),
+        "beamformer_refresh_skipped_clean": float(runtime_summary.get("beamformer_refresh_skipped_clean", float("nan"))),
+        "beamformer_weights_reused_frames": float(runtime_summary.get("beamformer_weights_reused_frames", float("nan"))),
+        "beamformer_dirty_stat_last": float(runtime_summary.get("beamformer_dirty_stat_last", float("nan"))),
+        "beamformer_dirty_stat_mean": float(runtime_summary.get("beamformer_dirty_stat_mean", float("nan"))),
+        "beamformer_dirty_stat_p95": float(runtime_summary.get("beamformer_dirty_stat_p95", float("nan"))),
         "interstage_queue_wait_p95_ms": float(runtime_summary.get("interstage_queue_wait_p95_ms", float("nan"))),
         "interstage_queue_depth_max": float(runtime_summary.get("interstage_queue_depth_max", float("nan"))),
         **_metric_dict(overall),
@@ -1450,6 +1499,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-zone-width-deg", type=float, default=None)
     parser.add_argument("--manifest-path", default=None)
     parser.add_argument("--mvdr-hop-ms", type=int, default=DEFAULT_MVDR_HOP_MS)
+    parser.add_argument("--robust-target-band-max-freq-hz", type=float, default=0.0)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=DEFAULT_FD_ANALYSIS_WINDOW_MS)
     parser.add_argument(
         "--localization-backend",
@@ -1461,6 +1511,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--postfilter-queue-drop-oldest", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--fd-cov-ema-alpha", type=float, default=None)
     parser.add_argument("--fd-diag-load", type=float, default=None)
+    parser.add_argument("--beamformer-rnn-skip-refresh-when-clean", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--beamformer-rnn-dirty-threshold", type=float, default=None)
+    parser.add_argument("--beamformer-rnn-dirty-eps", type=float, default=None)
+    parser.add_argument("--beamformer-rnn-dirty-stat", choices=["max", "mean"], default=None)
+    parser.add_argument("--beamformer-sparse-solve-enabled", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--beamformer-sparse-solve-stride", type=int, default=None)
+    parser.add_argument("--beamformer-sparse-solve-min-freq-hz", type=float, default=None)
+    parser.add_argument("--beamformer-sparse-solve-interp", choices=["linear_complex"], default=None)
+    parser.add_argument("--beamformer-weight-reuse-enabled", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--beamformer-weight-smoothing-alpha", type=float, default=None)
+    parser.add_argument("--beamformer-doa-refresh-tolerance-deg", type=float, default=None)
     parser.add_argument(
         "--fd-noise-covariance-mode",
         default=None,
@@ -1576,12 +1637,24 @@ def main() -> None:
     base_detector_params = dict(DEFAULT_TARGET_ACTIVITY_PRESETS[detector_backend])
     params = {
         "mvdr_hop_ms": int(args.mvdr_hop_ms),
+        "robust_target_band_max_freq_hz": float(args.robust_target_band_max_freq_hz),
         "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
         "localization_backend": str(args.localization_backend),
         "split_runtime_mode": str(args.split_runtime_mode),
         "postfilter_queue_max_frames": int(args.postfilter_queue_max_frames),
         "postfilter_queue_drop_oldest": bool(args.postfilter_queue_drop_oldest),
         "fd_noise_covariance_mode": "estimated_target_subtractive",
+        "beamformer_rnn_skip_refresh_when_clean": False,
+        "beamformer_rnn_dirty_threshold": 0.0,
+        "beamformer_rnn_dirty_eps": 1e-8,
+        "beamformer_rnn_dirty_stat": "max",
+        "beamformer_sparse_solve_enabled": False,
+        "beamformer_sparse_solve_stride": 1,
+        "beamformer_sparse_solve_min_freq_hz": 200.0,
+        "beamformer_sparse_solve_interp": "linear_complex",
+        "beamformer_weight_reuse_enabled": True,
+        "beamformer_weight_smoothing_alpha": 1.0,
+        "beamformer_doa_refresh_tolerance_deg": 5.0,
         **base_detector_params,
         **DEFAULT_POSTFILTER_PRESETS["no_pf"],
         **detector_overrides,
