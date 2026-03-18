@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from localization.algo import (
+    CaponLocalization,
+    CaponMVDRRefineLocalization,
     CSSMLocalization,
     GMDALaplace,
     MUSICLocalization,
@@ -39,6 +41,22 @@ def _build_algorithm(method: str, mic_pos_rel: np.ndarray, fs: int, n_true_targe
         "freq_range": tuple(cfg.get("freq_range", [200, 3000])),
         "max_sources": max(1, n_true_targets),
     }
+    realtime_common = {
+        **common,
+        "grid_size": cfg.get("grid_size", 360),
+        "min_separation_deg": cfg.get("min_separation_deg", 15.0),
+        "diagonal_loading": cfg.get("diagonal_loading", 1e-3),
+        "vad_enabled": cfg.get("vad_enabled", True),
+        "vad_frame_ms": cfg.get("vad_frame_ms", 20),
+        "vad_aggressiveness": cfg.get("vad_aggressiveness", 2),
+        "vad_min_speech_ratio": cfg.get("vad_min_speech_ratio", 0.2),
+        "capon_spectrum_ema_alpha": cfg.get("capon_spectrum_ema_alpha", 0.78),
+        "capon_peak_min_sharpness": cfg.get("capon_peak_min_sharpness", 0.12),
+        "capon_peak_min_margin": cfg.get("capon_peak_min_margin", 0.04),
+        "capon_hold_frames": cfg.get("capon_hold_frames", 2),
+        "capon_refine_window_deg": cfg.get("capon_refine_window_deg", 20.0),
+        "capon_refine_step_deg": cfg.get("capon_refine_step_deg", 2.0),
+    }
 
     if method == "SSZ":
         return SSZLocalization(
@@ -46,7 +64,7 @@ def _build_algorithm(method: str, mic_pos_rel: np.ndarray, fs: int, n_true_targe
             epsilon=cfg.get("epsilon", 0.1),
             d_freq=cfg.get("d_freq", 8),
         )
-    if method == "SRP-PHAT":
+    if method in {"SRP-PHAT", "srp_phat_localization"}:
         return SRPPHATLocalization(**common)
     if method == "GMDA":
         return GMDALaplace(
@@ -76,6 +94,10 @@ def _build_algorithm(method: str, mic_pos_rel: np.ndarray, fs: int, n_true_targe
             grid_size=cfg.get("grid_size", 360),
             num_iter=cfg.get("num_iter", 5),
         )
+    if method == "capon_1src":
+        return CaponLocalization(**realtime_common)
+    if method == "capon_mvdr_refine_1src":
+        return CaponMVDRRefineLocalization(**realtime_common)
 
     raise ValueError(f"Unsupported method: {method}")
 

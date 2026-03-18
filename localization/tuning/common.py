@@ -25,6 +25,15 @@ DEFAULT_BENCHMARK_CONFIG = Path("localization/benchmark/configs/default.json")
 SUPPORTED_METHODS = ("SSZ", "SRP-PHAT", "GMDA", "MUSIC", "NormMUSIC", "CSSM", "WAVES")
 
 
+def _resolve_existing_path(path: Path) -> Path:
+    if path.exists():
+        return path
+    sibling = Path("..") / "signal-processing-research" / path
+    if sibling.exists():
+        return sibling
+    return path
+
+
 @dataclass(frozen=True)
 class SceneGeometry:
     scene_id: str
@@ -48,6 +57,8 @@ def load_scene_geometries(
     scenes_root: Path = DEFAULT_SCENES_ROOT,
     assets_root: Path = DEFAULT_ASSETS_ROOT,
 ) -> list[SceneGeometry]:
+    scenes_root = _resolve_existing_path(Path(scenes_root))
+    assets_root = _resolve_existing_path(Path(assets_root))
     scenes: list[SceneGeometry] = []
     for scene_path in sorted(Path(scenes_root).glob("*.json")):
         metadata_path = Path(assets_root) / scene_path.stem / "scenario_metadata.json"

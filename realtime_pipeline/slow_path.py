@@ -35,6 +35,14 @@ class _CentroidState:
     velocity_deg_per_s: float = 0.0
 
 
+@dataclass(slots=True)
+class _PendingSingleActiveSwitch:
+    target_angle_deg: float
+    score: float
+    count: int
+    last_seen_ms: float
+
+
 class SlowPathWorker(threading.Thread):
     def __init__(
         self,
@@ -64,6 +72,12 @@ class SlowPathWorker(threading.Thread):
         self._centroid_active_hold_ms = 1500.0
         self._centroid_expiry_ms = 30000.0
         self._centroid_new_track_min_score = 0.35
+        self._single_active_mode = bool(config.single_active or int(config.max_speakers_hint) <= 1)
+        self._single_active_switch_jump_deg = 45.0
+        self._single_active_switch_confirm_frames = 2
+        self._single_active_switch_match_window_deg = 20.0
+        self._single_active_switch_min_score = 0.6
+        self._pending_single_active_switch: _PendingSingleActiveSwitch | None = None
 
     def _score_for_peak(self, idx: int, scores: tuple[float, ...] | None) -> float:
         if scores is None or idx >= len(scores):
@@ -121,6 +135,67 @@ class SlowPathWorker(threading.Thread):
             return float(np.exp(-0.5 * (dist / sigma) ** 2))
         return 1.0 - float(dist / self._centroid_match_window_deg)
 
+    def _current_single_active_centroid_id(self) -> int | None:
+        if not self._centroids:
+            return None
+        return max(
+            self._centroids,
+            key=lambda sid: (float(self._centroids[int(sid)].last_seen_ms), float(self._centroids[int(sid)].confidence)),
+        )
+
+    def _reset_pending_single_active_switch(self) -> None:
+        self._pending_single_active_switch = None
+
+    def _update_pending_single_active_switch(self, *, angle_deg: float, score: float, ts_ms: float) -> None:
+        pending = self._pending_single_active_switch
+        if pending is None:
+            self._pending_single_active_switch = _PendingSingleActiveSwitch(
+                target_angle_deg=float(_normalize_angle_deg(angle_deg)),
+                score=float(score),
+                count=1,
+                last_seen_ms=float(ts_ms),
+            )
+            return
+        if _angular_dist_deg(float(angle_deg), float(pending.target_angle_deg)) <= self._single_active_switch_match_window_deg:
+            merged_angle = self._update_centroid_angle(float(pending.target_angle_deg), float(angle_deg))
+            self._pending_single_active_switch = _PendingSingleActiveSwitch(
+                target_angle_deg=float(merged_angle),
+                score=float(max(float(score), float(pending.score))),
+                count=int(pending.count) + 1,
+                last_seen_ms=float(ts_ms),
+            )
+            return
+        self._pending_single_active_switch = _PendingSingleActiveSwitch(
+            target_angle_deg=float(_normalize_angle_deg(angle_deg)),
+            score=float(score),
+            count=1,
+            last_seen_ms=float(ts_ms),
+        )
+
+    def _maybe_commit_single_active_switch(self, *, ts_ms: float) -> int | None:
+        pending = self._pending_single_active_switch
+        if pending is None or int(pending.count) < self._single_active_switch_confirm_frames:
+            return None
+        current_id = self._current_single_active_centroid_id()
+        if current_id is None:
+            sid = self._next_speaker_id
+            self._next_speaker_id += 1
+        else:
+            sid = int(current_id)
+        self._centroids = {
+            int(sid): _CentroidState(
+                speaker_id=int(sid),
+                direction_deg=float(_normalize_angle_deg(pending.target_angle_deg)),
+                confidence=float(np.clip(pending.score, 0.0, 1.0)),
+                last_seen_ms=float(ts_ms),
+                last_observed_score=float(pending.score),
+                observation_count=1,
+                velocity_deg_per_s=0.0,
+            )
+        }
+        self._reset_pending_single_active_switch()
+        return int(sid)
+
     def _process_centroid_frame(self, frame_mc: np.ndarray) -> None:
         del frame_mc
         srp = self._state.get_srp_snapshot()
@@ -150,6 +225,23 @@ class SlowPathWorker(threading.Thread):
                         best_id = int(sid)
 
                 if best_id is None:
+                    if self._single_active_mode and self._centroids:
+                        current_id = self._current_single_active_centroid_id()
+                        current = None if current_id is None else self._centroids.get(int(current_id))
+                        jump_deg = None if current is None else _angular_dist_deg(angle_deg, current.direction_deg)
+                        if (
+                            current is not None
+                            and jump_deg is not None
+                            and jump_deg >= self._single_active_switch_jump_deg
+                            and float(score) >= self._single_active_switch_min_score
+                        ):
+                            self._update_pending_single_active_switch(angle_deg=angle_deg, score=score, ts_ms=ts_ms)
+                            switched_id = self._maybe_commit_single_active_switch(ts_ms=ts_ms)
+                            if switched_id is not None:
+                                assigned.add(int(switched_id))
+                            continue
+                        self._reset_pending_single_active_switch()
+                        continue
                     if float(score) < self._centroid_new_track_min_score:
                         continue
                     sid = self._next_speaker_id
@@ -165,6 +257,7 @@ class SlowPathWorker(threading.Thread):
                     assigned.add(int(sid))
                     continue
 
+                self._reset_pending_single_active_switch()
                 prev = self._centroids[int(best_id)]
                 updated_angle = self._update_centroid_angle(prev.direction_deg, angle_deg)
                 dt_s = max((float(ts_ms) - float(prev.last_seen_ms)) / 1000.0, 1e-3)
