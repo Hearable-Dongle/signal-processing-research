@@ -951,7 +951,10 @@ def _run_recording_method_job(
             ground_truth_tracks,
             mic_array_profile=str(mic_array_profile),
         )
-        initial_focus_direction_deg = float(ground_truth_tracks[0]["angle_deg"])
+        initial_focus_direction_deg = _display_angle_to_backend_prediction_deg(
+            float(ground_truth_tracks[0]["angle_deg"]),
+            mic_array_profile=str(mic_array_profile),
+        )
     summary = run_offline_session_pipeline(
         req=req,
         mic_audio=mic_audio,
