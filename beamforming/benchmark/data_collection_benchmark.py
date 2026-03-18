@@ -1052,6 +1052,8 @@ def _run_recording_method_job(
     output_enhancer_mode: str,
     postfilter_enabled: bool,
     postfilter_method: str,
+    postfilter_noise_source: str,
+    postfilter_input_source: str,
     postfilter_noise_ema_alpha: float,
     postfilter_speech_ema_alpha: float,
     postfilter_gain_floor: float,
@@ -1062,6 +1064,7 @@ def _run_recording_method_job(
     postfilter_spectral_floor_beta: float,
     postfilter_gain_max_step_db: float,
     rnnoise_wet_mix: float,
+    rnnoise_output_lowpass_cutoff_hz: float,
     rnnoise_residual_ema_enabled: bool,
     rnnoise_residual_ema_alpha: float,
     slow_chunk_ms: int,
@@ -1133,6 +1136,8 @@ def _run_recording_method_job(
             "output_enhancer_mode": str(output_enhancer_mode),
             "postfilter_enabled": bool(postfilter_enabled),
             "postfilter_method": str(postfilter_method),
+            "postfilter_noise_source": str(postfilter_noise_source),
+            "postfilter_input_source": str(postfilter_input_source),
             "postfilter_noise_ema_alpha": float(postfilter_noise_ema_alpha),
             "postfilter_speech_ema_alpha": float(postfilter_speech_ema_alpha),
             "postfilter_gain_floor": float(postfilter_gain_floor),
@@ -1143,6 +1148,7 @@ def _run_recording_method_job(
             "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
             "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
             "rnnoise_wet_mix": float(rnnoise_wet_mix),
+            "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
             "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
@@ -1294,9 +1300,12 @@ def _run_recording_method_job(
         "enhancement_tier": str(summary.get("enhancement_tier", enhancement_tier)),
         "output_enhancer_mode": str(summary.get("output_enhancer_mode", output_enhancer_mode)),
         "postfilter_method": str(postfilter_method),
+        "postfilter_noise_source": str(postfilter_noise_source),
+        "postfilter_input_source": str(postfilter_input_source),
         "postfilter_oversubtraction_alpha": float(postfilter_oversubtraction_alpha),
         "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
         "rnnoise_wet_mix": float(rnnoise_wet_mix),
+        "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
         "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
         "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
         "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
@@ -1447,6 +1456,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-enhancer-mode", choices=["off", "wiener"], default="off")
     parser.add_argument("--postfilter-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "log_mmse", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"], default="off")
+    parser.add_argument("--postfilter-noise-source", choices=["tracked_mono", "beamformer_rnn_output"], default="tracked_mono")
+    parser.add_argument("--postfilter-input-source", choices=["beamformed_mono", "raw_mix_mono"], default="beamformed_mono")
     parser.add_argument("--postfilter-noise-ema-alpha", type=float, default=0.02)
     parser.add_argument("--postfilter-speech-ema-alpha", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-floor", type=float, default=0.22)
@@ -1457,6 +1468,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-spectral-floor-beta", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
     parser.add_argument("--rnnoise-wet-mix", type=float, default=0.9)
+    parser.add_argument("--rnnoise-output-lowpass-cutoff-hz", type=float, default=7500.0)
     parser.add_argument("--rnnoise-residual-ema-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--rnnoise-residual-ema-alpha", type=float, default=0.0)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
@@ -1612,6 +1624,8 @@ def main() -> None:
                 output_enhancer_mode=str(args.output_enhancer_mode),
                 postfilter_enabled=bool(args.postfilter_enabled),
                 postfilter_method=str(args.postfilter_method),
+                postfilter_noise_source=str(args.postfilter_noise_source),
+                postfilter_input_source=str(args.postfilter_input_source),
                 postfilter_noise_ema_alpha=float(args.postfilter_noise_ema_alpha),
                 postfilter_speech_ema_alpha=float(args.postfilter_speech_ema_alpha),
                 postfilter_gain_floor=float(args.postfilter_gain_floor),
@@ -1622,6 +1636,7 @@ def main() -> None:
                 postfilter_spectral_floor_beta=float(args.postfilter_spectral_floor_beta),
                 postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
                 rnnoise_wet_mix=float(args.rnnoise_wet_mix),
+                rnnoise_output_lowpass_cutoff_hz=float(args.rnnoise_output_lowpass_cutoff_hz),
                 rnnoise_residual_ema_enabled=bool(args.rnnoise_residual_ema_enabled),
                 rnnoise_residual_ema_alpha=float(args.rnnoise_residual_ema_alpha),
                 slow_chunk_ms=int(args.slow_chunk_ms),
@@ -1758,9 +1773,12 @@ def main() -> None:
             "output_enhancer_mode": str(args.output_enhancer_mode),
             "postfilter_enabled": bool(args.postfilter_enabled),
             "postfilter_method": str(args.postfilter_method),
+            "postfilter_noise_source": str(args.postfilter_noise_source),
+            "postfilter_input_source": str(args.postfilter_input_source),
             "postfilter_oversubtraction_alpha": float(args.postfilter_oversubtraction_alpha),
             "postfilter_spectral_floor_beta": float(args.postfilter_spectral_floor_beta),
             "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
+            "rnnoise_output_lowpass_cutoff_hz": float(args.rnnoise_output_lowpass_cutoff_hz),
             "rnnoise_residual_ema_enabled": bool(args.rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(args.rnnoise_residual_ema_alpha),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),

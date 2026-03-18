@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Callable
 
 import numpy as np
-from scipy.signal import resample_poly
+from scipy.signal import butter, resample_poly, sosfiltfilt
 from scipy.special import exp1
 
 try:
@@ -248,6 +248,24 @@ class _FDBufferedBeamformer:
 
     def get_beamformer_snapshot_trace(self) -> list[dict]:
         return [dict(item) for item in self._beamformer_snapshot_trace]
+
+    def get_output_noise_psd_for_fft(self, target_n_fft: int) -> np.ndarray | None:
+        if self.rnn_mvdr_noise is None:
+            return None
+        weights = self._cached_lcmv_weights if self._cached_lcmv_weights is not None else self._cached_mvdr_weights
+        if weights is None:
+            return None
+        target_n_fft = int(max(2, target_n_fft))
+        src_freq = np.fft.rfftfreq(self.analysis_n, d=1.0 / float(self.cfg.sample_rate_hz))
+        dst_freq = np.fft.rfftfreq(target_n_fft, d=1.0 / float(self.cfg.sample_rate_hz))
+        phi = np.zeros((weights.shape[0],), dtype=np.float64)
+        for f in range(weights.shape[0]):
+            w = weights[f].reshape(-1, 1)
+            r = np.asarray(self.rnn_mvdr_noise[f], dtype=np.complex128)
+            phi[f] = max(float(np.real((w.conj().T @ r @ w)[0, 0])), 1e-12)
+        if phi.shape[0] == dst_freq.shape[0]:
+            return phi.astype(np.float32, copy=False)
+        return np.asarray(np.interp(dst_freq, src_freq, phi, left=phi[0], right=phi[-1]), dtype=np.float32)
 
     def _maybe_record_beamformer_snapshot(
         self,
@@ -1059,7 +1077,14 @@ class _PostFilterState:
         kernel /= np.sum(kernel)
         return np.convolve(gain, kernel, mode="same")
 
-    def process(self, frame: np.ndarray, speech_activity: float, *, target_activity_active: bool = False) -> np.ndarray:
+    def process(
+        self,
+        frame: np.ndarray,
+        speech_activity: float,
+        *,
+        target_activity_active: bool = False,
+        external_noise_psd: np.ndarray | None = None,
+    ) -> np.ndarray:
         x = np.asarray(frame, dtype=np.float64).reshape(-1)
         block = np.concatenate([self._prev_in, x], axis=0)
         self._prev_in = x.copy()
@@ -1067,8 +1092,15 @@ class _PostFilterState:
         x_fft = np.fft.rfft(xw, n=self.fft_n)
         psd = np.abs(x_fft) ** 2
 
+        external_noise = None if external_noise_psd is None else np.asarray(external_noise_psd, dtype=np.float64).reshape(-1)
+        use_external_noise = bool(
+            str(getattr(self.cfg, "postfilter_noise_source", "tracked_mono")).strip().lower() == "beamformer_rnn_output"
+            and external_noise is not None
+            and external_noise.shape == psd.shape
+            and np.all(np.isfinite(external_noise))
+        )
         if self.noise_psd is None:
-            self.noise_psd = psd.copy()
+            self.noise_psd = psd.copy() if not use_external_noise else np.maximum(external_noise, 1e-12)
         if self.speech_psd is None:
             self.speech_psd = np.maximum(psd * 0.25, 1e-12)
         if self.gain_prev is None:
@@ -1089,10 +1121,13 @@ class _PostFilterState:
         output_activity = float(np.clip((output_rms - 0.003) / 0.02, 0.0, 1.0))
         posterior_snr_hint = float(np.clip(np.mean(psd / np.maximum(self.noise_psd, 1e-12) - 1.0) / 6.0, 0.0, 1.0))
         speech_presence = float(np.clip(max(float(speech_activity), output_activity, posterior_snr_hint), 0.0, 1.0))
-        allow_noise_update = (not bool(target_activity_active)) and (float(speech_activity) < 0.2)
+        allow_noise_update = (not bool(target_activity_active)) and (float(speech_activity) < 0.2) and (not use_external_noise)
         noise_alpha_eff = 0.0
         update_reason = "wiener_noise_psd_hold_speech"
-        if allow_noise_update:
+        if use_external_noise:
+            self.noise_psd = np.maximum(external_noise, 1e-12)
+            update_reason = "beamformer_rnn_output_psd"
+        elif allow_noise_update:
             if self._noise_bootstrap_frames_seen < self._noise_bootstrap_target_frames:
                 if self._noise_bootstrap_frames_seen == 0:
                     self.noise_psd = psd.copy()
@@ -1115,6 +1150,8 @@ class _PostFilterState:
                 "speech_activity": float(speech_activity),
                 "target_activity_active": bool(target_activity_active),
                 "noise_update_applied": bool(allow_noise_update),
+                "noise_source": "beamformer_rnn_output" if use_external_noise else "tracked_mono",
+                "external_noise_psd_valid": bool(use_external_noise),
                 "noise_bootstrap_frames_seen": int(self._noise_bootstrap_frames_seen),
                 "noise_bootstrap_target_frames": int(self._noise_bootstrap_target_frames),
                 "noise_bootstrap_complete": bool(self._noise_bootstrap_frames_seen >= self._noise_bootstrap_target_frames),
@@ -1164,6 +1201,13 @@ class _RNNoisePostFilter:
         self._residual_ema_state = np.zeros((0,), dtype=np.float32)
         self._backend.channels = 1
         self._backend.dtype = np.int16
+        cutoff_hz = float(max(getattr(cfg, "rnnoise_output_lowpass_cutoff_hz", 0.0), 0.0))
+        self._output_lowpass_cutoff_hz = cutoff_hz
+        self._output_lowpass_sos = (
+            None
+            if cutoff_hz <= 0.0 or cutoff_hz >= 0.5 * float(self._input_sample_rate_hz)
+            else butter(6, cutoff_hz, btype="lowpass", fs=float(self._input_sample_rate_hz), output="sos")
+        )
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
@@ -1218,7 +1262,10 @@ class _RNNoisePostFilter:
         else:
             self._residual_ema_state = residual.astype(np.float32, copy=False)
         wet = float(np.clip(self.cfg.rnnoise_wet_mix, 0.0, 1.0))
-        return (((wet * out) + ((1.0 - wet) * x))).astype(np.float32, copy=False)
+        mixed = ((wet * out) + ((1.0 - wet) * x)).astype(np.float32, copy=False)
+        if self._output_lowpass_sos is not None and mixed.shape[0] > 8:
+            mixed = np.asarray(sosfiltfilt(self._output_lowpass_sos, mixed), dtype=np.float32)
+        return mixed.astype(np.float32, copy=False)
 
 
 class _CoherenceWienerPostFilter:
@@ -1326,6 +1373,7 @@ class _PostFilterRouter:
         target_activity_active: bool = False,
         frame_mc: np.ndarray | None = None,
         doa_deg: float | None = None,
+        external_noise_psd: np.ndarray | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
         stages: dict[str, np.ndarray] = {}
         if not bool(self.cfg.postfilter_enabled) or self.method == "off":
@@ -1334,13 +1382,23 @@ class _PostFilterRouter:
             stages["postfilter_output"] = out
             return out, stages
         if self.method == "wiener_dd":
-            out = self._wiener.process(beamformed, speech_activity=speech_activity, target_activity_active=target_activity_active)
+            out = self._wiener.process(
+                beamformed,
+                speech_activity=speech_activity,
+                target_activity_active=target_activity_active,
+                external_noise_psd=external_noise_psd,
+            )
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
             stages["post_wiener"] = np.asarray(out, dtype=np.float32)
             stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
             return out, stages
         if self.method == "log_mmse":
-            out = self._log_mmse.process(beamformed, speech_activity=speech_activity, target_activity_active=target_activity_active)
+            out = self._log_mmse.process(
+                beamformed,
+                speech_activity=speech_activity,
+                target_activity_active=target_activity_active,
+                external_noise_psd=external_noise_psd,
+            )
             self._last_noise_model_update = _normalize_noise_model_update(self._log_mmse.last_noise_model_update)
             stages["post_wiener"] = np.asarray(out, dtype=np.float32)
             stages["postfilter_output"] = np.asarray(out, dtype=np.float32)
@@ -1371,7 +1429,12 @@ class _PostFilterRouter:
         if self.method == "wiener_then_voice_bandpass":
             if self._wiener is None or self._voice_bandpass is None:
                 raise RuntimeError("Wiener->voice_bandpass postfilter not initialized.")
-            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity, target_activity_active=target_activity_active)
+            post_wiener = self._wiener.process(
+                beamformed,
+                speech_activity=speech_activity,
+                target_activity_active=target_activity_active,
+                external_noise_psd=external_noise_psd,
+            )
             out = self._voice_bandpass.process(post_wiener, speech_activity=speech_activity)
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
             stages["post_wiener"] = np.asarray(post_wiener, dtype=np.float32)
@@ -1391,7 +1454,12 @@ class _PostFilterRouter:
         if self.method == "wiener_then_rnnoise":
             if self._wiener is None or self._rnnoise is None:
                 raise RuntimeError("Hybrid postfilter not initialized.")
-            post_wiener = self._wiener.process(beamformed, speech_activity=speech_activity, target_activity_active=target_activity_active)
+            post_wiener = self._wiener.process(
+                beamformed,
+                speech_activity=speech_activity,
+                target_activity_active=target_activity_active,
+                external_noise_psd=external_noise_psd,
+            )
             out = self._rnnoise.process(post_wiener, speech_activity=speech_activity)
             self._last_noise_model_update = _normalize_noise_model_update(self._wiener.last_noise_model_update)
             stages["post_wiener"] = np.asarray(post_wiener, dtype=np.float32)
@@ -1403,13 +1471,23 @@ class _PostFilterRouter:
         stages["postfilter_output"] = out
         return out, stages
 
-    def process(self, beamformed: np.ndarray, *, speech_activity: float, target_activity_active: bool = False, frame_mc: np.ndarray | None = None, doa_deg: float | None = None) -> np.ndarray:
+    def process(
+        self,
+        beamformed: np.ndarray,
+        *,
+        speech_activity: float,
+        target_activity_active: bool = False,
+        frame_mc: np.ndarray | None = None,
+        doa_deg: float | None = None,
+        external_noise_psd: np.ndarray | None = None,
+    ) -> np.ndarray:
         out, _stages = self.process_with_stages(
             beamformed,
             speech_activity=speech_activity,
             target_activity_active=target_activity_active,
             frame_mc=frame_mc,
             doa_deg=doa_deg,
+            external_noise_psd=external_noise_psd,
         )
         return out
 
@@ -1439,8 +1517,13 @@ class _PostFilterStageCore:
 
     def process_packet(self, packet: FastPathAudioPacket) -> tuple[float, float, float]:
         t0 = perf_counter()
-        out = np.asarray(packet.beamformed_audio, dtype=np.float32).reshape(-1)
-        postfilter_stages: dict[str, np.ndarray] = {"post_beamforming": out.copy()}
+        beamformed = np.asarray(packet.beamformed_audio, dtype=np.float32).reshape(-1)
+        input_source = str(getattr(self._cfg, "postfilter_input_source", "beamformed_mono")).strip().lower()
+        if input_source == "raw_mix_mono" and packet.frame_mc is not None:
+            out = np.mean(np.asarray(packet.frame_mc, dtype=np.float32), axis=1).astype(np.float32, copy=False)
+        else:
+            out = beamformed
+        postfilter_stages: dict[str, np.ndarray] = {"post_beamforming": beamformed.copy()}
         if bool(self._cfg.postfilter_enabled):
             out, postfilter_stages = self._postfilter.process_with_stages(
                 out,
@@ -1448,8 +1531,13 @@ class _PostFilterStageCore:
                 target_activity_active=bool(packet.target_activity_state),
                 frame_mc=None if packet.frame_mc is None else np.asarray(packet.frame_mc, dtype=np.float32),
                 doa_deg=None if packet.target_doa_deg is None else float(packet.target_doa_deg),
+                external_noise_psd=(
+                    None
+                    if packet.beamformer_output_noise_psd is None
+                    else np.asarray(packet.beamformer_output_noise_psd, dtype=np.float32).reshape(-1)
+                ),
             )
-            postfilter_stages["post_beamforming"] = np.asarray(packet.beamformed_audio, dtype=np.float32).reshape(-1).copy()
+            postfilter_stages["post_beamforming"] = beamformed.copy()
         postfilter_noise_update = self._postfilter.get_last_noise_model_update()
         packet.postfilter_wiener_audio = (
             None
@@ -2519,6 +2607,7 @@ class FastPathWorker(threading.Thread):
         if bool(self._cfg.postfilter_enabled):
             method = str(getattr(self._cfg, "postfilter_method", "off"))
         noise_model_update = self._current_beamformer_noise_model_update()
+        beamformer_output_noise_psd = self._fd.get_output_noise_psd_for_fft(int(2 * frame_samples))
         return FastPathAudioPacket.create(
             frame_index=int(self._frame_idx),
             start_sample=start_sample,
@@ -2526,6 +2615,7 @@ class FastPathWorker(threading.Thread):
             sample_rate_hz=int(self._cfg.sample_rate_hz),
             frame_samples=int(frame_samples),
             beamformed_audio=np.asarray(out, dtype=np.float32),
+            beamformer_output_noise_psd=beamformer_output_noise_psd,
             frame_mc=np.asarray(x, dtype=np.float32),
             target_doa_deg=None if target_doa is None else float(target_doa),
             target_activity_score=float(target_activity_score),

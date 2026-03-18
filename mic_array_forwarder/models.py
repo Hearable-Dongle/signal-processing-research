@@ -78,6 +78,8 @@ class FastPathConfig(BaseModel):
     output_enhancer_mode: Literal["off", "wiener"] = "off"
     postfilter_method: Literal["off", "wiener_dd", "log_mmse", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"] = "off"
     postfilter_enabled: bool = True
+    postfilter_noise_source: Literal["tracked_mono", "beamformer_rnn_output"] = "tracked_mono"
+    postfilter_input_source: Literal["beamformed_mono", "raw_mix_mono"] = "beamformed_mono"
     postfilter_noise_ema_alpha: float = 0.02
     postfilter_speech_ema_alpha: float = 0.01
     postfilter_gain_floor: float = 0.22
@@ -90,6 +92,7 @@ class FastPathConfig(BaseModel):
     postfilter_gain_max_step_db: float = 2.5
     rnnoise_wet_mix: float = 0.9
     rnnoise_input_gain_db: float = 0.0
+    rnnoise_output_lowpass_cutoff_hz: float = 7500.0
     rnnoise_residual_ema_enabled: bool = False
     rnnoise_residual_ema_alpha: float = 0.0
     coherence_wiener_gain_floor: float = 0.12
@@ -391,6 +394,14 @@ class SessionStartRequest(BaseModel):
         return str(self.fast_path.postfilter_method)
 
     @property
+    def postfilter_noise_source(self) -> str:
+        return str(self.fast_path.postfilter_noise_source)
+
+    @property
+    def postfilter_input_source(self) -> str:
+        return str(self.fast_path.postfilter_input_source)
+
+    @property
     def postfilter_noise_ema_alpha(self) -> float:
         return float(self.fast_path.postfilter_noise_ema_alpha)
 
@@ -437,6 +448,10 @@ class SessionStartRequest(BaseModel):
     @property
     def rnnoise_input_gain_db(self) -> float:
         return float(self.fast_path.rnnoise_input_gain_db)
+
+    @property
+    def rnnoise_output_lowpass_cutoff_hz(self) -> float:
+        return float(self.fast_path.rnnoise_output_lowpass_cutoff_hz)
 
     @property
     def rnnoise_residual_ema_enabled(self) -> bool:
