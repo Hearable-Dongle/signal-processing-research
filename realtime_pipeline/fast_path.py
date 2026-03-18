@@ -2009,6 +2009,7 @@ class FastPathWorker(threading.Thread):
             mic_pos=self._mic_geometry_xyz if self._mic_geometry_xyz.shape[0] == 3 else self._mic_geometry_xyz.T,
             fs=config.sample_rate_hz,
             window_ms=tracker_window_ms,
+            hop_ms=int(config.localization_hop_ms),
             nfft=config.srp_nfft,
             overlap=config.srp_overlap,
             freq_range=tracker_freq,
@@ -2057,6 +2058,29 @@ class FastPathWorker(threading.Thread):
             dominant_lock_switch_confirm_frames=config.dominant_lock_switch_confirm_frames,
             dominant_lock_switch_min_confidence=config.dominant_lock_switch_min_confidence,
         )
+        self._localization_update_interval_frames = max(
+            1,
+            int(
+                np.ceil(
+                    float(max(int(config.localization_hop_ms), 1))
+                    / max(float(int(config.fast_frame_ms)), 1.0)
+                )
+            ),
+        )
+        self._localization_pending_frames: list[np.ndarray] = []
+        self._cached_localization_peaks: list[float] = []
+        self._cached_localization_scores: list[float] | None = None
+        self._cached_localization_valid = False
+        self._cached_localization_debug: dict = {
+            "backend": str(config.localization_backend),
+            "raw_peaks_deg": [],
+            "tracked_peaks_deg": [],
+            "held_tracks": 0,
+            "track_assignments": [],
+            "spawned_tracks": [],
+            "retired_tracks": [],
+            "tracking_mode": str(config.tracking_mode),
+        }
         self._frame_idx = 0
         self._rms_gain_ema = 1.0
         self._smoothed_doa_by_speaker: dict[int, float] = {}
@@ -3177,7 +3201,29 @@ class FastPathWorker(threading.Thread):
                     t0 = perf_counter()
                     override = None if self._srp_override_provider is None else self._srp_override_provider(self._frame_idx, now_ms)
                     if override is None:
-                        peaks, scores, tracker_debug = self._tracker.update(x)
+                        self._localization_pending_frames.append(x.copy())
+                        localization_update_due = (
+                            (not self._cached_localization_valid)
+                            or len(self._localization_pending_frames) >= self._localization_update_interval_frames
+                        )
+                        if localization_update_due:
+                            localization_chunk = np.concatenate(self._localization_pending_frames, axis=0)
+                            self._localization_pending_frames.clear()
+                            peaks, scores, tracker_debug = self._tracker.update(localization_chunk)
+                            self._cached_localization_peaks = list(peaks)
+                            self._cached_localization_scores = None if scores is None else list(scores)
+                            self._cached_localization_debug = dict(tracker_debug)
+                            self._cached_localization_valid = True
+                            localization_update_executed = True
+                        else:
+                            peaks = list(self._cached_localization_peaks)
+                            scores = None if self._cached_localization_scores is None else list(self._cached_localization_scores)
+                            tracker_debug = dict(self._cached_localization_debug)
+                            localization_update_executed = False
+                        tracker_debug = dict(tracker_debug)
+                        tracker_debug["localization_update_executed"] = bool(localization_update_executed)
+                        tracker_debug["localization_update_interval_frames"] = int(self._localization_update_interval_frames)
+                        tracker_debug["localization_pending_frames"] = int(len(self._localization_pending_frames))
                         matched_user_peak_deg, matched_user_score, matched_user_idx = self._match_user_peak(peaks, scores)
                         if bool(getattr(self._cfg, "single_active", False)):
                             peaks, scores, single_active_debug = self._resolve_single_active_localization(

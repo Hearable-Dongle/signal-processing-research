@@ -13,6 +13,7 @@ class FastPathConfig(BaseModel):
     split_runtime_mode: Literal["monolithic", "pipelined", "beamforming_only", "postfilter_only"] = "monolithic"
     postfilter_queue_max_frames: int = 4
     postfilter_queue_drop_oldest: bool = False
+    fast_frame_ms: int = 10
     localization_hop_ms: int = 10
     localization_window_ms: int = 160
     input_downsample_rate_hz: int | None = None
@@ -30,7 +31,7 @@ class FastPathConfig(BaseModel):
         "capon_mvdr_refine_1src",
         "music_1src",
     ] = "srp_phat_localization"
-    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "delay_sum_subtractive", "delay_sum_subtractive_multi", "delay_sum_differential", "lcmv_top2_tracked", "lcmv_target_band"] = "mvdr_fd"
+    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "delay_sum_subtractive", "delay_sum_subtractive_multi", "delay_sum_differential", "lcmv_top2_tracked", "lcmv_target_band"] = "delay_sum"
     mvdr_hop_ms: int | None = None
     beamformer_snapshot_frame_indices: tuple[int, ...] = ()
     fd_analysis_window_ms: float = 20.0
@@ -94,9 +95,14 @@ class FastPathConfig(BaseModel):
     capon_peak_min_sharpness: float = 0.12
     capon_peak_min_margin: float = 0.04
     capon_hold_frames: int = 2
+    localization_track_hold_frames: int = 5
+    localization_velocity_alpha: float = 0.35
+    localization_angle_alpha: float = 0.30
+    srp_peak_ema_alpha: float = 0.35
+    srp_peak_hold_frames: int = 4
     enhancement_tier: Literal["custom", "baseline_pi", "classical_plus", "quality_cpu", "quality_heavy"] = "custom"
     output_enhancer_mode: Literal["off", "wiener"] = "off"
-    postfilter_method: Literal["off", "wiener_dd", "log_mmse", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"] = "off"
+    postfilter_method: Literal["off", "wiener_dd", "log_mmse", "rnnoise", "coherence_wiener", "wiener_then_rnnoise", "voice_bandpass", "rnnoise_then_voice_bandpass", "wiener_then_voice_bandpass"] = "rnnoise"
     postfilter_enabled: bool = True
     postfilter_noise_source: Literal["tracked_mono", "beamformer_rnn_output"] = "tracked_mono"
     postfilter_input_source: Literal["beamformed_mono", "raw_mix_mono"] = "beamformed_mono"
@@ -192,6 +198,10 @@ class SessionStartRequest(BaseModel):
         "localize_and_beamform",
         "beamform_from_ground_truth",
     ] = "specific_speaker_enhancement"
+
+    @property
+    def fast_frame_ms(self) -> int:
+        return int(self.fast_path.fast_frame_ms)
 
     @property
     def localization_hop_ms(self) -> int:
@@ -420,6 +430,26 @@ class SessionStartRequest(BaseModel):
     @property
     def assume_single_speaker(self) -> bool:
         return bool(self.fast_path.assume_single_speaker)
+
+    @property
+    def localization_track_hold_frames(self) -> int:
+        return int(self.fast_path.localization_track_hold_frames)
+
+    @property
+    def localization_velocity_alpha(self) -> float:
+        return float(self.fast_path.localization_velocity_alpha)
+
+    @property
+    def localization_angle_alpha(self) -> float:
+        return float(self.fast_path.localization_angle_alpha)
+
+    @property
+    def srp_peak_ema_alpha(self) -> float:
+        return float(self.fast_path.srp_peak_ema_alpha)
+
+    @property
+    def srp_peak_hold_frames(self) -> int:
+        return int(self.fast_path.srp_peak_hold_frames)
 
     @property
     def capon_spectrum_ema_alpha(self) -> float:

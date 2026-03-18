@@ -67,6 +67,7 @@ class SRPPeakTracker:
         overlap: float,
         freq_range: tuple[int, int],
         max_sources: int,
+        hop_ms: int | None = None,
         prior_enabled: bool = True,
         min_score: float = 0.05,
         ema_alpha: float = 0.35,
@@ -144,7 +145,8 @@ class SRPPeakTracker:
         self._min_relative_peak_score = float(min_relative_peak_score)
         self._min_peak_contrast = float(min_peak_contrast)
         self._min_peak_separation_deg = float(min_peak_separation_deg)
-        self._update_interval_s = max(1e-3, float(window_ms) / 1000.0)
+        effective_hop_ms = int(window_ms if hop_ms is None else hop_ms)
+        self._update_interval_s = max(1e-3, float(effective_hop_ms) / 1000.0)
         self._backend = build_localization_backend(
             self._backend_name,
             mic_pos=np.asarray(mic_pos, dtype=float),
