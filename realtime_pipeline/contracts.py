@@ -230,6 +230,7 @@ class PipelineConfig:
     process_partial_chunk: bool = True
     max_speakers_hint: int = 8
     assume_single_speaker: bool = False
+    single_active: bool = False
     prefer_multispeaker_module: bool = True
     multispeaker_model_dir: str = "multispeaker_separation/models"
     multispeaker_backend: str = "pytorch"

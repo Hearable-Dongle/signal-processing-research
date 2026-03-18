@@ -31,7 +31,8 @@ def build_pipeline_config_from_request(
     max_speakers_hint: int,
 ) -> PipelineConfig:
     assume_single_speaker = bool(req.assume_single_speaker)
-    slow_path_enabled = bool(req.slow_path_enabled)
+    single_active = bool(req.single_active)
+    slow_path_enabled = bool(req.slow_path_enabled) and (not single_active)
     beamforming_mode = str(req.beamforming_mode).strip().lower()
     target_activity_mode = req.target_activity_rnn_update_mode
     if beamforming_mode == "mvdr_fd" and target_activity_mode is None:
@@ -46,6 +47,7 @@ def build_pipeline_config_from_request(
         postfilter_queue_drop_oldest=bool(req.postfilter_queue_drop_oldest),
         max_speakers_hint=1 if assume_single_speaker else max(1, int(max_speakers_hint)),
         assume_single_speaker=assume_single_speaker,
+        single_active=single_active,
         convtasnet_model_name=str(req.convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(req.convtasnet_model_sample_rate_hz),
         convtasnet_input_sample_rate_hz=int(req.convtasnet_input_sample_rate_hz),
@@ -178,25 +180,9 @@ def public_speaker_rows(
     *,
     single_active: bool,
 ) -> list[dict[str, Any]]:
+    del single_active
     rows = [_row_from_speaker(item) for item in snapshot.values()]
     rows.sort(key=lambda item: (-float(item["active"]), -float(item["confidence"]), int(item["speaker_id"])))
-    if not bool(single_active) or not rows:
-        return rows
-    active_rows = [row for row in rows if bool(row["active"])]
-    if not active_rows:
-        return rows
-    best = max(
-        active_rows,
-        key=lambda row: (
-            float(row["activity_confidence"]),
-            float(row["confidence"]),
-            float(row["gain_weight"]),
-            -int(row["speaker_id"]),
-        ),
-    )
-    best_id = int(best["speaker_id"])
-    for row in rows:
-        row["active"] = bool(int(row["speaker_id"]) == best_id and bool(row["active"]))
     return rows
 
 

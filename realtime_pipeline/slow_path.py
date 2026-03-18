@@ -132,7 +132,6 @@ class SlowPathWorker(threading.Thread):
             for idx in range(min(len(peaks), max(1, int(self._cfg.max_speakers_hint))))
         ]
         observations.sort(key=lambda item: item[1], reverse=True)
-
         with Timer() as t:
             assigned: set[int] = set()
             for angle_deg, score in observations:
