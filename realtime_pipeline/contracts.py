@@ -66,6 +66,7 @@ class FastPathAudioPacket:
     postfilter_rnnoise_audio: np.ndarray | None = None
     postfilter_bandpass_audio: np.ndarray | None = None
     postfilter_output_audio: np.ndarray | None = None
+    beamformer_output_noise_psd: np.ndarray | None = None
     frame_mc: np.ndarray | None = None
     target_doa_deg: float | None = None
     target_activity_score: float = 0.0
@@ -98,6 +99,7 @@ class FastPathAudioPacket:
         sample_rate_hz: int,
         frame_samples: int,
         beamformed_audio: np.ndarray,
+        beamformer_output_noise_psd: np.ndarray | None,
         frame_mc: np.ndarray | None,
         target_doa_deg: float | None,
         target_activity_score: float,
@@ -126,6 +128,11 @@ class FastPathAudioPacket:
             postfilter_rnnoise_audio=None,
             postfilter_bandpass_audio=None,
             postfilter_output_audio=None,
+            beamformer_output_noise_psd=(
+                None
+                if beamformer_output_noise_psd is None
+                else np.asarray(beamformer_output_noise_psd, dtype=np.float32).reshape(-1).copy()
+            ),
             frame_mc=None if frame_mc is None else np.asarray(frame_mc, dtype=np.float32).copy(),
             target_doa_deg=None if target_doa_deg is None else float(target_doa_deg),
             target_activity_score=float(target_activity_score),
@@ -351,6 +358,8 @@ class PipelineConfig:
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True
     postfilter_method: str = "off"  # one of: off, wiener_dd, log_mmse, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass, rnnoise_then_voice_bandpass, wiener_then_voice_bandpass
+    postfilter_noise_source: str = "tracked_mono"  # one of: tracked_mono, beamformer_rnn_output
+    postfilter_input_source: str = "beamformed_mono"  # one of: beamformed_mono, raw_mix_mono
     postfilter_noise_ema_alpha: float = 0.02
     postfilter_speech_ema_alpha: float = 0.01
     postfilter_gain_floor: float = 0.22
