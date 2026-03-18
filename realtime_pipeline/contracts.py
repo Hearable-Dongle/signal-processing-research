@@ -361,7 +361,7 @@ class PipelineConfig:
     postfilter_spectral_floor_beta: float = 0.01
     postfilter_freq_smoothing_bins: int = 2
     postfilter_gain_max_step_db: float = 2.5
-    rnnoise_wet_mix: float = 0.8
+    rnnoise_wet_mix: float = 0.9
     rnnoise_input_gain_db: float = 0.0
     rnnoise_residual_ema_enabled: bool = False
     rnnoise_residual_ema_alpha: float = 0.0

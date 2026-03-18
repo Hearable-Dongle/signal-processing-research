@@ -1456,7 +1456,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-oversubtraction-alpha", type=float, default=1.0)
     parser.add_argument("--postfilter-spectral-floor-beta", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
-    parser.add_argument("--rnnoise-wet-mix", type=float, default=0.8)
+    parser.add_argument("--rnnoise-wet-mix", type=float, default=0.9)
     parser.add_argument("--rnnoise-residual-ema-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--rnnoise-residual-ema-alpha", type=float, default=0.0)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
