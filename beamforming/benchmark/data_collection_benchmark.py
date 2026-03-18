@@ -27,7 +27,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
 
 try:
     from scipy.optimize import linear_sum_assignment
-    from scipy.signal import welch
+    from scipy.signal import resample_poly, welch
 except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific dependency guard
     missing = exc.name or "scipy"
     raise SystemExit(
@@ -187,6 +187,23 @@ def _load_multichannel_wavs(raw_dir: Path) -> tuple[np.ndarray, int, list[str]]:
     assert min_len is not None
     stacked = np.stack([ch[:min_len] for ch in chans], axis=1)
     return stacked, sample_rate_hz, [p.name for p in wav_paths]
+
+
+def _resample_multichannel_audio(
+    mic_audio: np.ndarray,
+    *,
+    in_sample_rate_hz: int,
+    out_sample_rate_hz: int,
+) -> np.ndarray:
+    audio = np.asarray(mic_audio, dtype=np.float32)
+    if int(in_sample_rate_hz) == int(out_sample_rate_hz):
+        return audio
+    if int(in_sample_rate_hz) <= 0 or int(out_sample_rate_hz) <= 0:
+        raise ValueError("sample rates must be positive for resampling")
+    return np.asarray(
+        resample_poly(audio, up=int(out_sample_rate_hz), down=int(in_sample_rate_hz), axis=0),
+        dtype=np.float32,
+    )
 
 
 def _recording_dir_from_path(path: Path) -> Path | None:
@@ -1038,6 +1055,7 @@ def _run_recording_method_job(
     target_activity_exit_frames: int,
     fd_cov_update_scale_target_active: float,
     fd_cov_update_scale_target_inactive: float,
+    input_downsample_rate_hz: int | None,
 ) -> dict:
     raw_dir = recording_dir / "raw" if (recording_dir / "raw").is_dir() else recording_dir
     mic_audio, sample_rate_hz, channel_filenames = _load_multichannel_wavs(raw_dir)
@@ -1060,6 +1078,7 @@ def _run_recording_method_job(
         fast_path={
             "localization_hop_ms": int(localization_hop_ms),
             "localization_window_ms": int(localization_window_ms),
+            "input_downsample_rate_hz": (None if input_downsample_rate_hz is None else int(input_downsample_rate_hz)),
             "overlap": float(localization_overlap),
             "freq_low_hz": int(localization_freq_low_hz),
             "freq_high_hz": int(localization_freq_high_hz),
@@ -1162,6 +1181,16 @@ def _run_recording_method_job(
     proc, proc_sr = sf.read(run_dir / "enhanced_fast_path.wav", dtype="float32", always_2d=False)
     proc = np.asarray(proc, dtype=np.float32).reshape(-1)
     fs = int(proc_sr if proc_sr > 0 else sample_rate_hz)
+    raw_mix_for_metrics = raw_mix
+    if fs != int(sample_rate_hz):
+        raw_mix_for_metrics = np.mean(
+            _resample_multichannel_audio(
+                mic_audio,
+                in_sample_rate_hz=int(sample_rate_hz),
+                out_sample_rate_hz=int(fs),
+            ),
+            axis=1,
+        )
     stage_paths = {
         "post_beamforming": run_dir / "post_beamforming.wav",
         "post_wiener": run_dir / "post_wiener.wav",
@@ -1182,7 +1211,7 @@ def _run_recording_method_job(
             run_dir=run_dir,
             mic_geometry_xyz=np.asarray(mic_geometry_xyz, dtype=np.float64),
         )
-    n = min(raw_mix.size, proc.size)
+    n = min(raw_mix_for_metrics.size, proc.size)
     trace_metrics = _trace_metrics(summary)
     duration_s = float(n / max(fs, 1))
     suppressed_user_tracks = _filter_tracks_by_speaker_name(ground_truth_tracks, suppressed_user_speaker_name)
@@ -1207,6 +1236,8 @@ def _run_recording_method_job(
             else str(summary.get("beamforming_mode", method))
         ),
         "sample_rate_hz": fs,
+        "input_sample_rate_hz": int(sample_rate_hz),
+        "input_downsample_rate_hz": (float("nan") if input_downsample_rate_hz is None else int(input_downsample_rate_hz)),
         "duration_s": duration_s,
         "channel_count": int(mic_audio.shape[1]),
         "raw_channel_filenames": ",".join(channel_filenames),
@@ -1236,14 +1267,14 @@ def _run_recording_method_job(
         "slow_rtf": float(summary["slow_rtf"]),
         "fast_avg_ms": float(summary["fast_avg_ms"]),
         "slow_avg_ms": float(summary["slow_avg_ms"]),
-        "clip_rate_raw": _clip_rate(raw_mix[:n]),
+        "clip_rate_raw": _clip_rate(raw_mix_for_metrics[:n]),
         "clip_rate_processed": _clip_rate(proc[:n]),
-        "peak_abs_raw": float(np.max(np.abs(raw_mix[:n]))) if n else 0.0,
+        "peak_abs_raw": float(np.max(np.abs(raw_mix_for_metrics[:n]))) if n else 0.0,
         "peak_abs_processed": float(np.max(np.abs(proc[:n]))) if n else 0.0,
-        "rms_gain_db": _rms_db_ratio(raw_mix[:n], proc[:n]),
-        "high_band_noise_ratio_raw": _high_band_noise_ratio(raw_mix[:n], fs),
+        "rms_gain_db": _rms_db_ratio(raw_mix_for_metrics[:n], proc[:n]),
+        "high_band_noise_ratio_raw": _high_band_noise_ratio(raw_mix_for_metrics[:n], fs),
         "high_band_noise_ratio_processed": _high_band_noise_ratio(proc[:n], fs),
-        "frame_gain_delta_p95": _frame_gain_delta_p95(raw_mix[:n], proc[:n]),
+        "frame_gain_delta_p95": _frame_gain_delta_p95(raw_mix_for_metrics[:n], proc[:n]),
         "speaker_count_final": int(len(summary.get("speaker_map_final", []))),
         "active_speaker_count_final": int(sum(1 for speaker in summary.get("speaker_map_final", []) if bool(speaker.get("active", False)))),
         "max_confidence_final": float(max((float(speaker.get("confidence", 0.0)) for speaker in summary.get("speaker_map_final", [])), default=0.0)),
@@ -1255,12 +1286,12 @@ def _run_recording_method_job(
 
     label = f"{recording_id} | {method} | realtime_pipeline"
     viz_dir = run_dir / "visualizations"
-    _plot_waveform_compare(raw_mix[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
-    _plot_spectrogram_compare(raw_mix[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
-    _plot_psd_compare(raw_mix[:n], proc[:n], fs, viz_dir / "psd.png", label)
+    _plot_waveform_compare(raw_mix_for_metrics[:n], proc[:n], fs, viz_dir / "waveforms.png", label)
+    _plot_spectrogram_compare(raw_mix_for_metrics[:n], proc[:n], fs, viz_dir / "spectrograms.png", label)
+    _plot_psd_compare(raw_mix_for_metrics[:n], proc[:n], fs, viz_dir / "psd.png", label)
     _plot_psd_stages(
         [
-            ("raw", raw_mix[:n]),
+            ("raw", raw_mix_for_metrics[:n]),
             ("post_beamforming", stage_audio.get("post_beamforming", proc)[:n]),
             *([("post_wiener", stage_audio["post_wiener"][:n])] if "post_wiener" in stage_audio else []),
             *([("post_rnnoise", stage_audio["post_rnnoise"][:n])] if "post_rnnoise" in stage_audio else []),
@@ -1271,7 +1302,7 @@ def _run_recording_method_job(
         viz_dir / "psd_stages.png",
         label,
     )
-    _plot_single_psd(raw_mix[:n], fs, viz_dir / "psd_raw.png", f"{label} raw PSD", color="#666666")
+    _plot_single_psd(raw_mix_for_metrics[:n], fs, viz_dir / "psd_raw.png", f"{label} raw PSD", color="#666666")
     _plot_single_psd(
         stage_audio.get("post_beamforming", proc)[:n],
         fs,
@@ -1342,6 +1373,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fast-frame-ms", type=int, default=None, help="Fast-path frame cadence in ms. Defaults to localization hop when omitted.")
     parser.add_argument("--localization-window-ms", type=int, default=200)
     parser.add_argument("--localization-hop-ms", type=int, default=50)
+    parser.add_argument("--input-downsample-rate-hz", type=int, default=None, help="Optional first-step resample target for the full pipeline.")
     parser.add_argument("--localization-overlap", type=float, default=0.2)
     parser.add_argument("--localization-freq-low-hz", type=int, default=200)
     parser.add_argument("--localization-freq-high-hz", type=int, default=3000)
@@ -1565,6 +1597,7 @@ def main() -> None:
                 target_activity_exit_frames=int(args.target_activity_exit_frames),
                 fd_cov_update_scale_target_active=float(args.fd_cov_update_scale_target_active),
                 fd_cov_update_scale_target_inactive=float(args.fd_cov_update_scale_target_inactive),
+                input_downsample_rate_hz=(None if args.input_downsample_rate_hz is None else int(args.input_downsample_rate_hz)),
             )
 
         if int(args.workers) <= 1:

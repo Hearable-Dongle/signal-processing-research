@@ -148,6 +148,8 @@ class FastPathAudioPacket:
 @dataclass(slots=True)
 class PipelineConfig:
     sample_rate_hz: int = 16000
+    input_sample_rate_hz: int = 16000
+    input_downsample_rate_hz: int | None = None
     fast_frame_ms: int = 10
     slow_chunk_ms: int = 200
     slow_chunk_hop_ms: int | None = None
