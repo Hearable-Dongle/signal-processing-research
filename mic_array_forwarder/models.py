@@ -90,6 +90,8 @@ class FastPathConfig(BaseModel):
     postfilter_gain_max_step_db: float = 2.5
     rnnoise_wet_mix: float = 0.8
     rnnoise_input_gain_db: float = 0.0
+    rnnoise_residual_ema_enabled: bool = False
+    rnnoise_residual_ema_alpha: float = 0.0
     coherence_wiener_gain_floor: float = 0.12
     coherence_wiener_coherence_exponent: float = 1.5
     coherence_wiener_temporal_alpha: float = 0.65
@@ -435,6 +437,14 @@ class SessionStartRequest(BaseModel):
     @property
     def rnnoise_input_gain_db(self) -> float:
         return float(self.fast_path.rnnoise_input_gain_db)
+
+    @property
+    def rnnoise_residual_ema_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_residual_ema_enabled)
+
+    @property
+    def rnnoise_residual_ema_alpha(self) -> float:
+        return float(self.fast_path.rnnoise_residual_ema_alpha)
 
     @property
     def coherence_wiener_gain_floor(self) -> float:

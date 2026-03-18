@@ -1062,6 +1062,8 @@ def _run_recording_method_job(
     postfilter_spectral_floor_beta: float,
     postfilter_gain_max_step_db: float,
     rnnoise_wet_mix: float,
+    rnnoise_residual_ema_enabled: bool,
+    rnnoise_residual_ema_alpha: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -1141,6 +1143,8 @@ def _run_recording_method_job(
             "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
             "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
             "rnnoise_wet_mix": float(rnnoise_wet_mix),
+            "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
+            "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
             "suppressed_user_voice_doa_deg": (
                 None if suppressed_user_voice_doa_deg is None else float(suppressed_user_voice_doa_deg)
@@ -1293,6 +1297,8 @@ def _run_recording_method_job(
         "postfilter_oversubtraction_alpha": float(postfilter_oversubtraction_alpha),
         "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
         "rnnoise_wet_mix": float(rnnoise_wet_mix),
+        "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
+        "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
         "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
         "fd_analysis_window_ms": float(fd_analysis_window_ms),
         "robust_target_band_width_deg": float(robust_target_band_width_deg),
@@ -1451,6 +1457,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-spectral-floor-beta", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
     parser.add_argument("--rnnoise-wet-mix", type=float, default=0.8)
+    parser.add_argument("--rnnoise-residual-ema-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-residual-ema-alpha", type=float, default=0.0)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
     parser.add_argument("--robust-target-band-width-deg", type=float, default=10.0)
@@ -1614,6 +1622,8 @@ def main() -> None:
                 postfilter_spectral_floor_beta=float(args.postfilter_spectral_floor_beta),
                 postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
                 rnnoise_wet_mix=float(args.rnnoise_wet_mix),
+                rnnoise_residual_ema_enabled=bool(args.rnnoise_residual_ema_enabled),
+                rnnoise_residual_ema_alpha=float(args.rnnoise_residual_ema_alpha),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),
@@ -1751,6 +1761,8 @@ def main() -> None:
             "postfilter_oversubtraction_alpha": float(args.postfilter_oversubtraction_alpha),
             "postfilter_spectral_floor_beta": float(args.postfilter_spectral_floor_beta),
             "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
+            "rnnoise_residual_ema_enabled": bool(args.rnnoise_residual_ema_enabled),
+            "rnnoise_residual_ema_alpha": float(args.rnnoise_residual_ema_alpha),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),
             "fd_analysis_window_ms": float(args.fd_analysis_window_ms),
             "fd_noise_covariance_mode": str(args.fd_noise_covariance_mode),

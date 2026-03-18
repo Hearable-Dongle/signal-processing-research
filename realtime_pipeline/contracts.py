@@ -363,6 +363,8 @@ class PipelineConfig:
     postfilter_gain_max_step_db: float = 2.5
     rnnoise_wet_mix: float = 0.8
     rnnoise_input_gain_db: float = 0.0
+    rnnoise_residual_ema_enabled: bool = False
+    rnnoise_residual_ema_alpha: float = 0.0
     coherence_wiener_gain_floor: float = 0.12
     coherence_wiener_coherence_exponent: float = 1.5
     coherence_wiener_temporal_alpha: float = 0.65

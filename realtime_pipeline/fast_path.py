@@ -1161,6 +1161,7 @@ class _RNNoisePostFilter:
         self._frame_size = 480
         self._pending_in = np.zeros((0,), dtype=np.float32)
         self._pending_out = np.zeros((0,), dtype=np.float32)
+        self._residual_ema_state = np.zeros((0,), dtype=np.float32)
         self._backend.channels = 1
         self._backend.dtype = np.int16
 
@@ -1203,6 +1204,19 @@ class _RNNoisePostFilter:
                 out = out[: x.shape[0]]
             elif out.shape[0] < x.shape[0]:
                 out = np.pad(out, (0, x.shape[0] - out.shape[0]))
+        if self._residual_ema_state.shape[0] != x.shape[0]:
+            self._residual_ema_state = np.zeros((x.shape[0],), dtype=np.float32)
+        residual = np.asarray(out - x, dtype=np.float32)
+        residual_ema_enabled = bool(getattr(self.cfg, "rnnoise_residual_ema_enabled", False))
+        residual_ema_alpha = float(np.clip(getattr(self.cfg, "rnnoise_residual_ema_alpha", 0.0), 0.0, 0.999))
+        if residual_ema_enabled and residual_ema_alpha > 0.0:
+            self._residual_ema_state = (
+                (residual_ema_alpha * self._residual_ema_state)
+                + ((1.0 - residual_ema_alpha) * residual)
+            ).astype(np.float32, copy=False)
+            out = np.asarray(x + self._residual_ema_state, dtype=np.float32)
+        else:
+            self._residual_ema_state = residual.astype(np.float32, copy=False)
         wet = float(np.clip(self.cfg.rnnoise_wet_mix, 0.0, 1.0))
         return (((wet * out) + ((1.0 - wet) * x))).astype(np.float32, copy=False)
 
