@@ -67,6 +67,12 @@ def build_pipeline_config_from_request(
         delay_sum_update_min_delta_deg=float(req.delay_sum_update_min_delta_deg),
         delay_sum_crossfade_frames=int(req.delay_sum_crossfade_frames),
         delay_sum_use_smoothed_doa=bool(req.delay_sum_use_smoothed_doa),
+        delay_sum_subtractive_alpha=float(req.delay_sum_subtractive_alpha),
+        delay_sum_subtractive_interferer_doa_deg=(
+            None if req.delay_sum_subtractive_interferer_doa_deg is None else float(req.delay_sum_subtractive_interferer_doa_deg)
+        ),
+        delay_sum_subtractive_use_suppressed_user_doa=bool(req.delay_sum_subtractive_use_suppressed_user_doa),
+        delay_sum_subtractive_output_clip_guard=bool(req.delay_sum_subtractive_output_clip_guard),
         fd_cov_ema_alpha=float(req.fd_cov_ema_alpha),
         fd_diag_load=float(req.fd_diag_load),
         fd_trace_diagonal_loading_factor=float(req.fd_trace_diagonal_loading_factor),
@@ -585,6 +591,12 @@ def run_offline_session_pipeline(
         "rnnoise_output_notch_q": float(cfg.rnnoise_output_notch_q),
         "rnnoise_residual_ema_enabled": bool(cfg.rnnoise_residual_ema_enabled),
         "rnnoise_residual_ema_alpha": float(cfg.rnnoise_residual_ema_alpha),
+        "delay_sum_subtractive_alpha": float(cfg.delay_sum_subtractive_alpha),
+        "delay_sum_subtractive_interferer_doa_deg": (
+            None if cfg.delay_sum_subtractive_interferer_doa_deg is None else float(cfg.delay_sum_subtractive_interferer_doa_deg)
+        ),
+        "delay_sum_subtractive_use_suppressed_user_doa": bool(cfg.delay_sum_subtractive_use_suppressed_user_doa),
+        "delay_sum_subtractive_output_clip_guard": bool(cfg.delay_sum_subtractive_output_clip_guard),
         "coherence_wiener_gain_floor": float(cfg.coherence_wiener_gain_floor),
         "coherence_wiener_coherence_exponent": float(cfg.coherence_wiener_coherence_exponent),
         "coherence_wiener_temporal_alpha": float(cfg.coherence_wiener_temporal_alpha),

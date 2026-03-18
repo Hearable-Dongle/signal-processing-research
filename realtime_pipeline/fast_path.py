@@ -2105,7 +2105,7 @@ class FastPathWorker(threading.Thread):
 
     def get_beamformer_snapshot_trace(self) -> list[dict]:
         mode = str(self._cfg.beamforming_mode).strip().lower()
-        if mode == "delay_sum":
+        if mode in {"delay_sum", "delay_sum_subtractive"}:
             return [dict(item) for item in self._delay_sum_snapshot_trace]
         return self._fd.get_beamformer_snapshot_trace()
 
@@ -2251,6 +2251,34 @@ class FastPathWorker(threading.Thread):
             fs=self._cfg.sample_rate_hz,
             sound_speed_m_s=self._cfg.sound_speed_m_s,
         )
+
+    def _delay_sum_subtractive_interferer_doa(self) -> float | None:
+        if bool(getattr(self._cfg, "delay_sum_subtractive_use_suppressed_user_doa", True)):
+            suppressed = getattr(self._cfg, "suppressed_user_voice_doa_deg", None)
+            if suppressed is not None:
+                return float(suppressed)
+        explicit = getattr(self._cfg, "delay_sum_subtractive_interferer_doa_deg", None)
+        if explicit is None:
+            return None
+        return float(explicit)
+
+    def _delay_sum_subtractive(self, x: np.ndarray, *, target_doa_deg: float) -> np.ndarray:
+        target = self._delay_sum_with_state(x, doa_deg=float(target_doa_deg), state_key="subtractive_target")
+        interferer_doa = self._delay_sum_subtractive_interferer_doa()
+        if interferer_doa is None:
+            return target.astype(np.float32, copy=False)
+        interferer = self._delay_sum_with_state(x, doa_deg=float(interferer_doa), state_key="subtractive_interferer")
+        alpha = float(max(0.0, getattr(self._cfg, "delay_sum_subtractive_alpha", 0.5)))
+        out = np.asarray(target, dtype=np.float32) - (alpha * np.asarray(interferer, dtype=np.float32))
+        if bool(getattr(self._cfg, "delay_sum_subtractive_output_clip_guard", True)):
+            peak = float(np.max(np.abs(out))) if out.size else 0.0
+            if peak > 1.0:
+                out = out / peak
+        frame_idx = int(self._frame_idx) + 1
+        if frame_idx in self._beamformer_snapshot_target_set:
+            if not any(int(item.get("frame_index", -1)) == frame_idx for item in self._delay_sum_snapshot_trace):
+                self._maybe_record_delay_sum_snapshot(state_key="subtractive_target", doa_deg=float(target_doa_deg))
+        return np.asarray(out, dtype=np.float32)
 
     def _suppression_mode(self) -> str:
         return str(self._cfg.own_voice_suppression_mode).strip().lower()
@@ -2886,6 +2914,8 @@ class FastPathWorker(threading.Thread):
         mode = str(self._cfg.beamforming_mode).strip().lower()
         if mode == "delay_sum":
             return self._delay_sum_with_state(x, doa_deg=doa_deg, state_key="primary")
+        if mode == "delay_sum_subtractive":
+            return self._delay_sum_subtractive(x, target_doa_deg=doa_deg)
         if mode == "gsc_fd":
             return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
         if mode == "lcmv_target_band":
@@ -2929,6 +2959,8 @@ class FastPathWorker(threading.Thread):
         if mode == "delay_sum":
             aligned = [self._delay_sum_with_state(x, doa_deg=float(doa), state_key=f"target_{idx}") for idx, doa in enumerate(target_doas_deg[:2])]
             return np.mean(np.stack(aligned, axis=0), axis=0).astype(np.float32, copy=False)
+        if mode == "delay_sum_subtractive":
+            return self._delay_sum_subtractive(x, target_doa_deg=float(target_doas_deg[0]))
         return self._fd.lcmv_top2(
             x,
             primary_doa_deg=float(target_doas_deg[0]),
