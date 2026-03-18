@@ -29,7 +29,7 @@ class FastPathConfig(BaseModel):
         "capon_mvdr_refine_1src",
         "music_1src",
     ] = "srp_phat_localization"
-    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "lcmv_top2_tracked"] = "mvdr_fd"
+    beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "lcmv_top2_tracked", "lcmv_target_band"] = "mvdr_fd"
     mvdr_hop_ms: int | None = None
     fd_analysis_window_ms: float = 20.0
     # Defaults track the sensitivity-tuned Silero preset from
@@ -103,6 +103,7 @@ class FastPathConfig(BaseModel):
     multi_target_min_activity: float = 0.15
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
+    robust_target_band_width_deg: float = 10.0
 
 
 class SlowPathConfig(BaseModel):
@@ -477,6 +478,10 @@ class SessionStartRequest(BaseModel):
     @property
     def output_allow_amplification(self) -> bool:
         return bool(self.fast_path.output_allow_amplification)
+
+    @property
+    def robust_target_band_width_deg(self) -> float:
+        return float(self.fast_path.robust_target_band_width_deg)
 
     @property
     def tracking_mode(self) -> str:

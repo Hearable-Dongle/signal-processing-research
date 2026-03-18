@@ -310,6 +310,11 @@ class _FDBufferedBeamformer:
         response = np.asarray([[1.0 + 0.0j], [1.0 + 0.0j]], dtype=np.complex128)
         return self._solve_lcmv_constraint_weights(constraints, response)
 
+    def _solve_lcmv_target_band_weights(self, steerings: list[np.ndarray]) -> np.ndarray:
+        constraints = np.stack(steerings, axis=2)
+        response = np.ones((constraints.shape[2], 1), dtype=np.complex128)
+        return self._solve_lcmv_constraint_weights(constraints, response)
+
     def _update_covariance(self, rnn_prev: np.ndarray | None, x_fft: np.ndarray, cov_alpha: float) -> np.ndarray:
         # x_fft: (F, M)
         f_bins, mics = x_fft.shape
@@ -737,6 +742,94 @@ class _FDBufferedBeamformer:
             self._last_noise_model_update = _inactive_noise_model_update()
         if self._cached_lcmv_weights is None:
             raise RuntimeError("LCMV top2 weights were not initialized.")
+        y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
+        y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
+        return y
+
+    def lcmv_target_band(
+        self,
+        frame_mc: np.ndarray,
+        target_doa_deg: float,
+        covariance_alpha: float | None = None,
+        *,
+        target_active: bool = True,
+        oracle_noise_frame: np.ndarray | None = None,
+    ) -> np.ndarray:
+        x = np.asarray(frame_mc, dtype=np.float64)
+        x_fft = self._analysis_block(x)
+        self._mvdr_frame_counter += 1
+        oracle_noise_fft = None
+        if oracle_noise_frame is not None:
+            oracle_noise_fft, next_prev_noise = self._analysis_block_with_state(oracle_noise_frame, self._prev_noise_mc)
+            self._prev_noise_mc = next_prev_noise
+        refresh = self._should_refresh_weights(
+            doa_deg=float(target_doa_deg),
+            target_active=bool(target_active),
+        )
+        self._last_weights_reused = bool(not refresh)
+        band_width_deg = float(max(0.0, getattr(self.cfg, "robust_target_band_width_deg", 10.0)))
+        target_steering = self._cached_steering if (not refresh and self._cached_steering is not None) else _steering_vector_f_domain(
+            doa_deg=target_doa_deg,
+            n_fft=self.analysis_n,
+            fs=self.cfg.sample_rate_hz,
+            mic_geometry_xyz=self.mic_geometry_xyz,
+            sound_speed_m_s=self.cfg.sound_speed_m_s,
+        )
+        if refresh:
+            self.rnn_mvdr_noise = self._update_noise_covariance(
+                self.rnn_mvdr_noise,
+                x_fft,
+                target_steering,
+                float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                target_active=bool(target_active),
+                oracle_noise_fft=oracle_noise_fft,
+            )
+            if band_width_deg <= 0.0:
+                self._cached_lcmv_weights = self._solve_lcmv_target_band_weights([target_steering])
+            else:
+                offsets = (-band_width_deg, 0.0, band_width_deg)
+                steerings = [
+                    _steering_vector_f_domain(
+                        doa_deg=float(target_doa_deg + offset),
+                        n_fft=self.analysis_n,
+                        fs=self.cfg.sample_rate_hz,
+                        mic_geometry_xyz=self.mic_geometry_xyz,
+                        sound_speed_m_s=self.cfg.sound_speed_m_s,
+                    )
+                    for offset in offsets
+                ]
+                self._cached_lcmv_weights = self._solve_lcmv_target_band_weights(steerings)
+            self._cached_steering = np.asarray(target_steering, dtype=np.complex128)
+            self._cached_target_doa_deg = float(target_doa_deg)
+            self._cached_null_doa_deg = None
+            self._cached_secondary_target_doa_deg = None
+            self._cached_last_target_active = bool(target_active)
+            if self._noise_covariance_mode() == "oracle_non_target_residual":
+                reason = "oracle_non_target_residual"
+            elif self._noise_covariance_is_frozen() and self._noise_covariance_frozen_bootstrap_active():
+                reason = "estimated_target_subtractive_frozen_bootstrap"
+            elif self._noise_covariance_is_frozen():
+                reason = "estimated_target_subtractive_frozen_hold"
+            elif bool(target_active):
+                reason = "estimated_target_subtractive"
+            else:
+                reason = "target_inactive_direct_mix"
+            self._last_noise_model_update = {
+                "active": True,
+                "sources": ("beamformer_rnn",),
+                "reasons": (reason, "lcmv_target_band_active"),
+                "debug": {
+                    "beamforming_mode": "lcmv_target_band",
+                    "covariance_alpha": float(self.cfg.fd_cov_ema_alpha if covariance_alpha is None else covariance_alpha),
+                    "target_active": bool(target_active),
+                    "target_doa_deg": float(target_doa_deg),
+                    "target_band_width_deg": float(band_width_deg),
+                },
+            }
+        else:
+            self._last_noise_model_update = _inactive_noise_model_update()
+        if self._cached_lcmv_weights is None:
+            raise RuntimeError("LCMV target-band weights were not initialized.")
         y_fft = np.einsum("fm,fm->f", np.conj(self._cached_lcmv_weights), x_fft)
         y, self._ola_tail_mvdr, self._ola_norm_mvdr = self._synthesis_block(y_fft, self._ola_tail_mvdr, self._ola_norm_mvdr)
         return y
@@ -1331,12 +1424,12 @@ class FastPathWorker(threading.Thread):
 
         mode = self._target_activity_mode()
         beamforming_mode = str(self._cfg.beamforming_mode).strip().lower()
-        if beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked"} and mode is None:
+        if beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked", "lcmv_target_band"} and mode is None:
             raise ValueError("Covariance beamforming requires target_activity_rnn_update_mode to be configured.")
         if mode == "oracle_target_activity" and self._target_activity_override_provider is None:
             raise ValueError("oracle_target_activity mode requires a target activity override provider.")
         if (
-            beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked"}
+            beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked", "lcmv_target_band"}
             and str(getattr(self._cfg, "fd_noise_covariance_mode", "estimated_target_subtractive")).strip().lower() == "oracle_non_target_residual"
             and self._oracle_noise_frame_provider is None
         ):
@@ -1984,6 +2077,14 @@ class FastPathWorker(threading.Thread):
             )
         if mode == "gsc_fd":
             return self._fd.gsc(x, doa_deg=doa_deg, speech_activity=speech_activity)
+        if mode == "lcmv_target_band":
+            return self._fd.lcmv_target_band(
+                x,
+                target_doa_deg=doa_deg,
+                covariance_alpha=covariance_alpha,
+                target_active=bool(target_active),
+                oracle_noise_frame=oracle_noise_frame,
+            )
         return self._fd.mvdr(
             x,
             doa_deg=doa_deg,
@@ -2053,7 +2154,7 @@ class FastPathWorker(threading.Thread):
 
     def _current_beamformer_noise_model_update(self) -> dict:
         mode = str(self._cfg.beamforming_mode).strip().lower()
-        if mode in {"mvdr_fd", "gsc_fd"}:
+        if mode in {"mvdr_fd", "gsc_fd", "lcmv_target_band", "lcmv_top2_tracked"}:
             return self._fd.get_last_noise_model_update()
         return _inactive_noise_model_update()
 

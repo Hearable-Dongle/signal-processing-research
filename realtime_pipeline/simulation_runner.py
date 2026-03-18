@@ -120,7 +120,7 @@ def run_simulation_pipeline(
         ),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
-        target_activity_rnn_update_mode="estimated_target_activity" if str(beamforming_mode).strip().lower() == "mvdr_fd" else None,
+        target_activity_rnn_update_mode="estimated_target_activity" if str(beamforming_mode).strip().lower() in {"mvdr_fd", "lcmv_target_band"} else None,
         output_normalization_enabled=bool(output_normalization_enabled),
         output_allow_amplification=bool(output_allow_amplification),
         srp_prior_enabled=bool(robust_mode),
@@ -406,7 +406,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-dir", default="realtime_pipeline/output/sim_run")
     p.add_argument("--real-separation", action="store_true", help="Use real Asteroid ConvTasNet instead of mock backend")
     p.add_argument("--validate-only", action="store_true", help="Run sanity checks and emit validation_report.json")
-    p.add_argument("--beamforming-mode", choices=["mvdr_fd", "gsc_fd", "delay_sum"], default="mvdr_fd")
+    p.add_argument("--beamforming-mode", choices=["mvdr_fd", "lcmv_target_band", "gsc_fd", "delay_sum"], default="mvdr_fd")
     p.add_argument("--fast-path-reference-mode", choices=["speaker_map", "srp_peak"], default="speaker_map")
     p.add_argument("--disable-output-normalization", action="store_true")
     p.add_argument("--allow-output-amplification", action="store_true")

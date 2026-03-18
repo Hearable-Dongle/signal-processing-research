@@ -864,7 +864,7 @@ def _run_recording_method_job(
 
     method_slug = _slug(method)
     run_dir = out_dir / "runs" / _slug(recording_id) / method_slug
-    is_mvdr = str(method).strip().lower() == "mvdr_fd"
+    is_mvdr = str(method).strip().lower() in {"mvdr_fd", "lcmv_target_band"}
     if str(fd_noise_covariance_mode) == "oracle_non_target_residual":
         raise ValueError(
             "fd_noise_covariance_mode=oracle_non_target_residual is not supported for real-data benchmarks "
@@ -1048,7 +1048,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run realtime beamforming over Data Collection raw-channel recordings.")
     parser.add_argument("--input-path", required=True, help="Data Collection export root/zip, recording dir, or raw WAV dir")
     parser.add_argument("--out-dir", required=True, help="Directory for benchmark outputs")
-    parser.add_argument("--methods", nargs="+", choices=["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum"], default=["mvdr_fd"])
+    parser.add_argument("--methods", nargs="+", choices=["mvdr_fd", "lcmv_target_band", "sd_mvdr_fd", "gsc_fd", "delay_sum"], default=["mvdr_fd"])
     parser.add_argument(
         "--separation-mode",
         choices=["single_dominant_no_separator", "mock", "auto"],

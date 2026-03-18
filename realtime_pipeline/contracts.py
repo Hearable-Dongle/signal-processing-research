@@ -295,7 +295,7 @@ class PipelineConfig:
     speaker_map_confidence_decay: float = 0.9
     speaker_map_activity_decay: float = 0.92
     # Beamformer mode
-    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum, lcmv_top2_tracked
+    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum, lcmv_top2_tracked, lcmv_target_band
     mvdr_hop_ms: int | None = None
     # DOA/gain smoothing to reduce steering chatter
     doa_ema_alpha: float = 0.2
@@ -360,3 +360,4 @@ class PipelineConfig:
     output_rms_max_gain_db: float = 6.0
     output_normalization_enabled: bool = True
     output_allow_amplification: bool = False
+    robust_target_band_width_deg: float = 10.0

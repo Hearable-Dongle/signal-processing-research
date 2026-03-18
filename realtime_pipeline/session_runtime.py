@@ -35,8 +35,8 @@ def build_pipeline_config_from_request(
     slow_path_enabled = bool(req.slow_path_enabled) and (not single_active)
     beamforming_mode = str(req.beamforming_mode).strip().lower()
     target_activity_mode = req.target_activity_rnn_update_mode
-    if beamforming_mode == "mvdr_fd" and target_activity_mode is None:
-        raise ValueError("MVDR requires fast_path.target_activity_rnn_update_mode to be explicitly set.")
+    if beamforming_mode in {"mvdr_fd", "lcmv_target_band"} and target_activity_mode is None:
+        raise ValueError("Covariance beamforming requires fast_path.target_activity_rnn_update_mode to be explicitly set.")
     return PipelineConfig(
         sample_rate_hz=int(sample_rate_hz),
         fast_frame_ms=max(10, int(req.localization_hop_ms)),
@@ -114,6 +114,7 @@ def build_pipeline_config_from_request(
         coherence_wiener_temporal_alpha=float(req.coherence_wiener_temporal_alpha),
         output_normalization_enabled=bool(req.output_normalization_enabled),
         output_allow_amplification=bool(req.output_allow_amplification),
+        robust_target_band_width_deg=float(req.robust_target_band_width_deg),
         srp_overlap=float(req.overlap),
         srp_freq_min_hz=int(req.freq_low_hz),
         srp_freq_max_hz=int(req.freq_high_hz),
