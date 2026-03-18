@@ -941,6 +941,7 @@ def _run_recording_method_job(
     use_ground_truth_doa_override: bool,
     mvdr_hop_ms: int | None,
     fd_analysis_window_ms: float,
+    robust_target_band_width_deg: float,
     fd_noise_covariance_mode: str,
     target_activity_rnn_update_mode: str,
     target_activity_detector_mode: str,
@@ -999,6 +1000,7 @@ def _run_recording_method_job(
             "assume_single_speaker": bool(assume_single_speaker),
             "localization_backend": str(localization_backend),
             "beamforming_mode": str(method),
+            "robust_target_band_width_deg": float(robust_target_band_width_deg),
             "mvdr_hop_ms": (None if mvdr_hop_ms is None else int(mvdr_hop_ms)),
             "fd_analysis_window_ms": float(fd_analysis_window_ms),
             "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
@@ -1108,6 +1110,7 @@ def _run_recording_method_job(
         "postfilter_method": str(postfilter_method),
         "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
         "fd_analysis_window_ms": float(fd_analysis_window_ms),
+        "robust_target_band_width_deg": float(robust_target_band_width_deg),
         "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
         "target_activity_rnn_update_mode": str(target_activity_rnn_update_mode) if is_mvdr else "",
         "target_activity_detector_mode": str(target_activity_detector_mode) if is_mvdr else "",
@@ -1198,6 +1201,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-method", choices=["off", "wiener_dd", "rnnoise", "coherence_wiener", "wiener_then_rnnoise"], default="off")
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
+    parser.add_argument("--robust-target-band-width-deg", type=float, default=10.0)
     parser.add_argument(
         "--fd-noise-covariance-mode",
         choices=["estimated_target_subtractive", "estimated_target_subtractive_frozen", "oracle_non_target_residual"],
@@ -1360,6 +1364,7 @@ def main() -> None:
                 use_ground_truth_doa_override=bool(args.use_ground_truth_doa_override),
                 mvdr_hop_ms=(None if args.mvdr_hop_ms is None else int(args.mvdr_hop_ms)),
                 fd_analysis_window_ms=float(args.fd_analysis_window_ms),
+                robust_target_band_width_deg=float(args.robust_target_band_width_deg),
                 fd_noise_covariance_mode=str(args.fd_noise_covariance_mode),
                 target_activity_rnn_update_mode=str(args.target_activity_rnn_update_mode),
                 target_activity_detector_mode=str(args.target_activity_detector_mode),
