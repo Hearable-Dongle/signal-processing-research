@@ -1036,6 +1036,7 @@ def _run_recording_method_job(
     speaker_history_size: int,
     speaker_activation_min_predictions: int,
     speaker_match_window_deg: float,
+    single_active_min_observation_score: float,
     centroid_association_mode: str,
     centroid_association_sigma_deg: float,
     centroid_association_min_score: float,
@@ -1193,6 +1194,7 @@ def _run_recording_method_job(
             "speaker_history_size": int(speaker_history_size),
             "speaker_activation_min_predictions": int(speaker_activation_min_predictions),
             "speaker_match_window_deg": float(speaker_match_window_deg),
+            "single_active_min_observation_score": float(single_active_min_observation_score),
             "centroid_association_mode": str(centroid_association_mode),
             "centroid_association_sigma_deg": float(centroid_association_sigma_deg),
             "centroid_association_min_score": float(centroid_association_min_score),
@@ -1522,6 +1524,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=3,
     )
     parser.add_argument("--speaker-match-window-deg", type=float, default=25.0)
+    parser.add_argument("--single-active-min-observation-score", type=float, default=0.65)
     parser.add_argument("--centroid-association-mode", choices=["hard_window", "gaussian"], default="hard_window")
     parser.add_argument("--centroid-association-sigma-deg", type=float, default=10.0)
     parser.add_argument("--centroid-association-min-score", type=float, default=0.15)
@@ -1606,6 +1609,7 @@ def main() -> None:
                 speaker_history_size=int(args.speaker_history_size),
                 speaker_activation_min_predictions=int(args.speaker_activation_min_predictions),
                 speaker_match_window_deg=float(args.speaker_match_window_deg),
+                single_active_min_observation_score=float(args.single_active_min_observation_score),
                 centroid_association_mode=str(args.centroid_association_mode),
                 centroid_association_sigma_deg=float(args.centroid_association_sigma_deg),
                 centroid_association_min_score=float(args.centroid_association_min_score),

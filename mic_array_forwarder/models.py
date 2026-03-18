@@ -126,6 +126,7 @@ class SlowPathConfig(BaseModel):
     speaker_history_size: int = 8
     speaker_activation_min_predictions: int = 3
     speaker_match_window_deg: float = 25.0
+    single_active_min_observation_score: float = 0.65
     centroid_association_mode: Literal["hard_window", "gaussian"] = "hard_window"
     centroid_association_sigma_deg: float = 10.0
     centroid_association_min_score: float = 0.15
@@ -572,6 +573,10 @@ class SessionStartRequest(BaseModel):
     @property
     def speaker_match_window_deg(self) -> float:
         return float(self.slow_path.speaker_match_window_deg)
+
+    @property
+    def single_active_min_observation_score(self) -> float:
+        return float(self.slow_path.single_active_min_observation_score)
 
     @property
     def centroid_association_mode(self) -> str:
