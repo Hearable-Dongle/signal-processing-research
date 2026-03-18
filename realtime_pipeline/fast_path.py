@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Callable
 
 import numpy as np
-from scipy.signal import resample_poly
+from scipy.signal import butter, resample_poly, sosfiltfilt
 from scipy.special import exp1
 
 try:
@@ -1201,6 +1201,13 @@ class _RNNoisePostFilter:
         self._residual_ema_state = np.zeros((0,), dtype=np.float32)
         self._backend.channels = 1
         self._backend.dtype = np.int16
+        cutoff_hz = float(max(getattr(cfg, "rnnoise_output_lowpass_cutoff_hz", 0.0), 0.0))
+        self._output_lowpass_cutoff_hz = cutoff_hz
+        self._output_lowpass_sos = (
+            None
+            if cutoff_hz <= 0.0 or cutoff_hz >= 0.5 * float(self._input_sample_rate_hz)
+            else butter(6, cutoff_hz, btype="lowpass", fs=float(self._input_sample_rate_hz), output="sos")
+        )
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
@@ -1255,7 +1262,10 @@ class _RNNoisePostFilter:
         else:
             self._residual_ema_state = residual.astype(np.float32, copy=False)
         wet = float(np.clip(self.cfg.rnnoise_wet_mix, 0.0, 1.0))
-        return (((wet * out) + ((1.0 - wet) * x))).astype(np.float32, copy=False)
+        mixed = ((wet * out) + ((1.0 - wet) * x)).astype(np.float32, copy=False)
+        if self._output_lowpass_sos is not None and mixed.shape[0] > 8:
+            mixed = np.asarray(sosfiltfilt(self._output_lowpass_sos, mixed), dtype=np.float32)
+        return mixed.astype(np.float32, copy=False)
 
 
 class _CoherenceWienerPostFilter:

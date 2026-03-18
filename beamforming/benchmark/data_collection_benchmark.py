@@ -1064,6 +1064,7 @@ def _run_recording_method_job(
     postfilter_spectral_floor_beta: float,
     postfilter_gain_max_step_db: float,
     rnnoise_wet_mix: float,
+    rnnoise_output_lowpass_cutoff_hz: float,
     rnnoise_residual_ema_enabled: bool,
     rnnoise_residual_ema_alpha: float,
     slow_chunk_ms: int,
@@ -1147,6 +1148,7 @@ def _run_recording_method_job(
             "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
             "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
             "rnnoise_wet_mix": float(rnnoise_wet_mix),
+            "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
             "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
@@ -1303,6 +1305,7 @@ def _run_recording_method_job(
         "postfilter_oversubtraction_alpha": float(postfilter_oversubtraction_alpha),
         "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
         "rnnoise_wet_mix": float(rnnoise_wet_mix),
+        "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
         "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
         "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
         "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
@@ -1465,6 +1468,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-spectral-floor-beta", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
     parser.add_argument("--rnnoise-wet-mix", type=float, default=0.9)
+    parser.add_argument("--rnnoise-output-lowpass-cutoff-hz", type=float, default=7500.0)
     parser.add_argument("--rnnoise-residual-ema-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--rnnoise-residual-ema-alpha", type=float, default=0.0)
     parser.add_argument("--mvdr-hop-ms", type=int, default=60)
@@ -1632,6 +1636,7 @@ def main() -> None:
                 postfilter_spectral_floor_beta=float(args.postfilter_spectral_floor_beta),
                 postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
                 rnnoise_wet_mix=float(args.rnnoise_wet_mix),
+                rnnoise_output_lowpass_cutoff_hz=float(args.rnnoise_output_lowpass_cutoff_hz),
                 rnnoise_residual_ema_enabled=bool(args.rnnoise_residual_ema_enabled),
                 rnnoise_residual_ema_alpha=float(args.rnnoise_residual_ema_alpha),
                 slow_chunk_ms=int(args.slow_chunk_ms),
@@ -1773,6 +1778,7 @@ def main() -> None:
             "postfilter_oversubtraction_alpha": float(args.postfilter_oversubtraction_alpha),
             "postfilter_spectral_floor_beta": float(args.postfilter_spectral_floor_beta),
             "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
+            "rnnoise_output_lowpass_cutoff_hz": float(args.rnnoise_output_lowpass_cutoff_hz),
             "rnnoise_residual_ema_enabled": bool(args.rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(args.rnnoise_residual_ema_alpha),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),
