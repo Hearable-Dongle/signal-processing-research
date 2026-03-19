@@ -193,7 +193,7 @@ class FastPathConfig(BaseModel):
     suppressed_user_voice_doa_deg: float | None = None
     suppressed_user_match_window_deg: float = 33.0
     suppressed_user_null_on_frames: int = 3
-    suppressed_user_null_off_frames: int = 30
+    suppressed_user_null_off_frames: int = 50
     suppressed_user_gate_attenuation_db: float = 18.0
     suppressed_user_target_conflict_deg: float = 30.0
     focus_direction_match_window_deg: float = 30.0
