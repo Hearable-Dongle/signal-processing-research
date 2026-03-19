@@ -11,6 +11,11 @@ def _int16_multichannel(samples: int, channels: int = 4, freq_hz: float = 440.0,
     return [base.copy() for _ in range(channels)]
 
 
+def _mono_passthrough(samples: int, channels: int = 4, sample_rate_hz: int = 16000) -> np.ndarray:
+    stacked = np.stack(_int16_multichannel(samples, channels=channels, sample_rate_hz=sample_rate_hz), axis=1)
+    return np.mean(stacked.astype(np.float32) / 32768.0, axis=1).astype(np.float32)
+
+
 def test_streaming_adapter_defaults_match_requested_realtime_shape() -> None:
     adapter = RealtimeIntelligibilityAdapter()
     try:
@@ -22,6 +27,7 @@ def test_streaming_adapter_defaults_match_requested_realtime_shape() -> None:
         assert adapter.request.sample_rate_hz == 16000
         assert adapter.channel_count == 4
         assert adapter.frame_samples == 160
+        assert adapter.window_samples == 3200
     finally:
         adapter.close()
 
@@ -31,21 +37,25 @@ def test_streaming_adapter_default_path_processes_audio() -> None:
     try:
         emitted = 0
         for samples in (73, 211, 160, 97, 401, 120):
-            emitted += int(adapter.process_chunk(_int16_multichannel(samples)).shape[0])
+            out = adapter.process_chunk(_int16_multichannel(samples))
+            emitted += int(out.shape[0])
+            assert out.shape == (samples,)
         emitted += int(adapter.flush().shape[0])
         assert emitted == sum((73, 211, 160, 97, 401, 120))
     finally:
         adapter.close()
 
 
-def test_streaming_adapter_buffers_short_callback_until_frame_ready() -> None:
+def test_streaming_adapter_returns_passthrough_during_warmup() -> None:
     adapter = RealtimeIntelligibilityAdapter(postfilter_method="off", postfilter_enabled=False)
     try:
         first = adapter.process_chunk(_int16_multichannel(80))
         second = adapter.process_chunk(_int16_multichannel(80))
-        assert first.shape == (0,)
-        assert second.shape == (adapter.frame_samples,)
+        assert first.shape == (80,)
+        assert second.shape == (80,)
         assert second.dtype == np.float32
+        np.testing.assert_allclose(first, _mono_passthrough(80))
+        np.testing.assert_allclose(second, _mono_passthrough(80))
     finally:
         adapter.close()
 
@@ -56,9 +66,27 @@ def test_streaming_adapter_accepts_variable_chunk_sizes() -> None:
         out0 = adapter.process_chunk(_int16_multichannel(160))
         out1 = adapter.process_chunk(_int16_multichannel(320))
         out2 = adapter.process_chunk(_int16_multichannel(40))
-        assert out0.shape == (adapter.frame_samples,)
-        assert out1.shape == (adapter.frame_samples * 2,)
-        assert out2.shape == (0,)
+        assert out0.shape == (160,)
+        assert out1.shape == (320,)
+        assert out2.shape == (40,)
+    finally:
+        adapter.close()
+
+
+def test_streaming_adapter_warmup_transition_at_200ms() -> None:
+    adapter = RealtimeIntelligibilityAdapter(postfilter_method="off", postfilter_enabled=False)
+    try:
+        for idx in range(19):
+            out = adapter.process_chunk(_int16_multichannel(160))
+            assert out.shape == (160,)
+            assert adapter.warmup_ready is False
+            np.testing.assert_allclose(out, _mono_passthrough(160))
+            assert idx < 19
+        out = adapter.process_chunk(_int16_multichannel(160))
+        assert out.shape == (160,)
+        assert adapter.warmup_ready is True
+        assert float(np.max(np.abs(out))) > 0.0
+        assert not np.allclose(out, _mono_passthrough(160))
     finally:
         adapter.close()
 

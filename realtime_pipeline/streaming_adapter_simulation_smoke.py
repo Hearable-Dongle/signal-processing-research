@@ -45,7 +45,7 @@ def run_streaming_adapter_smoke(
     scene_paths: list[Path],
     out_dir: Path,
     processing_sample_rate_hz: int = 16000,
-    chunk_pattern: tuple[int, ...] = (73, 211, 160, 97, 401),
+    chunk_pattern: tuple[int, ...] = (160,),
 ) -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
@@ -66,9 +66,16 @@ def run_streaming_adapter_smoke(
         )
         try:
             parts: list[np.ndarray] = []
+            warmup_callbacks = 0
+            enhanced_callbacks = 0
             for start, end in _chunk_plan(int(mic_audio.shape[0]), chunk_pattern):
+                was_ready = bool(adapter.warmup_ready)
                 callback_channels = _float_mc_to_int16_channels(mic_audio[start:end, :])
                 out = adapter.process_chunk(callback_channels)
+                if was_ready:
+                    enhanced_callbacks += 1
+                else:
+                    warmup_callbacks += 1
                 if out.size > 0:
                     parts.append(np.asarray(out, dtype=np.float32))
             flushed = adapter.flush()
@@ -97,6 +104,9 @@ def run_streaming_adapter_smoke(
             "expected_output_samples": int(expected_samples),
             "channel_count": int(mic_audio.shape[1]),
             "chunk_calls": int(len(_chunk_plan(int(mic_audio.shape[0]), chunk_pattern))),
+            "warmup_callbacks": int(warmup_callbacks),
+            "enhanced_callbacks": int(enhanced_callbacks),
+            "window_samples": int(adapter.window_samples),
             "output_rms": float(np.sqrt(np.mean(enhanced.astype(np.float64) ** 2) + 1e-12)) if enhanced.size else 0.0,
             "output_peak": float(np.max(np.abs(enhanced))) if enhanced.size else 0.0,
         }

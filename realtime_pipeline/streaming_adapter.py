@@ -82,6 +82,7 @@ class RealtimeIntelligibilityAdapter:
     - mic profile: `respeaker_xvf3800_0650`
     - benchmark-style algorithm selection: `speaker_tracking_single_active`
     - localization VAD: `False` to avoid an extra `webrtcvad` runtime dependency
+    - localization window: `200 ms` by default
 
     To change behavior, override constructor arguments such as:
     - `localization_backend="srp_phat_localization"`
@@ -90,9 +91,11 @@ class RealtimeIntelligibilityAdapter:
     - `enable_resample=True, input_sample_rate_hz=48000, processing_sample_rate_hz=16000`
 
     Notes:
-    - The internal pipeline runs at fixed `fast_frame_ms` cadence. If a callback
-      provides fewer than one full internal frame of input, the adapter buffers it
-      and may return an empty array until enough samples accumulate.
+    - At `16 kHz`, `10 ms` is `160` samples and `200 ms` is `3200` samples.
+    - Before enough history is buffered to fill the processing window, the adapter
+      returns mono passthrough for each callback chunk.
+    - After warm-up, the adapter returns enhanced mono output for each callback
+      chunk while keeping a moving history of the most recent window of samples.
     - Output is mono `float32`. If the caller needs `int16`, convert with:
       `np.clip(y * 32767.0, -32768, 32767).astype(np.int16)`.
     """
@@ -111,7 +114,7 @@ class RealtimeIntelligibilityAdapter:
         postfilter_enabled: bool = True,
         fast_frame_ms: int = 10,
         localization_hop_ms: int = 10,
-        localization_window_ms: int = 160,
+        localization_window_ms: int = 200,
         localization_grid_size: int = 72,
         localization_vad_enabled: bool = False,
         separation_mode: str = "single_dominant_no_separator",
@@ -126,6 +129,9 @@ class RealtimeIntelligibilityAdapter:
         self._frame_queue: queue.Queue[np.ndarray | None] = queue.Queue(maxsize=256)
         self._output_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=256)
         self._pending_input = np.zeros((0, 0), dtype=np.float32)
+        self._pending_output = np.zeros((0,), dtype=np.float32)
+        self._discard_output_samples = 0
+        self._history_mc = np.zeros((0, 0), dtype=np.float32)
         self._process_timeout_s = float(process_timeout_s)
         self._input_sample_rate_hz = int(input_sample_rate_hz)
         self._processing_sample_rate_hz = int(processing_sample_rate_hz)
@@ -183,6 +189,7 @@ class RealtimeIntelligibilityAdapter:
             max_speakers_hint=max(1, int(self._channel_count)),
         )
         self._frame_samples = max(1, int(self.config.sample_rate_hz * self.config.fast_frame_ms / 1000))
+        self._window_samples = max(1, int(round(self.config.sample_rate_hz * self.config.localization_window_ms / 1000.0)))
 
         self._pipeline = RealtimeSpeakerPipeline(
             config=self.config,
@@ -202,6 +209,14 @@ class RealtimeIntelligibilityAdapter:
     def frame_samples(self) -> int:
         return int(self._frame_samples)
 
+    @property
+    def window_samples(self) -> int:
+        return int(self._window_samples)
+
+    @property
+    def warmup_ready(self) -> bool:
+        return bool(self._history_mc.shape[0] >= int(self._window_samples))
+
     def _frame_iter(self):
         while True:
             frame = self._frame_queue.get()
@@ -211,6 +226,64 @@ class RealtimeIntelligibilityAdapter:
 
     def _on_output_chunk(self, frame_mono: np.ndarray) -> None:
         self._output_queue.put(np.asarray(frame_mono, dtype=np.float32).reshape(-1).copy())
+
+    def _mono_passthrough(self, audio: np.ndarray) -> np.ndarray:
+        if audio.shape[0] == 0:
+            return np.zeros((0,), dtype=np.float32)
+        return np.mean(np.asarray(audio, dtype=np.float32), axis=1).astype(np.float32, copy=False)
+
+    def _append_history(self, audio: np.ndarray) -> None:
+        if audio.shape[0] == 0:
+            return
+        if self._history_mc.shape[1] == 0:
+            self._history_mc = np.asarray(audio, dtype=np.float32)
+        else:
+            self._history_mc = np.concatenate([self._history_mc, np.asarray(audio, dtype=np.float32)], axis=0)
+        if self._history_mc.shape[0] > int(self._window_samples):
+            self._history_mc = self._history_mc[-int(self._window_samples) :, :]
+
+    def _drain_pipeline_outputs(self) -> None:
+        while True:
+            try:
+                part = self._output_queue.get_nowait()
+            except queue.Empty:
+                break
+            if self._pending_output.size == 0:
+                self._pending_output = np.asarray(part, dtype=np.float32)
+            else:
+                self._pending_output = np.concatenate([self._pending_output, np.asarray(part, dtype=np.float32)], axis=0)
+
+    def _consume_discarded_outputs(self) -> None:
+        self._drain_pipeline_outputs()
+        if self._discard_output_samples <= 0:
+            return
+        available = min(int(self._discard_output_samples), int(self._pending_output.shape[0]))
+        if available > 0:
+            self._pending_output = self._pending_output[available:]
+            self._discard_output_samples -= available
+
+    def _collect_expected_outputs(self, expected_output_samples: int) -> None:
+        target = int(max(0, expected_output_samples))
+        while int(self._pending_output.shape[0]) < target:
+            try:
+                part = self._output_queue.get(timeout=self._process_timeout_s)
+            except queue.Empty as exc:
+                raise TimeoutError("timed out waiting for processed audio from realtime pipeline") from exc
+            if self._pending_output.size == 0:
+                self._pending_output = np.asarray(part, dtype=np.float32)
+            else:
+                self._pending_output = np.concatenate([self._pending_output, np.asarray(part, dtype=np.float32)], axis=0)
+
+    def _return_enhanced_chunk(self, expected_samples: int) -> np.ndarray:
+        self._consume_discarded_outputs()
+        target = int(expected_samples) + int(max(0, self._discard_output_samples))
+        self._collect_expected_outputs(target)
+        self._consume_discarded_outputs()
+        if int(self._pending_output.shape[0]) < int(expected_samples):
+            raise TimeoutError("processed output alignment fell behind the callback input")
+        out = np.asarray(self._pending_output[: int(expected_samples)], dtype=np.float32)
+        self._pending_output = self._pending_output[int(expected_samples) :]
+        return out
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -234,6 +307,10 @@ class RealtimeIntelligibilityAdapter:
         with self._lock:
             self._ensure_open()
             audio = self._prepare_chunk(channels)
+            callback_samples = int(audio.shape[0])
+            passthrough = self._mono_passthrough(audio)
+            self._append_history(audio)
+            warmup_active = not self.warmup_ready
             if self._pending_input.shape[1] == 0:
                 self._pending_input = audio
             elif audio.shape[0] > 0:
@@ -245,23 +322,27 @@ class RealtimeIntelligibilityAdapter:
                 self._pending_input = self._pending_input[self._frame_samples :, :]
 
             if not frames_to_process:
-                return np.zeros(0, dtype=np.float32)
+                if warmup_active:
+                    self._discard_output_samples += int(callback_samples)
+                    self._consume_discarded_outputs()
+                    return passthrough
+                raise ValueError(
+                    f"callback must supply at least one full processing frame after warm-up; "
+                    f"got {callback_samples} samples, expected {self._frame_samples}"
+                )
 
             for frame in frames_to_process:
                 self._frame_queue.put(frame)
 
             expected_output_samples = int(len(frames_to_process) * self._frame_samples)
-            out_parts: list[np.ndarray] = []
-            collected = 0
-            while collected < expected_output_samples:
-                try:
-                    part = self._output_queue.get(timeout=self._process_timeout_s)
-                except queue.Empty as exc:
-                    raise TimeoutError("timed out waiting for processed audio from realtime pipeline") from exc
-                out_parts.append(part)
-                collected += int(part.shape[0])
+            if warmup_active:
+                self._discard_output_samples += int(expected_output_samples)
+                self._consume_discarded_outputs()
+                self._collect_expected_outputs(int(expected_output_samples))
+                self._consume_discarded_outputs()
+                return passthrough
 
-            return np.concatenate(out_parts, axis=0)[:expected_output_samples].astype(np.float32, copy=False)
+            return self._return_enhanced_chunk(int(callback_samples))
 
     def flush(self) -> np.ndarray:
         with self._lock:
@@ -269,16 +350,17 @@ class RealtimeIntelligibilityAdapter:
             pending_samples = int(self._pending_input.shape[0])
             if pending_samples <= 0:
                 return np.zeros(0, dtype=np.float32)
+            if not self.warmup_ready:
+                out = self._mono_passthrough(self._pending_input)
+                self._pending_input = np.zeros((0, self._channel_count), dtype=np.float32)
+                return out
             pad = int(self._frame_samples - pending_samples)
             padded = self._pending_input
             if pad > 0:
                 padded = np.pad(padded, ((0, pad), (0, 0)))
             self._pending_input = np.zeros((0, self._channel_count), dtype=np.float32)
             self._frame_queue.put(np.asarray(padded, dtype=np.float32))
-            try:
-                out = self._output_queue.get(timeout=self._process_timeout_s)
-            except queue.Empty as exc:
-                raise TimeoutError("timed out waiting for flushed audio from realtime pipeline") from exc
+            out = self._return_enhanced_chunk(int(self._frame_samples))
             return np.asarray(out[:pending_samples], dtype=np.float32)
 
     def close(self) -> None:
