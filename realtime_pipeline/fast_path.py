@@ -1423,10 +1423,22 @@ class _RNNoisePostFilter:
         self._pending_in = np.zeros((0,), dtype=np.float32)
         self._pending_out = np.zeros((0,), dtype=np.float32)
         self._pending_vad = np.zeros((0,), dtype=np.float32)
+        self._prev_backend_chunk = np.zeros((0,), dtype=np.float32)
+        self._last_good_backend_chunk = np.zeros((0,), dtype=np.float32)
         self._residual_ema_state = np.zeros((0,), dtype=np.float32)
         self._residual_jump_prev_band_rms = 0.0
+        self._declick_prev_output_sample = 0.0
         self._backend.channels = 1
         self._backend.dtype = np.int16
+        self._boundary_jump_window = 16
+        self._boundary_jump_threshold = 0.03
+        self._boundary_jump_max_abs = 0.0
+        self._boundary_jump_rms_sq_sum = 0.0
+        self._boundary_jump_count = 0
+        self._boundary_jump_count_over_threshold = 0
+        self._output_input_peak_ratio_max = 0.0
+        self._output_input_rms_ratio_max = 0.0
+        self._suspect_frame_count = 0
         input_highpass_cutoff_hz = float(max(getattr(cfg, "rnnoise_input_highpass_cutoff_hz", 0.0), 0.0))
         self._input_highpass_enabled = bool(getattr(cfg, "rnnoise_input_highpass_enabled", True))
         self._input_highpass_sos = (
@@ -1527,6 +1539,95 @@ class _RNNoisePostFilter:
             self._inverse_bandstop_sos = None
             self._inverse_bandstop_zi = None
         self._last_inverse_output = np.zeros((0,), dtype=np.float32)
+        if bool(getattr(cfg, "rnnoise_startup_warmup_enabled", False)):
+            warm_frames = max(0, int(getattr(cfg, "rnnoise_startup_warmup_frames", 10)))
+            if warm_frames > 0:
+                silence_i16 = np.zeros((1, self._frame_size), dtype=np.int16)
+                for _ in range(warm_frames):
+                    _vad_prob, den = self._backend.denoise_frame(silence_i16, partial=False)
+                    den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
+                    if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
+                        den_arr = den_arr / 32768.0
+                    self._prev_backend_chunk = den_arr.astype(np.float32, copy=False)
+                    self._last_good_backend_chunk = self._prev_backend_chunk.copy()
+
+    def _record_backend_chunk_diagnostics(self, *, input_chunk: np.ndarray, output_chunk: np.ndarray) -> None:
+        in_chunk = np.asarray(input_chunk, dtype=np.float32).reshape(-1)
+        out_chunk = np.asarray(output_chunk, dtype=np.float32).reshape(-1)
+        in_peak = float(np.max(np.abs(in_chunk))) if in_chunk.size else 0.0
+        out_peak = float(np.max(np.abs(out_chunk))) if out_chunk.size else 0.0
+        in_rms = float(np.sqrt(np.mean(np.asarray(in_chunk, dtype=np.float64) ** 2) + 1e-12))
+        out_rms = float(np.sqrt(np.mean(np.asarray(out_chunk, dtype=np.float64) ** 2) + 1e-12))
+        peak_ratio = out_peak / max(in_peak, 1e-6)
+        rms_ratio = out_rms / max(in_rms, 1e-6)
+        self._output_input_peak_ratio_max = max(self._output_input_peak_ratio_max, float(peak_ratio))
+        self._output_input_rms_ratio_max = max(self._output_input_rms_ratio_max, float(rms_ratio))
+        if peak_ratio > 3.0 or rms_ratio > 2.0:
+            self._suspect_frame_count += 1
+        if self._prev_backend_chunk.size:
+            width = min(
+                int(self._boundary_jump_window),
+                int(self._prev_backend_chunk.shape[0]),
+                int(out_chunk.shape[0]),
+            )
+            if width > 0:
+                jump = float(abs(float(out_chunk[0]) - float(self._prev_backend_chunk[-1])))
+                mismatch = np.asarray(out_chunk[:width] - self._prev_backend_chunk[-width:], dtype=np.float64)
+                mismatch_rms = float(np.sqrt(np.mean(mismatch**2) + 1e-12))
+                self._boundary_jump_max_abs = max(self._boundary_jump_max_abs, jump)
+                self._boundary_jump_rms_sq_sum += mismatch_rms * mismatch_rms
+                self._boundary_jump_count += 1
+                if jump > float(self._boundary_jump_threshold):
+                    self._boundary_jump_count_over_threshold += 1
+
+    def _apply_backend_crossfade(self, chunk: np.ndarray) -> np.ndarray:
+        out_chunk = np.asarray(chunk, dtype=np.float32).reshape(-1).copy()
+        if (not bool(getattr(self.cfg, "rnnoise_chunk_crossfade_enabled", False))) or self._prev_backend_chunk.size == 0:
+            return out_chunk
+        fade_len = max(0, int(getattr(self.cfg, "rnnoise_chunk_crossfade_samples", 16)))
+        fade_len = min(fade_len, out_chunk.shape[0] // 4, self._prev_backend_chunk.shape[0], out_chunk.shape[0])
+        if fade_len <= 0:
+            return out_chunk
+        fade_out = np.linspace(1.0, 0.0, fade_len, endpoint=True, dtype=np.float32)
+        fade_in = np.linspace(0.0, 1.0, fade_len, endpoint=True, dtype=np.float32)
+        out_chunk[:fade_len] = (self._prev_backend_chunk[-fade_len:] * fade_out) + (out_chunk[:fade_len] * fade_in)
+        return out_chunk
+
+    def _apply_declick(self, mixed: np.ndarray) -> np.ndarray:
+        if not bool(getattr(self.cfg, "rnnoise_declick_enabled", False)):
+            if mixed.shape[0] > 0:
+                self._declick_prev_output_sample = float(mixed[-1])
+            return np.asarray(mixed, dtype=np.float32)
+        alpha = float(np.clip(getattr(self.cfg, "rnnoise_declick_alpha", 0.92), 0.0, 0.9999))
+        conditional = bool(getattr(self.cfg, "rnnoise_declick_conditional", True))
+        threshold = float(max(getattr(self.cfg, "rnnoise_declick_spike_threshold", 0.03), 0.0))
+        out = np.asarray(mixed, dtype=np.float32).copy()
+        prev = float(self._declick_prev_output_sample)
+        for i in range(out.shape[0]):
+            cur = float(out[i])
+            if conditional and abs(cur - prev) <= threshold:
+                prev = cur
+                continue
+            smoothed = float((alpha * prev) + ((1.0 - alpha) * cur))
+            out[i] = smoothed
+            prev = smoothed
+        self._declick_prev_output_sample = prev
+        return out
+
+    def get_runtime_stats(self) -> dict[str, float | int]:
+        boundary_rms = (
+            float(np.sqrt(self._boundary_jump_rms_sq_sum / float(self._boundary_jump_count)))
+            if self._boundary_jump_count > 0
+            else 0.0
+        )
+        return {
+            "rnnoise_boundary_jump_max_abs": float(self._boundary_jump_max_abs),
+            "rnnoise_boundary_jump_rms": float(boundary_rms),
+            "rnnoise_boundary_jump_count_over_threshold": int(self._boundary_jump_count_over_threshold),
+            "rnnoise_output_input_peak_ratio_max": float(self._output_input_peak_ratio_max),
+            "rnnoise_output_input_rms_ratio_max": float(self._output_input_rms_ratio_max),
+            "rnnoise_suspect_frame_count": int(self._suspect_frame_count),
+        }
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
@@ -1553,7 +1654,31 @@ class _RNNoisePostFilter:
             den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
             if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
                 den_arr = den_arr / 32768.0
+            den_arr = np.asarray(den_arr, dtype=np.float32)
+            self._record_backend_chunk_diagnostics(input_chunk=chunk, output_chunk=den_arr)
+            if bool(getattr(self.cfg, "rnnoise_corruption_guard_enabled", False)):
+                in_peak = float(np.max(np.abs(chunk))) if chunk.size else 0.0
+                out_peak = float(np.max(np.abs(den_arr))) if den_arr.size else 0.0
+                in_rms = float(np.sqrt(np.mean(np.asarray(chunk, dtype=np.float64) ** 2) + 1e-12))
+                out_rms = float(np.sqrt(np.mean(np.asarray(den_arr, dtype=np.float64) ** 2) + 1e-12))
+                bad_rms = out_rms > float(getattr(self.cfg, "rnnoise_corruption_guard_rms_ratio_threshold", 2.0)) * max(in_rms, 1e-6)
+                bad_peak = out_peak > float(getattr(self.cfg, "rnnoise_corruption_guard_peak_ratio_threshold", 3.0)) * max(in_peak, 1e-6)
+                if bad_rms or bad_peak:
+                    mode = str(getattr(self.cfg, "rnnoise_corruption_guard_mode", "hold_previous")).strip().lower()
+                    if mode == "use_input":
+                        den_arr = np.asarray(chunk, dtype=np.float32).copy()
+                    elif mode == "mute":
+                        den_arr = np.zeros_like(den_arr)
+                    else:
+                        den_arr = (
+                            self._last_good_backend_chunk.copy()
+                            if self._last_good_backend_chunk.shape == den_arr.shape and self._last_good_backend_chunk.size
+                            else np.asarray(chunk, dtype=np.float32).copy()
+                        )
+            den_arr = self._apply_backend_crossfade(den_arr)
             parts.append(den_arr)
+            self._prev_backend_chunk = den_arr.copy()
+            self._last_good_backend_chunk = den_arr.copy()
             vad_arr = np.asarray(vad_prob, dtype=np.float32).reshape(-1)
             vad_scalar = float(vad_arr[0]) if vad_arr.size else 0.0
             vad_scalar = float(np.clip(vad_scalar, 0.0, 1.0))
@@ -1643,6 +1768,7 @@ class _RNNoisePostFilter:
             if scale < 0.999:
                 mixed = np.asarray(mixed - ((1.0 - scale) * jump_high), dtype=np.float32)
             self._residual_jump_prev_band_rms = allowed_band_rms
+        mixed = self._apply_declick(mixed)
         if self._output_highpass_sos is not None and self._output_highpass_zi is not None and mixed.shape[0] > 0:
             mixed, self._output_highpass_zi = sosfilt(self._output_highpass_sos, mixed, zi=self._output_highpass_zi)
             mixed = np.asarray(mixed, dtype=np.float32)
@@ -1651,6 +1777,9 @@ class _RNNoisePostFilter:
         if self._output_notch_sos is not None and self._output_notch_zi is not None and mixed.shape[0] > 0:
             mixed, self._output_notch_zi = sosfilt(self._output_notch_sos, mixed, zi=self._output_notch_zi)
             mixed = np.asarray(mixed, dtype=np.float32)
+        if bool(getattr(self.cfg, "rnnoise_output_clip_guard_enabled", False)) and mixed.shape[0] > 0:
+            abs_max = float(max(getattr(self.cfg, "rnnoise_output_clip_guard_abs_max", 0.95), 0.0))
+            mixed = np.clip(mixed, -abs_max, abs_max).astype(np.float32, copy=False)
         inverse = np.asarray(x - mixed, dtype=np.float32)
         if self._inverse_bandstop_sos is not None and self._inverse_bandstop_zi is not None and inverse.shape[0] > 0:
             inverse, self._inverse_bandstop_zi = sosfilt(self._inverse_bandstop_sos, inverse, zi=self._inverse_bandstop_zi)
@@ -1761,6 +1890,11 @@ class _PostFilterRouter:
         else:
             self._hybrid = None
         self._last_noise_model_update: dict = _inactive_noise_model_update()
+
+    def get_rnnoise_runtime_stats(self) -> dict[str, float | int]:
+        if self._rnnoise is None:
+            return {}
+        return self._rnnoise.get_runtime_stats()
 
     def process_with_stages(
         self,
@@ -1914,6 +2048,9 @@ class _PostFilterStageCore:
             cfg=cfg,
             mic_geometry_xyz=mic_geometry_xyz,
         )
+
+    def get_postfilter_runtime_stats(self) -> dict[str, float | int]:
+        return self._postfilter.get_rnnoise_runtime_stats()
 
     def process_packet(self, packet: FastPathAudioPacket) -> tuple[float, float, float]:
         t0 = perf_counter()
@@ -2316,6 +2453,9 @@ class FastPathWorker(threading.Thread):
 
     def get_beamformer_runtime_stats(self) -> dict[str, float | int]:
         return self._fd.get_beamformer_runtime_stats()
+
+    def get_postfilter_runtime_stats(self) -> dict[str, float | int]:
+        return self._postfilter_stage.get_postfilter_runtime_stats()
 
     def _maybe_record_delay_sum_snapshot(self, *, state_key: str, doa_deg: float) -> None:
         del state_key

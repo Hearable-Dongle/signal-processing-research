@@ -139,6 +139,20 @@ class FastPathConfig(BaseModel):
     rnnoise_vad_blend_gamma: float = 0.5
     rnnoise_vad_min_speech_preserve: float = 0.15
     rnnoise_vad_max_speech_preserve: float = 0.95
+    rnnoise_startup_warmup_enabled: bool = False
+    rnnoise_startup_warmup_frames: int = 10
+    rnnoise_chunk_crossfade_enabled: bool = False
+    rnnoise_chunk_crossfade_samples: int = 16
+    rnnoise_declick_enabled: bool = False
+    rnnoise_declick_alpha: float = 0.92
+    rnnoise_declick_conditional: bool = True
+    rnnoise_declick_spike_threshold: float = 0.03
+    rnnoise_output_clip_guard_enabled: bool = False
+    rnnoise_output_clip_guard_abs_max: float = 0.95
+    rnnoise_corruption_guard_enabled: bool = True
+    rnnoise_corruption_guard_rms_ratio_threshold: float = 2.0
+    rnnoise_corruption_guard_peak_ratio_threshold: float = 3.0
+    rnnoise_corruption_guard_mode: Literal["hold_previous", "use_input", "mute"] = "hold_previous"
     rnnoise_residual_highband_enabled: bool = False
     rnnoise_residual_highband_cutoff_hz: float = 3000.0
     rnnoise_residual_highband_gain: float = 0.5
@@ -692,6 +706,62 @@ class SessionStartRequest(BaseModel):
     @property
     def rnnoise_vad_max_speech_preserve(self) -> float:
         return float(self.fast_path.rnnoise_vad_max_speech_preserve)
+
+    @property
+    def rnnoise_startup_warmup_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_startup_warmup_enabled)
+
+    @property
+    def rnnoise_startup_warmup_frames(self) -> int:
+        return int(self.fast_path.rnnoise_startup_warmup_frames)
+
+    @property
+    def rnnoise_chunk_crossfade_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_chunk_crossfade_enabled)
+
+    @property
+    def rnnoise_chunk_crossfade_samples(self) -> int:
+        return int(self.fast_path.rnnoise_chunk_crossfade_samples)
+
+    @property
+    def rnnoise_declick_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_declick_enabled)
+
+    @property
+    def rnnoise_declick_alpha(self) -> float:
+        return float(self.fast_path.rnnoise_declick_alpha)
+
+    @property
+    def rnnoise_declick_conditional(self) -> bool:
+        return bool(self.fast_path.rnnoise_declick_conditional)
+
+    @property
+    def rnnoise_declick_spike_threshold(self) -> float:
+        return float(self.fast_path.rnnoise_declick_spike_threshold)
+
+    @property
+    def rnnoise_output_clip_guard_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_output_clip_guard_enabled)
+
+    @property
+    def rnnoise_output_clip_guard_abs_max(self) -> float:
+        return float(self.fast_path.rnnoise_output_clip_guard_abs_max)
+
+    @property
+    def rnnoise_corruption_guard_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_corruption_guard_enabled)
+
+    @property
+    def rnnoise_corruption_guard_rms_ratio_threshold(self) -> float:
+        return float(self.fast_path.rnnoise_corruption_guard_rms_ratio_threshold)
+
+    @property
+    def rnnoise_corruption_guard_peak_ratio_threshold(self) -> float:
+        return float(self.fast_path.rnnoise_corruption_guard_peak_ratio_threshold)
+
+    @property
+    def rnnoise_corruption_guard_mode(self) -> str:
+        return str(self.fast_path.rnnoise_corruption_guard_mode)
 
     @property
     def rnnoise_residual_highband_enabled(self) -> bool:

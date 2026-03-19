@@ -1198,6 +1198,20 @@ def _run_recording_method_job(
     rnnoise_vad_blend_gamma: float,
     rnnoise_vad_min_speech_preserve: float,
     rnnoise_vad_max_speech_preserve: float,
+    rnnoise_startup_warmup_enabled: bool,
+    rnnoise_startup_warmup_frames: int,
+    rnnoise_chunk_crossfade_enabled: bool,
+    rnnoise_chunk_crossfade_samples: int,
+    rnnoise_declick_enabled: bool,
+    rnnoise_declick_alpha: float,
+    rnnoise_declick_conditional: bool,
+    rnnoise_declick_spike_threshold: float,
+    rnnoise_output_clip_guard_enabled: bool,
+    rnnoise_output_clip_guard_abs_max: float,
+    rnnoise_corruption_guard_enabled: bool,
+    rnnoise_corruption_guard_rms_ratio_threshold: float,
+    rnnoise_corruption_guard_peak_ratio_threshold: float,
+    rnnoise_corruption_guard_mode: str,
     rnnoise_residual_highband_enabled: bool,
     rnnoise_residual_highband_cutoff_hz: float,
     rnnoise_residual_highband_gain: float,
@@ -1344,6 +1358,20 @@ def _run_recording_method_job(
             "rnnoise_vad_blend_gamma": float(rnnoise_vad_blend_gamma),
             "rnnoise_vad_min_speech_preserve": float(rnnoise_vad_min_speech_preserve),
             "rnnoise_vad_max_speech_preserve": float(rnnoise_vad_max_speech_preserve),
+            "rnnoise_startup_warmup_enabled": bool(rnnoise_startup_warmup_enabled),
+            "rnnoise_startup_warmup_frames": int(rnnoise_startup_warmup_frames),
+            "rnnoise_chunk_crossfade_enabled": bool(rnnoise_chunk_crossfade_enabled),
+            "rnnoise_chunk_crossfade_samples": int(rnnoise_chunk_crossfade_samples),
+            "rnnoise_declick_enabled": bool(rnnoise_declick_enabled),
+            "rnnoise_declick_alpha": float(rnnoise_declick_alpha),
+            "rnnoise_declick_conditional": bool(rnnoise_declick_conditional),
+            "rnnoise_declick_spike_threshold": float(rnnoise_declick_spike_threshold),
+            "rnnoise_output_clip_guard_enabled": bool(rnnoise_output_clip_guard_enabled),
+            "rnnoise_output_clip_guard_abs_max": float(rnnoise_output_clip_guard_abs_max),
+            "rnnoise_corruption_guard_enabled": bool(rnnoise_corruption_guard_enabled),
+            "rnnoise_corruption_guard_rms_ratio_threshold": float(rnnoise_corruption_guard_rms_ratio_threshold),
+            "rnnoise_corruption_guard_peak_ratio_threshold": float(rnnoise_corruption_guard_peak_ratio_threshold),
+            "rnnoise_corruption_guard_mode": str(rnnoise_corruption_guard_mode),
             "rnnoise_residual_highband_enabled": bool(rnnoise_residual_highband_enabled),
             "rnnoise_residual_highband_cutoff_hz": float(rnnoise_residual_highband_cutoff_hz),
             "rnnoise_residual_highband_gain": float(rnnoise_residual_highband_gain),
@@ -1805,6 +1833,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rnnoise-vad-blend-gamma", type=float, default=0.5)
     parser.add_argument("--rnnoise-vad-min-speech-preserve", type=float, default=0.15)
     parser.add_argument("--rnnoise-vad-max-speech-preserve", type=float, default=0.95)
+    parser.add_argument("--rnnoise-startup-warmup-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-startup-warmup-frames", type=int, default=10)
+    parser.add_argument("--rnnoise-chunk-crossfade-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-chunk-crossfade-samples", type=int, default=16)
+    parser.add_argument("--rnnoise-declick-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-declick-alpha", type=float, default=0.92)
+    parser.add_argument("--rnnoise-declick-conditional", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--rnnoise-declick-spike-threshold", type=float, default=0.03)
+    parser.add_argument("--rnnoise-output-clip-guard-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-output-clip-guard-abs-max", type=float, default=0.95)
+    parser.add_argument("--rnnoise-corruption-guard-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-corruption-guard-rms-ratio-threshold", type=float, default=2.0)
+    parser.add_argument("--rnnoise-corruption-guard-peak-ratio-threshold", type=float, default=3.0)
+    parser.add_argument("--rnnoise-corruption-guard-mode", choices=["hold_previous", "use_input", "mute"], default="hold_previous")
     parser.add_argument("--rnnoise-residual-highband-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--rnnoise-residual-highband-cutoff-hz", type=float, default=3000.0)
     parser.add_argument("--rnnoise-residual-highband-gain", type=float, default=0.5)
@@ -2021,6 +2063,20 @@ def main() -> None:
                 rnnoise_vad_blend_gamma=float(args.rnnoise_vad_blend_gamma),
                 rnnoise_vad_min_speech_preserve=float(args.rnnoise_vad_min_speech_preserve),
                 rnnoise_vad_max_speech_preserve=float(args.rnnoise_vad_max_speech_preserve),
+                rnnoise_startup_warmup_enabled=bool(args.rnnoise_startup_warmup_enabled),
+                rnnoise_startup_warmup_frames=int(args.rnnoise_startup_warmup_frames),
+                rnnoise_chunk_crossfade_enabled=bool(args.rnnoise_chunk_crossfade_enabled),
+                rnnoise_chunk_crossfade_samples=int(args.rnnoise_chunk_crossfade_samples),
+                rnnoise_declick_enabled=bool(args.rnnoise_declick_enabled),
+                rnnoise_declick_alpha=float(args.rnnoise_declick_alpha),
+                rnnoise_declick_conditional=bool(args.rnnoise_declick_conditional),
+                rnnoise_declick_spike_threshold=float(args.rnnoise_declick_spike_threshold),
+                rnnoise_output_clip_guard_enabled=bool(args.rnnoise_output_clip_guard_enabled),
+                rnnoise_output_clip_guard_abs_max=float(args.rnnoise_output_clip_guard_abs_max),
+                rnnoise_corruption_guard_enabled=bool(args.rnnoise_corruption_guard_enabled),
+                rnnoise_corruption_guard_rms_ratio_threshold=float(args.rnnoise_corruption_guard_rms_ratio_threshold),
+                rnnoise_corruption_guard_peak_ratio_threshold=float(args.rnnoise_corruption_guard_peak_ratio_threshold),
+                rnnoise_corruption_guard_mode=str(args.rnnoise_corruption_guard_mode),
                 rnnoise_residual_highband_enabled=bool(args.rnnoise_residual_highband_enabled),
                 rnnoise_residual_highband_cutoff_hz=float(args.rnnoise_residual_highband_cutoff_hz),
                 rnnoise_residual_highband_gain=float(args.rnnoise_residual_highband_gain),
@@ -2235,6 +2291,20 @@ def main() -> None:
             "rnnoise_vad_blend_gamma": float(args.rnnoise_vad_blend_gamma),
             "rnnoise_vad_min_speech_preserve": float(args.rnnoise_vad_min_speech_preserve),
             "rnnoise_vad_max_speech_preserve": float(args.rnnoise_vad_max_speech_preserve),
+            "rnnoise_startup_warmup_enabled": bool(args.rnnoise_startup_warmup_enabled),
+            "rnnoise_startup_warmup_frames": int(args.rnnoise_startup_warmup_frames),
+            "rnnoise_chunk_crossfade_enabled": bool(args.rnnoise_chunk_crossfade_enabled),
+            "rnnoise_chunk_crossfade_samples": int(args.rnnoise_chunk_crossfade_samples),
+            "rnnoise_declick_enabled": bool(args.rnnoise_declick_enabled),
+            "rnnoise_declick_alpha": float(args.rnnoise_declick_alpha),
+            "rnnoise_declick_conditional": bool(args.rnnoise_declick_conditional),
+            "rnnoise_declick_spike_threshold": float(args.rnnoise_declick_spike_threshold),
+            "rnnoise_output_clip_guard_enabled": bool(args.rnnoise_output_clip_guard_enabled),
+            "rnnoise_output_clip_guard_abs_max": float(args.rnnoise_output_clip_guard_abs_max),
+            "rnnoise_corruption_guard_enabled": bool(args.rnnoise_corruption_guard_enabled),
+            "rnnoise_corruption_guard_rms_ratio_threshold": float(args.rnnoise_corruption_guard_rms_ratio_threshold),
+            "rnnoise_corruption_guard_peak_ratio_threshold": float(args.rnnoise_corruption_guard_peak_ratio_threshold),
+            "rnnoise_corruption_guard_mode": str(args.rnnoise_corruption_guard_mode),
             "rnnoise_residual_highband_enabled": bool(args.rnnoise_residual_highband_enabled),
             "rnnoise_residual_highband_cutoff_hz": float(args.rnnoise_residual_highband_cutoff_hz),
             "rnnoise_residual_highband_gain": float(args.rnnoise_residual_highband_gain),

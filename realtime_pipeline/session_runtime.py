@@ -153,6 +153,20 @@ def build_pipeline_config_from_request(
         rnnoise_vad_blend_gamma=float(req.rnnoise_vad_blend_gamma),
         rnnoise_vad_min_speech_preserve=float(req.rnnoise_vad_min_speech_preserve),
         rnnoise_vad_max_speech_preserve=float(req.rnnoise_vad_max_speech_preserve),
+        rnnoise_startup_warmup_enabled=bool(req.rnnoise_startup_warmup_enabled),
+        rnnoise_startup_warmup_frames=int(req.rnnoise_startup_warmup_frames),
+        rnnoise_chunk_crossfade_enabled=bool(req.rnnoise_chunk_crossfade_enabled),
+        rnnoise_chunk_crossfade_samples=int(req.rnnoise_chunk_crossfade_samples),
+        rnnoise_declick_enabled=bool(req.rnnoise_declick_enabled),
+        rnnoise_declick_alpha=float(req.rnnoise_declick_alpha),
+        rnnoise_declick_conditional=bool(req.rnnoise_declick_conditional),
+        rnnoise_declick_spike_threshold=float(req.rnnoise_declick_spike_threshold),
+        rnnoise_output_clip_guard_enabled=bool(req.rnnoise_output_clip_guard_enabled),
+        rnnoise_output_clip_guard_abs_max=float(req.rnnoise_output_clip_guard_abs_max),
+        rnnoise_corruption_guard_enabled=bool(req.rnnoise_corruption_guard_enabled),
+        rnnoise_corruption_guard_rms_ratio_threshold=float(req.rnnoise_corruption_guard_rms_ratio_threshold),
+        rnnoise_corruption_guard_peak_ratio_threshold=float(req.rnnoise_corruption_guard_peak_ratio_threshold),
+        rnnoise_corruption_guard_mode=str(req.rnnoise_corruption_guard_mode),
         rnnoise_residual_highband_enabled=bool(req.rnnoise_residual_highband_enabled),
         rnnoise_residual_highband_cutoff_hz=float(req.rnnoise_residual_highband_cutoff_hz),
         rnnoise_residual_highband_gain=float(req.rnnoise_residual_highband_gain),
@@ -640,6 +654,20 @@ def run_offline_session_pipeline(
         "rnnoise_vad_blend_gamma": float(cfg.rnnoise_vad_blend_gamma),
         "rnnoise_vad_min_speech_preserve": float(cfg.rnnoise_vad_min_speech_preserve),
         "rnnoise_vad_max_speech_preserve": float(cfg.rnnoise_vad_max_speech_preserve),
+        "rnnoise_startup_warmup_enabled": bool(cfg.rnnoise_startup_warmup_enabled),
+        "rnnoise_startup_warmup_frames": int(cfg.rnnoise_startup_warmup_frames),
+        "rnnoise_chunk_crossfade_enabled": bool(cfg.rnnoise_chunk_crossfade_enabled),
+        "rnnoise_chunk_crossfade_samples": int(cfg.rnnoise_chunk_crossfade_samples),
+        "rnnoise_declick_enabled": bool(cfg.rnnoise_declick_enabled),
+        "rnnoise_declick_alpha": float(cfg.rnnoise_declick_alpha),
+        "rnnoise_declick_conditional": bool(cfg.rnnoise_declick_conditional),
+        "rnnoise_declick_spike_threshold": float(cfg.rnnoise_declick_spike_threshold),
+        "rnnoise_output_clip_guard_enabled": bool(cfg.rnnoise_output_clip_guard_enabled),
+        "rnnoise_output_clip_guard_abs_max": float(cfg.rnnoise_output_clip_guard_abs_max),
+        "rnnoise_corruption_guard_enabled": bool(cfg.rnnoise_corruption_guard_enabled),
+        "rnnoise_corruption_guard_rms_ratio_threshold": float(cfg.rnnoise_corruption_guard_rms_ratio_threshold),
+        "rnnoise_corruption_guard_peak_ratio_threshold": float(cfg.rnnoise_corruption_guard_peak_ratio_threshold),
+        "rnnoise_corruption_guard_mode": str(cfg.rnnoise_corruption_guard_mode),
         "rnnoise_residual_highband_enabled": bool(cfg.rnnoise_residual_highband_enabled),
         "rnnoise_residual_highband_cutoff_hz": float(cfg.rnnoise_residual_highband_cutoff_hz),
         "rnnoise_residual_highband_gain": float(cfg.rnnoise_residual_highband_gain),
@@ -712,6 +740,7 @@ def run_offline_session_pipeline(
         if pipe._fast is not None:
             summary["beamformer_snapshot_trace"] = pipe._fast.get_beamformer_snapshot_trace()
             summary.update(pipe._fast.get_beamformer_runtime_stats())
+            summary.update(pipe._fast.get_postfilter_runtime_stats())
 
     with (out_root / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
