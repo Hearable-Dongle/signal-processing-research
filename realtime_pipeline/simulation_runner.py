@@ -111,6 +111,25 @@ def run_simulation_pipeline(
     target_user_boost_db: float = 0.0,
     auto_focus_active_speaker: bool = False,
     single_dominant_no_separator: bool = False,
+    postfilter_method: str | None = None,
+    rnnoise_wet_mix: float | None = None,
+    rnnoise_input_highpass_enabled: bool | None = None,
+    rnnoise_input_highpass_cutoff_hz: float | None = None,
+    rnnoise_output_highpass_enabled: bool | None = None,
+    rnnoise_output_highpass_cutoff_hz: float | None = None,
+    rnnoise_output_lowpass_cutoff_hz: float | None = None,
+    rnnoise_output_notch_freq_hz: float | None = None,
+    rnnoise_output_notch_q: float | None = None,
+    rnnoise_vad_adaptive_blend_enabled: bool | None = None,
+    rnnoise_vad_blend_gamma: float | None = None,
+    rnnoise_vad_min_speech_preserve: float | None = None,
+    rnnoise_vad_max_speech_preserve: float | None = None,
+    rnnoise_residual_highband_enabled: bool | None = None,
+    rnnoise_residual_highband_cutoff_hz: float | None = None,
+    rnnoise_residual_highband_gain: float | None = None,
+    rnnoise_residual_jump_limit_enabled: bool | None = None,
+    rnnoise_residual_jump_limit_band_low_hz: float | None = None,
+    rnnoise_residual_jump_limit_rise_db_per_frame: float | None = None,
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
@@ -195,11 +214,102 @@ def run_simulation_pipeline(
         ),
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
+        postfilter_method=(
+            str(postfilter_method)
+            if postfilter_method is not None
+            else str(default_cfg.postfilter_method)
+        ),
         target_activity_rnn_update_mode="estimated_target_activity" if str(beamforming_mode).strip().lower() in {"mvdr_fd", "lcmv_target_band"} else None,
         target_activity_detector_mode="localization_peak_confidence",
         target_activity_detector_backend="webrtc_fused",
         output_normalization_enabled=bool(output_normalization_enabled),
         output_allow_amplification=bool(output_allow_amplification),
+        rnnoise_wet_mix=float(rnnoise_wet_mix) if rnnoise_wet_mix is not None else float(default_cfg.rnnoise_wet_mix),
+        rnnoise_input_highpass_enabled=(
+            bool(rnnoise_input_highpass_enabled)
+            if rnnoise_input_highpass_enabled is not None
+            else bool(default_cfg.rnnoise_input_highpass_enabled)
+        ),
+        rnnoise_input_highpass_cutoff_hz=(
+            float(rnnoise_input_highpass_cutoff_hz)
+            if rnnoise_input_highpass_cutoff_hz is not None
+            else float(default_cfg.rnnoise_input_highpass_cutoff_hz)
+        ),
+        rnnoise_output_highpass_enabled=(
+            bool(rnnoise_output_highpass_enabled)
+            if rnnoise_output_highpass_enabled is not None
+            else bool(default_cfg.rnnoise_output_highpass_enabled)
+        ),
+        rnnoise_output_highpass_cutoff_hz=(
+            float(rnnoise_output_highpass_cutoff_hz)
+            if rnnoise_output_highpass_cutoff_hz is not None
+            else float(default_cfg.rnnoise_output_highpass_cutoff_hz)
+        ),
+        rnnoise_output_lowpass_cutoff_hz=(
+            float(rnnoise_output_lowpass_cutoff_hz)
+            if rnnoise_output_lowpass_cutoff_hz is not None
+            else float(default_cfg.rnnoise_output_lowpass_cutoff_hz)
+        ),
+        rnnoise_output_notch_freq_hz=(
+            float(rnnoise_output_notch_freq_hz)
+            if rnnoise_output_notch_freq_hz is not None
+            else float(default_cfg.rnnoise_output_notch_freq_hz)
+        ),
+        rnnoise_output_notch_q=(
+            float(rnnoise_output_notch_q)
+            if rnnoise_output_notch_q is not None
+            else float(default_cfg.rnnoise_output_notch_q)
+        ),
+        rnnoise_vad_adaptive_blend_enabled=(
+            bool(rnnoise_vad_adaptive_blend_enabled)
+            if rnnoise_vad_adaptive_blend_enabled is not None
+            else bool(default_cfg.rnnoise_vad_adaptive_blend_enabled)
+        ),
+        rnnoise_vad_blend_gamma=(
+            float(rnnoise_vad_blend_gamma)
+            if rnnoise_vad_blend_gamma is not None
+            else float(default_cfg.rnnoise_vad_blend_gamma)
+        ),
+        rnnoise_vad_min_speech_preserve=(
+            float(rnnoise_vad_min_speech_preserve)
+            if rnnoise_vad_min_speech_preserve is not None
+            else float(default_cfg.rnnoise_vad_min_speech_preserve)
+        ),
+        rnnoise_vad_max_speech_preserve=(
+            float(rnnoise_vad_max_speech_preserve)
+            if rnnoise_vad_max_speech_preserve is not None
+            else float(default_cfg.rnnoise_vad_max_speech_preserve)
+        ),
+        rnnoise_residual_highband_enabled=(
+            bool(rnnoise_residual_highband_enabled)
+            if rnnoise_residual_highband_enabled is not None
+            else bool(default_cfg.rnnoise_residual_highband_enabled)
+        ),
+        rnnoise_residual_highband_cutoff_hz=(
+            float(rnnoise_residual_highband_cutoff_hz)
+            if rnnoise_residual_highband_cutoff_hz is not None
+            else float(default_cfg.rnnoise_residual_highband_cutoff_hz)
+        ),
+        rnnoise_residual_highband_gain=(
+            float(rnnoise_residual_highband_gain)
+            if rnnoise_residual_highband_gain is not None
+            else float(default_cfg.rnnoise_residual_highband_gain)
+        ),
+        rnnoise_residual_jump_limit_enabled=(
+            bool(rnnoise_residual_jump_limit_enabled)
+            if rnnoise_residual_jump_limit_enabled is not None
+            else bool(default_cfg.rnnoise_residual_jump_limit_enabled)
+        ),
+        rnnoise_residual_jump_limit_band_low_hz=(
+            float(rnnoise_residual_jump_limit_band_low_hz)
+            if rnnoise_residual_jump_limit_band_low_hz is not None
+            else float(default_cfg.rnnoise_residual_jump_limit_band_low_hz)
+        ),
+        rnnoise_residual_jump_limit_rise_db_per_frame=(
+            float(rnnoise_residual_jump_limit_rise_db_per_frame)
+            if rnnoise_residual_jump_limit_rise_db_per_frame is not None
+            else float(default_cfg.rnnoise_residual_jump_limit_rise_db_per_frame)
+        ),
         srp_prior_enabled=bool(robust_mode),
         srp_peak_match_tolerance_deg=12.0 if robust_mode else 20.0,
         srp_peak_hold_frames=4 if robust_mode else 0,

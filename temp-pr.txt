@@ -1,255 +1,49 @@
-Title: Add sparse LCMV runtime tuning and expose real-data fast-path timing breakdown
+This branch tunes the RNNoise postfilter defaults for the realtime `delay_sum + rnnoise` path.
 
-Summary
-- Added sparse-bin `lcmv_target_band` solving with complex interpolation and target renormalization.
-- Added higher-level runtime controls for LCMV reuse:
-  - sparse solve stride
-  - sparse solve minimum frequency
-  - weight smoothing/reuse
-  - DOA refresh tolerance
-- Exposed real-data benchmark timing breakdown so `summary_by_method.csv` now carries:
-  - `beamforming_rtf`
-  - `postfilter_rtf`
-  - `pipeline_rtf`
-  - `fast_srp_avg_ms`
-  - `fast_beamform_avg_ms`
-  - `fast_safety_avg_ms`
-  - `fast_sink_avg_ms`
-  - `fast_enqueue_avg_ms`
-  - per-stage fast-path RTFs derived from those averages
+Current default stack:
+- `rnnoise_wet_mix = 0.9`
+- input HPF enabled at `80 Hz`
+- output HPF enabled at `70 Hz`
+- VAD-adaptive blend disabled
+- corruption guard enabled with:
+  - `mode = hold_previous`
+  - `rms_ratio_threshold = 2.0`
+  - `peak_ratio_threshold = 3.0`
+- voice EQ enabled with:
+  - presence boost `+2.5 dB @ 3 kHz`
+  - `Q = 0.9`
+  - no low-mid cut by default
+- output low-pass `7500 Hz`
+- output notch `500 Hz`, `Q = 20`
 
-Why
-- Low-risk tuning alone only moved synthetic `beamforming_rtf` from about `2.22` to `1.50`.
-- The dominant cost was still full per-refresh, per-bin LCMV solving.
-- Sparse solving was the first architectural change that materially reduced beamforming cost.
-- Real-data CSVs were hiding the beamforming-vs-localization-vs-postfilter split, which made RTF comparisons misleading.
+Main changes on this branch:
+- RNNoise input/output HPF defaults
+- RNNoise continuity diagnostics in `summary.json`
+- corruption guard for bad RNNoise frames
+- optional chunk crossfade / de-click / clip guard experiments
+- post-RNNoise voice EQ
 
-New knobs
-- `beamformer_sparse_solve_enabled`
-- `beamformer_sparse_solve_stride`
-- `beamformer_sparse_solve_min_freq_hz`
-- `beamformer_sparse_solve_interp`
-- `beamformer_weight_reuse_enabled`
-- `beamformer_weight_smoothing_alpha`
-- `beamformer_doa_refresh_tolerance_deg`
+Useful example output:
+- `beamforming/benchmark/_gt_delay_sum_rnnoise_behind_poster_8k_hop200_default_guard_tests/presence_boost_25db`
 
-Chosen starting point
-- `mvdr_hop_ms = 500`
-- `robust_target_band_max_freq_hz = 4000`
-- `beamformer_sparse_solve_enabled = true`
-- `beamformer_sparse_solve_stride = 4`
-
-Synthetic benchmark commands
+Example command:
 ```bash
-python beamforming/benchmark/oracle_babble_bootstrap_mvdr_benchmark.py \
-  --scene-family near_target_far_diffuse \
-  --method lcmv_target_band_bootstrap_oracle_activity \
-  --out-root beamforming/benchmark/_rtf_tune_lcmv_hop500_cut4k_sparse4 \
-  --max-scenes 6 \
-  --workers 2 \
-  --mvdr-hop-ms 500 \
-  --robust-target-band-max-freq-hz 4000 \
-  --beamformer-rnn-skip-refresh-when-clean \
-  --beamformer-rnn-dirty-threshold 0.03 \
-  --beamformer-rnn-dirty-stat max \
-  --beamformer-sparse-solve-enabled \
-  --beamformer-sparse-solve-stride 4
-```
-
-```bash
-python beamforming/benchmark/oracle_babble_bootstrap_mvdr_benchmark.py \
-  --scene-family near_target_far_diffuse \
-  --method lcmv_target_band_bootstrap_oracle_activity \
-  --out-root beamforming/benchmark/_rtf_tune_lcmv_hop500_cut4k_sparse8 \
-  --max-scenes 6 \
-  --workers 2 \
-  --mvdr-hop-ms 500 \
-  --robust-target-band-max-freq-hz 4000 \
-  --beamformer-rnn-skip-refresh-when-clean \
-  --beamformer-rnn-dirty-threshold 0.03 \
-  --beamformer-rnn-dirty-stat max \
-  --beamformer-sparse-solve-enabled \
-  --beamformer-sparse-solve-stride 8
-```
-
-Key outputs
-- `beamforming/benchmark/_rtf_tune_lcmv_hop500_cut4k_sparse4/20260318_174320/summary_by_method.csv`
-- `beamforming/benchmark/_rtf_tune_lcmv_hop500_cut4k_sparse8/20260318_174237/summary_by_method.csv`
-- `beamforming/benchmark/_rtf_tune_lcmv_hop1000_cut3k_sparse8/20260318_174237/summary_by_method.csv`
-
-Observed synthetic results
-- `hop500 + 4k + sparse4`:
-  - `beamforming_rtf ≈ 0.103`
-  - `delta_snr_db ≈ 4.28`
-  - `delta_sii ≈ 0.089`
-- `hop500 + 4k + sparse8`:
-  - `beamforming_rtf ≈ 0.100`
-  - `delta_snr_db ≈ 4.23`
-  - `delta_sii ≈ 0.086`
-- `hop1000 + 3k + sparse8`:
-  - `beamforming_rtf ≈ 0.055`
-  - stronger quality tradeoff
-
-Notes
-- The real-data benchmark runner already had the timing in `summary.json`; this patch makes the CSV carry it too.
-- Existing benchmark outputs need rerunning to populate the new timing columns.
-
-Follow-up: delay-sum tick cleanup
-- Added delay-sum steering stabilization:
-  - `delay_sum_update_min_delta_deg`
-  - `delay_sum_crossfade_frames`
-  - `delay_sum_use_smoothed_doa`
-- Delay-sum now emits `beamformer_snapshots/` polar artifacts too.
-
-GT behind-poster rerun
-```bash
-python beamforming/benchmark/data_collection_benchmark.py \
-  --input-path data-collection/nano-sympoium/nano-symposium-behind-poster \
-  --out-dir beamforming/benchmark/_nano_behind_poster_delay_sum_rnnoise_gt_16k_tickfix \
+env PYTHONPATH=. python beamforming/benchmark/data_collection_benchmark.py \
+  --input-path data-collection/nano-sympoium/nano-symposium-behind-poster/recordings/recording-3skyncgm \
+  --out-dir beamforming/benchmark/_gt_delay_sum_rnnoise_behind_poster_8k_hop200_default_guard_tests/manual_default_check \
   --methods delay_sum \
   --workers 1 \
   --algorithm-mode speaker_tracking_single_active \
   --use-ground-truth-doa-override \
-  --localization-backend srp_phat_localization \
-  --no-localization-vad-enabled \
+  --input-downsample-rate-hz 8000 \
+  --fast-frame-ms 10 \
+  --localization-hop-ms 200 \
+  --localization-window-ms 200 \
   --postfilter-method rnnoise \
-  --input-downsample-rate-hz 16000 \
-  --beamformer-snapshot-frame-indices 5 10 20 \
-  --delay-sum-update-min-delta-deg 3.0 \
-  --delay-sum-crossfade-frames 1 \
-  --delay-sum-use-smoothed-doa \
+  --postfilter-input-source beamformed_mono \
   --target-activity-detector-backend webrtc_fused
 ```
 
-Key output
-- `beamforming/benchmark/_nano_behind_poster_delay_sum_rnnoise_gt_16k_tickfix`
-
-Follow-up: RNNoise cleanup
-- Added a default RNNoise output notch stage:
-  - `rnnoise_output_notch_freq_hz = 500.0`
-  - `rnnoise_output_notch_q = 20.0`
-- This runs after the existing RNNoise low-pass.
-- The one-off test file that motivated it was:
-  - `beamforming/benchmark/_nano_behind_poster_delay_sum_rnnoise_gt_16k_tickfix/runs/recording-3skyncgm/delay_sum/enhanced_fast_path_notch500_q20.wav`
-
-Follow-up: DAS attenuation experiments
-- Added cheap causal DAS attenuation modes:
-  - `delay_sum_subtractive`
-  - `delay_sum_subtractive_multi`
-  - `delay_sum_differential`
-- `delay_sum_subtractive` uses:
-  - `target_beam - alpha * interferer_beam`
-- `delay_sum_subtractive_multi` uses:
-  - target beam minus the average of 3 interferer-steered DAS beams around the cancel angle
-- `delay_sum_differential` uses:
-  - `target_beam - interferer_beam`
-- Added `inverse_rnnoise.wav` export so the removed residual can be inspected directly.
-- The inverse RNNoise export is filtered by default to make it less speech-dominant:
-  - speech-band stop `300-3400 Hz`
-  - `500 Hz` notch
-
-Sanity benchmark
-```bash
-python beamforming/benchmark/data_collection_benchmark.py \
-  --input-path data-collection/nano-sympoium/nano-symposium-behind-poster/recording-3skyncgm \
-  --out-dir beamforming/benchmark/_sanity_delay_sum_null_variants_3skyncgm \
-  --methods delay_sum delay_sum_subtractive delay_sum_subtractive_multi delay_sum_differential \
-  --workers 1 \
-  --algorithm-mode speaker_tracking_single_active \
-  --use-ground-truth-doa-override \
-  --input-downsample-rate-hz 16000 \
-  --postfilter-method rnnoise \
-  --delay-sum-subtractive-alpha 0.9 \
-  --delay-sum-subtractive-interferer-doa-deg 180 \
-  --delay-sum-subtractive-multi-offset-deg 10
-```
-
-Key output
-- `beamforming/benchmark/_sanity_delay_sum_null_variants_3skyncgm`
-- In this sanity pass, `delay_sum_subtractive_multi` looked like the strongest cheap null variant that still preserved output reasonably; `delay_sum_differential` was the most aggressive and damaged the target the most.
-
-Follow-up: Capon hard-gate tuning and real hop decimation
-- Made `localization_hop_ms` a real decimation control:
-  - localization now updates every `localization_hop_ms / fast_frame_ms` frames
-  - cached localization is reused between updates
-- Added Capon runtime knobs across realtime and benchmark paths:
-  - frequency-bin subsampling
-  - Cholesky/solve path
-  - covariance EMA
-  - full-scan decimation + local refine
-  - grid-size / smoothing / association controls
-- Added separate hard-gate tuners:
-  - `beamforming/benchmark/tune_capon_realdata_hardgate.py`
-  - `realtime_pipeline/tune_capon_synthetic_hardgate.py`
-
-Important bugfixes
-- Capon localization backend now actually forwards `grid_size` into `localization/algo.py`.
-- Single-source Capon now mirrors `localization_grid_size` instead of silently using the old `72`-bin single-source default.
-- Synthetic framewise runs mirror that same single-source grid fix.
-
-One-scene Capon sanity after the grid fix
-```bash
-env PYTHONPATH=. python -m realtime_pipeline.run_framewise_localization_benchmark \
-  --scenes-root simulation/simulations/configs/testing_specific_angles_reappearing_abab \
-  --assets-root simulation/simulations/assets/testing_specific_angles_reappearing_abab \
-  --out-root realtime_pipeline/output/scene00_capon_grid24_hop200_8k_fix3 \
-  --run-label scene00_capon_grid24_hop200_8k_fix3 \
-  --strategies capon_1src \
-  --max-scenes 1 \
-  --workers 1 \
-  --input-downsample-rate-hz 8000 \
-  --fast-frame-ms 10 \
-  --localization-window-ms 200 \
-  --localization-hop-ms 200 \
-  --localization-grid-size 24 \
-  --capon-spectrum-ema-alpha 0.78 \
-  --capon-hold-frames 2 \
-  --localization-track-hold-frames 5 \
-  --localization-max-assoc-distance-deg 20 \
-  --localization-velocity-alpha 0.35 \
-  --localization-angle-alpha 0.30 \
-  --capon-peak-min-sharpness 0.08 \
-  --capon-peak-min-margin 0.02 \
-  --capon-freq-bin-subsample-stride 2 \
-  --capon-freq-bin-min-hz 1000 \
-  --capon-freq-bin-max-hz 2200 \
-  --capon-use-cholesky-solve \
-  --capon-covariance-ema-alpha 0.93 \
-  --capon-full-scan-every-n-updates 4 \
-  --capon-local-refine-enabled \
-  --capon-local-refine-half-width-deg 20
-```
-
-Observed result
-- With the grid wiring fixed, `scene00` runtime dropped from about `9.0 RTF` to about `0.21 RTF` at:
-  - `8 kHz`
-  - `10 ms` fast frame
-  - `200 ms` hop
-  - `grid 12/24`
-
-Refined 15-minute tuning runs
-```bash
-env PYTHONPATH=. python -m beamforming.benchmark.tune_capon_realdata_hardgate \
-  --input-paths data-collection/nano-sympoium/nano-symposium-behind-poster \
-               data-collection/kitchener-public-library-mar-14 \
-               data-collection/gym-take-two-mar-17 \
-  --out-root beamforming/benchmark/capon_realdata_tuning_refined \
-  --study-name capon_realdata_hardgate_refined \
-  --time-budget-min 15 \
-  --trial-job-workers 4
-```
-
-```bash
-env PYTHONPATH=. python -m realtime_pipeline.tune_capon_synthetic_hardgate \
-  --near-scenes-root simulation/simulations/configs/testing_specific_angles_near_target_far_diffuse \
-  --near-assets-root simulation/simulations/assets/testing_specific_angles_near_target_far_diffuse \
-  --abab-scenes-root simulation/simulations/configs/testing_specific_angles_reappearing_abab \
-  --abab-assets-root simulation/simulations/assets/testing_specific_angles_reappearing_abab \
-  --out-root realtime_pipeline/output/capon_synthetic_tuning_refined \
-  --study-name capon_synthetic_hardgate_refined \
-  --time-budget-min 15 \
-  --trial-scene-workers 4
-```
-
-Current refined-study status
-- Real-data and synthetic studies both started producing valid `< 0.3` RTF trials once the grid-size bugs were fixed.
+Relevant commits:
+- `cba954a` `Add RNNoise continuity guards and spike diagnostics`
+- `43e8f95` `Add RNNoise voice EQ and lower default wet mix`
