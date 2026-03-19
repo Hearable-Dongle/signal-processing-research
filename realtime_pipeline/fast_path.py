@@ -2446,6 +2446,8 @@ class FastPathWorker(threading.Thread):
         self._own_voice_active = False
         self._own_voice_on_count = 0
         self._own_voice_off_count = 0
+        self._last_logged_ovp_applied = False
+        self._last_logged_ovp_strategy = "none"
         self._target_activity_state = False
         self._target_activity_on_count = 0
         self._target_activity_off_count = 0
@@ -3375,6 +3377,31 @@ class FastPathWorker(threading.Thread):
             "off_count": int(self._own_voice_off_count),
         }
 
+    def _emit_own_voice_suppression_log(
+        self,
+        *,
+        suppression_applied: bool,
+        suppression_strategy: str,
+        target_doa_deg: float | None,
+        user_doa_deg: float | None,
+    ) -> None:
+        strategy = str(suppression_strategy)
+        if bool(suppression_applied):
+            if (not self._last_logged_ovp_applied) or strategy != self._last_logged_ovp_strategy:
+                print(
+                    "[OVP] nulling ON",
+                    {
+                        "strategy": strategy,
+                        "target_doa_deg": None if target_doa_deg is None else float(target_doa_deg),
+                        "user_doa_deg": None if user_doa_deg is None else float(user_doa_deg),
+                    },
+                    flush=True,
+                )
+        elif self._last_logged_ovp_applied:
+            print("[OVP] nulling OFF", flush=True)
+        self._last_logged_ovp_applied = bool(suppression_applied)
+        self._last_logged_ovp_strategy = strategy
+
     def _smooth_speaker_items(self, speaker_map) -> list:
         alpha_doa = float(np.clip(self._cfg.doa_ema_alpha, 0.0, 1.0))
         alpha_gain = float(np.clip(self._cfg.gain_ema_alpha, 0.0, 1.0))
@@ -3935,6 +3962,13 @@ class FastPathWorker(threading.Thread):
                         out = self._apply_soft_gate(out)
                         suppression_applied = True
                         suppression_strategy = "soft_gate"
+                    if suppression_mode != "off":
+                        self._emit_own_voice_suppression_log(
+                            suppression_applied=suppression_applied,
+                            suppression_strategy=suppression_strategy,
+                            target_doa_deg=target_doa,
+                            user_doa_deg=user_doa,
+                        )
                     if target_doa is not None:
                         self._last_target_doa_deg = float(target_doa)
                         self._last_target_speaker_id = None if selected_target_speaker_id is None else int(selected_target_speaker_id)

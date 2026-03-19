@@ -31,6 +31,30 @@ def test_streaming_adapter_defaults_match_requested_realtime_shape() -> None:
         assert adapter.channel_count == 4
         assert adapter.frame_samples == 160
         assert adapter.window_samples == 3200
+        assert adapter.request.own_voice_suppression_mode == "off"
+        assert adapter.request.suppressed_user_voice_doa_deg is None
+    finally:
+        adapter.close()
+
+
+def test_streaming_adapter_own_voice_suppression_requires_enabled_flag_and_doa() -> None:
+    adapter = RealtimeIntelligibilityAdapter(
+        own_voice_suppression_enabled=True,
+        own_voice_suppression_doa_deg=15.0,
+    )
+    try:
+        assert adapter.request.own_voice_suppression_mode == "lcmv_null_hysteresis"
+        assert adapter.request.suppressed_user_voice_doa_deg == 15.0
+    finally:
+        adapter.close()
+
+    adapter = RealtimeIntelligibilityAdapter(
+        own_voice_suppression_enabled=True,
+        own_voice_suppression_doa_deg=None,
+    )
+    try:
+        assert adapter.request.own_voice_suppression_mode == "off"
+        assert adapter.request.suppressed_user_voice_doa_deg is None
     finally:
         adapter.close()
 
