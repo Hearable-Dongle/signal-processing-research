@@ -139,6 +139,12 @@ class FastPathConfig(BaseModel):
     rnnoise_vad_blend_gamma: float = 0.5
     rnnoise_vad_min_speech_preserve: float = 0.15
     rnnoise_vad_max_speech_preserve: float = 0.95
+    rnnoise_residual_highband_enabled: bool = False
+    rnnoise_residual_highband_cutoff_hz: float = 3000.0
+    rnnoise_residual_highband_gain: float = 0.5
+    rnnoise_residual_jump_limit_enabled: bool = False
+    rnnoise_residual_jump_limit_band_low_hz: float = 3000.0
+    rnnoise_residual_jump_limit_rise_db_per_frame: float = 4.0
     rnnoise_residual_ema_enabled: bool = False
     rnnoise_residual_ema_alpha: float = 0.0
     coherence_wiener_gain_floor: float = 0.12
@@ -686,6 +692,30 @@ class SessionStartRequest(BaseModel):
     @property
     def rnnoise_vad_max_speech_preserve(self) -> float:
         return float(self.fast_path.rnnoise_vad_max_speech_preserve)
+
+    @property
+    def rnnoise_residual_highband_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_residual_highband_enabled)
+
+    @property
+    def rnnoise_residual_highband_cutoff_hz(self) -> float:
+        return float(self.fast_path.rnnoise_residual_highband_cutoff_hz)
+
+    @property
+    def rnnoise_residual_highband_gain(self) -> float:
+        return float(self.fast_path.rnnoise_residual_highband_gain)
+
+    @property
+    def rnnoise_residual_jump_limit_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_residual_jump_limit_enabled)
+
+    @property
+    def rnnoise_residual_jump_limit_band_low_hz(self) -> float:
+        return float(self.fast_path.rnnoise_residual_jump_limit_band_low_hz)
+
+    @property
+    def rnnoise_residual_jump_limit_rise_db_per_frame(self) -> float:
+        return float(self.fast_path.rnnoise_residual_jump_limit_rise_db_per_frame)
 
     @property
     def rnnoise_residual_ema_enabled(self) -> bool:

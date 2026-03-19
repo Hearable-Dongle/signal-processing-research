@@ -1424,6 +1424,7 @@ class _RNNoisePostFilter:
         self._pending_out = np.zeros((0,), dtype=np.float32)
         self._pending_vad = np.zeros((0,), dtype=np.float32)
         self._residual_ema_state = np.zeros((0,), dtype=np.float32)
+        self._residual_jump_prev_band_rms = 0.0
         self._backend.channels = 1
         self._backend.dtype = np.int16
         input_highpass_cutoff_hz = float(max(getattr(cfg, "rnnoise_input_highpass_cutoff_hz", 0.0), 0.0))
@@ -1453,6 +1454,44 @@ class _RNNoisePostFilter:
         )
         self._output_highpass_zi = (
             None if self._output_highpass_sos is None else np.zeros((self._output_highpass_sos.shape[0], 2), dtype=np.float32)
+        )
+        residual_highband_cutoff_hz = float(max(getattr(cfg, "rnnoise_residual_highband_cutoff_hz", 0.0), 0.0))
+        self._residual_highband_enabled = bool(getattr(cfg, "rnnoise_residual_highband_enabled", False))
+        self._residual_highband_gain = float(
+            np.clip(getattr(cfg, "rnnoise_residual_highband_gain", 0.5), 0.0, 1.0)
+        )
+        self._residual_highband_sos = (
+            None
+            if (
+                (not self._residual_highband_enabled)
+                or residual_highband_cutoff_hz <= 0.0
+                or residual_highband_cutoff_hz >= 0.5 * float(self._input_sample_rate_hz)
+            )
+            else butter(2, residual_highband_cutoff_hz, btype="highpass", fs=float(self._input_sample_rate_hz), output="sos")
+        )
+        self._residual_highband_zi = (
+            None
+            if self._residual_highband_sos is None
+            else np.zeros((self._residual_highband_sos.shape[0], 2), dtype=np.float32)
+        )
+        residual_jump_band_low_hz = float(max(getattr(cfg, "rnnoise_residual_jump_limit_band_low_hz", 0.0), 0.0))
+        self._residual_jump_limit_enabled = bool(getattr(cfg, "rnnoise_residual_jump_limit_enabled", False))
+        self._residual_jump_limit_rise_db_per_frame = float(
+            max(getattr(cfg, "rnnoise_residual_jump_limit_rise_db_per_frame", 4.0), 0.0)
+        )
+        self._residual_jump_band_sos = (
+            None
+            if (
+                (not self._residual_jump_limit_enabled)
+                or residual_jump_band_low_hz <= 0.0
+                or residual_jump_band_low_hz >= 0.5 * float(self._input_sample_rate_hz)
+            )
+            else butter(2, residual_jump_band_low_hz, btype="highpass", fs=float(self._input_sample_rate_hz), output="sos")
+        )
+        self._residual_jump_band_zi = (
+            None
+            if self._residual_jump_band_sos is None
+            else np.zeros((self._residual_jump_band_sos.shape[0], 2), dtype=np.float32)
         )
         cutoff_hz = float(max(getattr(cfg, "rnnoise_output_lowpass_cutoff_hz", 0.0), 0.0))
         self._output_lowpass_cutoff_hz = cutoff_hz
@@ -1577,6 +1616,33 @@ class _RNNoisePostFilter:
         else:
             effective_preserve = np.full((x.shape[0],), 1.0 - wet, dtype=np.float32)
         mixed = ((effective_preserve * x) + ((1.0 - effective_preserve) * out)).astype(np.float32, copy=False)
+        if self._residual_highband_sos is not None and self._residual_highband_zi is not None and mixed.shape[0] > 0:
+            mixed_residual = np.asarray(mixed - x, dtype=np.float32)
+            high_residual, self._residual_highband_zi = sosfilt(
+                self._residual_highband_sos,
+                mixed_residual,
+                zi=self._residual_highband_zi,
+            )
+            high_residual = np.asarray(high_residual, dtype=np.float32)
+            mixed = np.asarray(mixed - ((1.0 - self._residual_highband_gain) * high_residual), dtype=np.float32)
+        if self._residual_jump_band_sos is not None and self._residual_jump_band_zi is not None and mixed.shape[0] > 0:
+            jump_residual = np.asarray(mixed - x, dtype=np.float32)
+            jump_high, self._residual_jump_band_zi = sosfilt(
+                self._residual_jump_band_sos,
+                jump_residual,
+                zi=self._residual_jump_band_zi,
+            )
+            jump_high = np.asarray(jump_high, dtype=np.float32)
+            current_band_rms = float(np.sqrt(np.mean(np.asarray(jump_high, dtype=np.float64) ** 2) + 1e-12))
+            if self._residual_jump_prev_band_rms <= 0.0:
+                allowed_band_rms = current_band_rms
+            else:
+                max_ratio = float(10.0 ** (self._residual_jump_limit_rise_db_per_frame / 20.0))
+                allowed_band_rms = min(current_band_rms, self._residual_jump_prev_band_rms * max_ratio)
+            scale = 1.0 if current_band_rms <= 1e-12 else float(np.clip(allowed_band_rms / current_band_rms, 0.0, 1.0))
+            if scale < 0.999:
+                mixed = np.asarray(mixed - ((1.0 - scale) * jump_high), dtype=np.float32)
+            self._residual_jump_prev_band_rms = allowed_band_rms
         if self._output_highpass_sos is not None and self._output_highpass_zi is not None and mixed.shape[0] > 0:
             mixed, self._output_highpass_zi = sosfilt(self._output_highpass_sos, mixed, zi=self._output_highpass_zi)
             mixed = np.asarray(mixed, dtype=np.float32)

@@ -27,7 +27,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific de
 
 try:
     from scipy.optimize import linear_sum_assignment
-    from scipy.signal import resample_poly, welch
+    from scipy.signal import butter, resample_poly, sosfiltfilt, welch
 except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific dependency guard
     missing = exc.name or "scipy"
     raise SystemExit(
@@ -154,6 +154,118 @@ def _rms_db_ratio(raw: np.ndarray, proc: np.ndarray) -> float:
     raw_rms = float(np.sqrt(np.mean(np.asarray(raw, dtype=np.float64) ** 2) + 1e-12))
     proc_rms = float(np.sqrt(np.mean(np.asarray(proc, dtype=np.float64) ** 2) + 1e-12))
     return float(20.0 * math.log10(max(proc_rms, 1e-6) / max(raw_rms, 1e-6)))
+
+
+def _band_energy_ratio(x: np.ndarray, fs: int, *, low_hz: float, high_hz: float | None = None) -> float:
+    y = np.asarray(x, dtype=np.float64).reshape(-1)
+    if y.size == 0:
+        return 0.0
+    spec = np.fft.rfft(y)
+    power = np.abs(spec) ** 2
+    freq = np.fft.rfftfreq(y.size, d=1.0 / float(fs))
+    mask = freq >= float(low_hz)
+    if high_hz is not None:
+        mask &= freq < float(high_hz)
+    total = float(np.sum(power) + 1e-12)
+    return float(np.sum(power[mask]) / total)
+
+
+def _stft_mag(x: np.ndarray, fs: int, *, n_fft: int = 512, hop: int = 128) -> tuple[np.ndarray, np.ndarray]:
+    y = np.asarray(x, dtype=np.float64).reshape(-1)
+    if y.size < n_fft:
+        y = np.pad(y, (0, n_fft - y.size))
+    win = np.hanning(n_fft).astype(np.float64)
+    frames: list[np.ndarray] = []
+    for start in range(0, max(1, y.size - n_fft + 1), hop):
+        frame = y[start : start + n_fft]
+        if frame.shape[0] < n_fft:
+            frame = np.pad(frame, (0, n_fft - frame.shape[0]))
+        frames.append(np.abs(np.fft.rfft(frame * win)))
+    mag = np.stack(frames, axis=0) if frames else np.zeros((0, n_fft // 2 + 1), dtype=np.float64)
+    freqs = np.fft.rfftfreq(n_fft, d=1.0 / float(fs))
+    return mag, freqs
+
+
+def _bandpassed(x: np.ndarray, fs: int, *, low_hz: float, high_hz: float) -> np.ndarray:
+    y = np.asarray(x, dtype=np.float64).reshape(-1)
+    nyquist = 0.5 * float(fs)
+    if y.size < 8 or not (0.0 < low_hz < high_hz < nyquist):
+        return y.astype(np.float64, copy=False)
+    sos = butter(4, [float(low_hz), float(high_hz)], btype="bandpass", fs=float(fs), output="sos")
+    return np.asarray(sosfiltfilt(sos, y), dtype=np.float64)
+
+
+def _artifact_metrics(post_beamforming: np.ndarray, post_rnnoise: np.ndarray, final_sig: np.ndarray, fs: int) -> dict[str, float]:
+    beam = np.asarray(post_beamforming, dtype=np.float64).reshape(-1)
+    rn = np.asarray(post_rnnoise, dtype=np.float64).reshape(-1)
+    final = np.asarray(final_sig, dtype=np.float64).reshape(-1)
+    n = min(beam.size, rn.size, final.size)
+    if n <= 0:
+        return {
+            "artifact_hf_jump_count": 0.0,
+            "artifact_hf_flux_p95": 0.0,
+            "artifact_hf_burst_ratio": 0.0,
+            "artifact_500hz_cluster_ratio": 0.0,
+            "artifact_lowband_hum_ratio": 0.0,
+            "speech_band_lsd_mean": 0.0,
+            "speech_envelope_corr": 1.0,
+        }
+    beam = beam[:n]
+    rn = rn[:n]
+    final = final[:n]
+    mag, freqs = _stft_mag(final, fs)
+    if mag.shape[0] == 0:
+        hf_jump_count = 0.0
+        hf_flux_p95 = 0.0
+    else:
+        hf_mask = (freqs >= 3000.0) & (freqs <= min(7500.0, 0.5 * float(fs)))
+        hf_mag = mag[:, hf_mask] if np.any(hf_mask) else mag
+        hf_energy = np.log(np.maximum(np.mean(hf_mag**2, axis=1), 1e-12))
+        ema = np.zeros_like(hf_energy)
+        ema[0] = hf_energy[0]
+        alpha = 0.1
+        for idx in range(1, hf_energy.size):
+            ema[idx] = (1.0 - alpha) * ema[idx - 1] + alpha * hf_energy[idx]
+        hf_jump_count = float(np.sum((hf_energy - ema) > math.log(4.0)))
+        flux = np.sqrt(np.sum(np.diff(hf_mag, axis=0) ** 2, axis=1)) if hf_mag.shape[0] > 1 else np.zeros((0,), dtype=np.float64)
+        hf_flux_p95 = float(np.percentile(flux, 95)) if flux.size else 0.0
+    final_hf = _band_energy_ratio(final, fs, low_hz=3000.0, high_hz=min(7500.0, 0.5 * float(fs)))
+    beam_hf = _band_energy_ratio(beam, fs, low_hz=3000.0, high_hz=min(7500.0, 0.5 * float(fs)))
+    cluster_ratio = float(
+        _band_energy_ratio(final, fs, low_hz=430.0, high_hz=min(560.0, 0.5 * float(fs)))
+        / max(_band_energy_ratio(final, fs, low_hz=600.0, high_hz=min(900.0, 0.5 * float(fs))), 1e-12)
+    )
+    low_ratio = _band_energy_ratio(final, fs, low_hz=0.0, high_hz=120.0)
+    speech_ratio = _band_energy_ratio(final, fs, low_hz=300.0, high_hz=min(3400.0, 0.5 * float(fs)))
+    mag_beam, freqs_beam = _stft_mag(beam, fs)
+    mag_final, freqs_final = _stft_mag(final, fs)
+    lsd_n = min(mag_beam.shape[0], mag_final.shape[0])
+    if lsd_n > 0:
+        speech_mask_beam = (freqs_beam >= 300.0) & (freqs_beam <= min(3400.0, 0.5 * float(fs)))
+        speech_mask_final = (freqs_final >= 300.0) & (freqs_final <= min(3400.0, 0.5 * float(fs)))
+        beam_spec = np.log(np.maximum(mag_beam[:lsd_n][:, speech_mask_beam], 1e-12))
+        final_spec = np.log(np.maximum(mag_final[:lsd_n][:, speech_mask_final], 1e-12))
+        min_bins = min(beam_spec.shape[1], final_spec.shape[1])
+        speech_band_lsd_mean = float(np.mean(np.sqrt(np.mean((beam_spec[:, :min_bins] - final_spec[:, :min_bins]) ** 2, axis=1)))) if min_bins > 0 else 0.0
+    else:
+        speech_band_lsd_mean = 0.0
+    beam_band = _bandpassed(beam, fs, low_hz=300.0, high_hz=min(3400.0, 0.5 * float(fs) - 1.0))
+    final_band = _bandpassed(final, fs, low_hz=300.0, high_hz=min(3400.0, 0.5 * float(fs) - 1.0))
+    env_beam = np.abs(beam_band)
+    env_final = np.abs(final_band)
+    if env_beam.size > 8 and env_final.size > 8 and float(np.std(env_beam)) > 1e-9 and float(np.std(env_final)) > 1e-9:
+        speech_envelope_corr = float(np.corrcoef(env_beam, env_final)[0, 1])
+    else:
+        speech_envelope_corr = 1.0
+    return {
+        "artifact_hf_jump_count": hf_jump_count,
+        "artifact_hf_flux_p95": hf_flux_p95,
+        "artifact_hf_burst_ratio": float(final_hf / max(beam_hf, 1e-12)),
+        "artifact_500hz_cluster_ratio": cluster_ratio,
+        "artifact_lowband_hum_ratio": float(low_ratio / max(speech_ratio, 1e-12)),
+        "speech_band_lsd_mean": speech_band_lsd_mean,
+        "speech_envelope_corr": speech_envelope_corr,
+    }
 
 
 def _parse_channel_key(path: Path) -> tuple[int, str]:
@@ -1075,9 +1187,23 @@ def _run_recording_method_job(
     postfilter_spectral_floor_beta: float,
     postfilter_gain_max_step_db: float,
     rnnoise_wet_mix: float,
+    rnnoise_input_highpass_enabled: bool,
+    rnnoise_input_highpass_cutoff_hz: float,
+    rnnoise_output_highpass_enabled: bool,
+    rnnoise_output_highpass_cutoff_hz: float,
     rnnoise_output_lowpass_cutoff_hz: float,
     rnnoise_output_notch_freq_hz: float,
     rnnoise_output_notch_q: float,
+    rnnoise_vad_adaptive_blend_enabled: bool,
+    rnnoise_vad_blend_gamma: float,
+    rnnoise_vad_min_speech_preserve: float,
+    rnnoise_vad_max_speech_preserve: float,
+    rnnoise_residual_highband_enabled: bool,
+    rnnoise_residual_highband_cutoff_hz: float,
+    rnnoise_residual_highband_gain: float,
+    rnnoise_residual_jump_limit_enabled: bool,
+    rnnoise_residual_jump_limit_band_low_hz: float,
+    rnnoise_residual_jump_limit_rise_db_per_frame: float,
     rnnoise_residual_ema_enabled: bool,
     rnnoise_residual_ema_alpha: float,
     beamformer_snapshot_frame_indices: tuple[int, ...] | None,
@@ -1207,9 +1333,23 @@ def _run_recording_method_job(
             "postfilter_spectral_floor_beta": float(postfilter_spectral_floor_beta),
             "postfilter_gain_max_step_db": float(postfilter_gain_max_step_db),
             "rnnoise_wet_mix": float(rnnoise_wet_mix),
+            "rnnoise_input_highpass_enabled": bool(rnnoise_input_highpass_enabled),
+            "rnnoise_input_highpass_cutoff_hz": float(rnnoise_input_highpass_cutoff_hz),
+            "rnnoise_output_highpass_enabled": bool(rnnoise_output_highpass_enabled),
+            "rnnoise_output_highpass_cutoff_hz": float(rnnoise_output_highpass_cutoff_hz),
             "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
             "rnnoise_output_notch_freq_hz": float(rnnoise_output_notch_freq_hz),
             "rnnoise_output_notch_q": float(rnnoise_output_notch_q),
+            "rnnoise_vad_adaptive_blend_enabled": bool(rnnoise_vad_adaptive_blend_enabled),
+            "rnnoise_vad_blend_gamma": float(rnnoise_vad_blend_gamma),
+            "rnnoise_vad_min_speech_preserve": float(rnnoise_vad_min_speech_preserve),
+            "rnnoise_vad_max_speech_preserve": float(rnnoise_vad_max_speech_preserve),
+            "rnnoise_residual_highband_enabled": bool(rnnoise_residual_highband_enabled),
+            "rnnoise_residual_highband_cutoff_hz": float(rnnoise_residual_highband_cutoff_hz),
+            "rnnoise_residual_highband_gain": float(rnnoise_residual_highband_gain),
+            "rnnoise_residual_jump_limit_enabled": bool(rnnoise_residual_jump_limit_enabled),
+            "rnnoise_residual_jump_limit_band_low_hz": float(rnnoise_residual_jump_limit_band_low_hz),
+            "rnnoise_residual_jump_limit_rise_db_per_frame": float(rnnoise_residual_jump_limit_rise_db_per_frame),
             "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
             "own_voice_suppression_mode": str(own_voice_suppression_mode),
@@ -1352,6 +1492,12 @@ def _run_recording_method_job(
     n = min(raw_mix_for_metrics.size, proc.size)
     trace_metrics = _trace_metrics(summary)
     postfilter_noise_metrics = _postfilter_noise_metrics(summary)
+    artifact_metrics = _artifact_metrics(
+        stage_audio.get("post_beamforming", proc)[:n],
+        stage_audio.get("post_rnnoise", proc)[:n],
+        proc[:n],
+        fs,
+    )
     duration_s = float(n / max(fs, 1))
     suppressed_user_tracks = _filter_tracks_by_speaker_name(ground_truth_tracks, suppressed_user_speaker_name)
     gt_metrics = _ground_truth_metrics(
@@ -1416,7 +1562,23 @@ def _run_recording_method_job(
         "fast_frame_ms": int(summary.get("fast_frame_ms", fast_frame_ms)),
         "localization_hop_ms": int(localization_hop_ms),
         "rnnoise_wet_mix": float(rnnoise_wet_mix),
+        "rnnoise_input_highpass_enabled": bool(rnnoise_input_highpass_enabled),
+        "rnnoise_input_highpass_cutoff_hz": float(rnnoise_input_highpass_cutoff_hz),
+        "rnnoise_output_highpass_enabled": bool(rnnoise_output_highpass_enabled),
+        "rnnoise_output_highpass_cutoff_hz": float(rnnoise_output_highpass_cutoff_hz),
         "rnnoise_output_lowpass_cutoff_hz": float(rnnoise_output_lowpass_cutoff_hz),
+        "rnnoise_output_notch_freq_hz": float(rnnoise_output_notch_freq_hz),
+        "rnnoise_output_notch_q": float(rnnoise_output_notch_q),
+        "rnnoise_vad_adaptive_blend_enabled": bool(rnnoise_vad_adaptive_blend_enabled),
+        "rnnoise_vad_blend_gamma": float(rnnoise_vad_blend_gamma),
+        "rnnoise_vad_min_speech_preserve": float(rnnoise_vad_min_speech_preserve),
+        "rnnoise_vad_max_speech_preserve": float(rnnoise_vad_max_speech_preserve),
+        "rnnoise_residual_highband_enabled": bool(rnnoise_residual_highband_enabled),
+        "rnnoise_residual_highband_cutoff_hz": float(rnnoise_residual_highband_cutoff_hz),
+        "rnnoise_residual_highband_gain": float(rnnoise_residual_highband_gain),
+        "rnnoise_residual_jump_limit_enabled": bool(rnnoise_residual_jump_limit_enabled),
+        "rnnoise_residual_jump_limit_band_low_hz": float(rnnoise_residual_jump_limit_band_low_hz),
+        "rnnoise_residual_jump_limit_rise_db_per_frame": float(rnnoise_residual_jump_limit_rise_db_per_frame),
         "rnnoise_residual_ema_enabled": bool(rnnoise_residual_ema_enabled),
         "rnnoise_residual_ema_alpha": float(rnnoise_residual_ema_alpha),
         "mvdr_hop_ms": (float("nan") if mvdr_hop_ms is None else int(mvdr_hop_ms)),
@@ -1487,6 +1649,7 @@ def _run_recording_method_job(
         "mean_gain_weight_final": float(np.mean([float(speaker.get("gain_weight", 0.0)) for speaker in summary.get("speaker_map_final", [])])) if summary.get("speaker_map_final") else 0.0,
         **trace_metrics,
         **postfilter_noise_metrics,
+        **artifact_metrics,
         **gt_metrics,
         **suppression_metrics,
     }
@@ -1631,9 +1794,23 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postfilter-spectral-floor-beta", type=float, default=0.01)
     parser.add_argument("--postfilter-gain-max-step-db", type=float, default=2.5)
     parser.add_argument("--rnnoise-wet-mix", type=float, default=0.9)
+    parser.add_argument("--rnnoise-input-highpass-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--rnnoise-input-highpass-cutoff-hz", type=float, default=80.0)
+    parser.add_argument("--rnnoise-output-highpass-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--rnnoise-output-highpass-cutoff-hz", type=float, default=70.0)
     parser.add_argument("--rnnoise-output-lowpass-cutoff-hz", type=float, default=7500.0)
     parser.add_argument("--rnnoise-output-notch-freq-hz", type=float, default=500.0)
     parser.add_argument("--rnnoise-output-notch-q", type=float, default=20.0)
+    parser.add_argument("--rnnoise-vad-adaptive-blend-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--rnnoise-vad-blend-gamma", type=float, default=0.5)
+    parser.add_argument("--rnnoise-vad-min-speech-preserve", type=float, default=0.15)
+    parser.add_argument("--rnnoise-vad-max-speech-preserve", type=float, default=0.95)
+    parser.add_argument("--rnnoise-residual-highband-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-residual-highband-cutoff-hz", type=float, default=3000.0)
+    parser.add_argument("--rnnoise-residual-highband-gain", type=float, default=0.5)
+    parser.add_argument("--rnnoise-residual-jump-limit-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-residual-jump-limit-band-low-hz", type=float, default=3000.0)
+    parser.add_argument("--rnnoise-residual-jump-limit-rise-db-per-frame", type=float, default=4.0)
     parser.add_argument("--rnnoise-residual-ema-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--rnnoise-residual-ema-alpha", type=float, default=0.0)
     parser.add_argument("--beamformer-snapshot-frame-indices", type=int, nargs="*", default=None)
@@ -1833,9 +2010,23 @@ def main() -> None:
                 postfilter_spectral_floor_beta=float(args.postfilter_spectral_floor_beta),
                 postfilter_gain_max_step_db=float(args.postfilter_gain_max_step_db),
                 rnnoise_wet_mix=float(args.rnnoise_wet_mix),
+                rnnoise_input_highpass_enabled=bool(args.rnnoise_input_highpass_enabled),
+                rnnoise_input_highpass_cutoff_hz=float(args.rnnoise_input_highpass_cutoff_hz),
+                rnnoise_output_highpass_enabled=bool(args.rnnoise_output_highpass_enabled),
+                rnnoise_output_highpass_cutoff_hz=float(args.rnnoise_output_highpass_cutoff_hz),
                 rnnoise_output_lowpass_cutoff_hz=float(args.rnnoise_output_lowpass_cutoff_hz),
                 rnnoise_output_notch_freq_hz=float(args.rnnoise_output_notch_freq_hz),
                 rnnoise_output_notch_q=float(args.rnnoise_output_notch_q),
+                rnnoise_vad_adaptive_blend_enabled=bool(args.rnnoise_vad_adaptive_blend_enabled),
+                rnnoise_vad_blend_gamma=float(args.rnnoise_vad_blend_gamma),
+                rnnoise_vad_min_speech_preserve=float(args.rnnoise_vad_min_speech_preserve),
+                rnnoise_vad_max_speech_preserve=float(args.rnnoise_vad_max_speech_preserve),
+                rnnoise_residual_highband_enabled=bool(args.rnnoise_residual_highband_enabled),
+                rnnoise_residual_highband_cutoff_hz=float(args.rnnoise_residual_highband_cutoff_hz),
+                rnnoise_residual_highband_gain=float(args.rnnoise_residual_highband_gain),
+                rnnoise_residual_jump_limit_enabled=bool(args.rnnoise_residual_jump_limit_enabled),
+                rnnoise_residual_jump_limit_band_low_hz=float(args.rnnoise_residual_jump_limit_band_low_hz),
+                rnnoise_residual_jump_limit_rise_db_per_frame=float(args.rnnoise_residual_jump_limit_rise_db_per_frame),
                 rnnoise_residual_ema_enabled=bool(args.rnnoise_residual_ema_enabled),
                 rnnoise_residual_ema_alpha=float(args.rnnoise_residual_ema_alpha),
                 beamformer_snapshot_frame_indices=(
@@ -1943,6 +2134,13 @@ def main() -> None:
                     "postfilter_noise_alpha_eff_mean": _mean_numeric(rows, "postfilter_noise_alpha_eff_mean"),
                     "postfilter_noise_bootstrap_rate_mean": _mean_numeric(rows, "postfilter_noise_bootstrap_rate"),
                     "postfilter_noise_bootstrap_complete_rate_mean": _mean_numeric(rows, "postfilter_noise_bootstrap_complete_rate"),
+                    "artifact_hf_jump_count_mean": _mean_numeric(rows, "artifact_hf_jump_count"),
+                    "artifact_hf_flux_p95_mean": _mean_numeric(rows, "artifact_hf_flux_p95"),
+                    "artifact_hf_burst_ratio_mean": _mean_numeric(rows, "artifact_hf_burst_ratio"),
+                    "artifact_500hz_cluster_ratio_mean": _mean_numeric(rows, "artifact_500hz_cluster_ratio"),
+                    "artifact_lowband_hum_ratio_mean": _mean_numeric(rows, "artifact_lowband_hum_ratio"),
+                    "speech_band_lsd_mean_mean": _mean_numeric(rows, "speech_band_lsd_mean"),
+                    "speech_envelope_corr_mean": _mean_numeric(rows, "speech_envelope_corr"),
                     "enhancement_tier": str(rows[0].get("enhancement_tier", "")) if rows else "",
                     "output_enhancer_mode": str(rows[0].get("output_enhancer_mode", "")) if rows else "",
                     "postfilter_method": str(rows[0].get("postfilter_method", "")) if rows else "",
@@ -2026,9 +2224,23 @@ def main() -> None:
             "postfilter_oversubtraction_alpha": float(args.postfilter_oversubtraction_alpha),
             "postfilter_spectral_floor_beta": float(args.postfilter_spectral_floor_beta),
             "rnnoise_wet_mix": float(args.rnnoise_wet_mix),
+            "rnnoise_input_highpass_enabled": bool(args.rnnoise_input_highpass_enabled),
+            "rnnoise_input_highpass_cutoff_hz": float(args.rnnoise_input_highpass_cutoff_hz),
+            "rnnoise_output_highpass_enabled": bool(args.rnnoise_output_highpass_enabled),
+            "rnnoise_output_highpass_cutoff_hz": float(args.rnnoise_output_highpass_cutoff_hz),
             "rnnoise_output_lowpass_cutoff_hz": float(args.rnnoise_output_lowpass_cutoff_hz),
             "rnnoise_output_notch_freq_hz": float(args.rnnoise_output_notch_freq_hz),
             "rnnoise_output_notch_q": float(args.rnnoise_output_notch_q),
+            "rnnoise_vad_adaptive_blend_enabled": bool(args.rnnoise_vad_adaptive_blend_enabled),
+            "rnnoise_vad_blend_gamma": float(args.rnnoise_vad_blend_gamma),
+            "rnnoise_vad_min_speech_preserve": float(args.rnnoise_vad_min_speech_preserve),
+            "rnnoise_vad_max_speech_preserve": float(args.rnnoise_vad_max_speech_preserve),
+            "rnnoise_residual_highband_enabled": bool(args.rnnoise_residual_highband_enabled),
+            "rnnoise_residual_highband_cutoff_hz": float(args.rnnoise_residual_highband_cutoff_hz),
+            "rnnoise_residual_highband_gain": float(args.rnnoise_residual_highband_gain),
+            "rnnoise_residual_jump_limit_enabled": bool(args.rnnoise_residual_jump_limit_enabled),
+            "rnnoise_residual_jump_limit_band_low_hz": float(args.rnnoise_residual_jump_limit_band_low_hz),
+            "rnnoise_residual_jump_limit_rise_db_per_frame": float(args.rnnoise_residual_jump_limit_rise_db_per_frame),
             "rnnoise_residual_ema_enabled": bool(args.rnnoise_residual_ema_enabled),
             "rnnoise_residual_ema_alpha": float(args.rnnoise_residual_ema_alpha),
             "mvdr_hop_ms": int(args.mvdr_hop_ms),

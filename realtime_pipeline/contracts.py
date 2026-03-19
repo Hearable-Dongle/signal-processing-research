@@ -413,6 +413,12 @@ class PipelineConfig:
     rnnoise_vad_blend_gamma: float = 0.5
     rnnoise_vad_min_speech_preserve: float = 0.15
     rnnoise_vad_max_speech_preserve: float = 0.95
+    rnnoise_residual_highband_enabled: bool = False
+    rnnoise_residual_highband_cutoff_hz: float = 3000.0
+    rnnoise_residual_highband_gain: float = 0.5
+    rnnoise_residual_jump_limit_enabled: bool = False
+    rnnoise_residual_jump_limit_band_low_hz: float = 3000.0
+    rnnoise_residual_jump_limit_rise_db_per_frame: float = 4.0
     rnnoise_residual_ema_enabled: bool = False
     rnnoise_residual_ema_alpha: float = 0.0
     coherence_wiener_gain_floor: float = 0.12
