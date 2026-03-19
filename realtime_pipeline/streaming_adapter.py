@@ -88,7 +88,7 @@ class RealtimeIntelligibilityAdapter:
     - mic profile: `respeaker_xvf3800_0650`
     - benchmark-style algorithm selection: `speaker_tracking_single_active`
     - localization VAD: `False` to avoid an extra `webrtcvad` runtime dependency
-    - localization window: `200 ms` by default
+    - localization hop/window: `200 ms` by default
 
     To change behavior, override constructor arguments such as:
     - `localization_backend="srp_phat_localization"`
@@ -119,7 +119,7 @@ class RealtimeIntelligibilityAdapter:
         postfilter_method: str = "rnnoise",
         postfilter_enabled: bool = True,
         fast_frame_ms: int = 10,
-        localization_hop_ms: int = 10,
+        localization_hop_ms: int = 200,
         localization_window_ms: int = 200,
         localization_grid_size: int = 72,
         localization_vad_enabled: bool = False,

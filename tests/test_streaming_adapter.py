@@ -25,6 +25,9 @@ def test_streaming_adapter_defaults_match_requested_realtime_shape() -> None:
         assert adapter.request.separation_mode == "single_dominant_no_separator"
         assert adapter.request.single_active is True
         assert adapter.request.sample_rate_hz == 16000
+        assert adapter.request.fast_frame_ms == 10
+        assert adapter.request.localization_hop_ms == 200
+        assert adapter.request.localization_window_ms == 200
         assert adapter.channel_count == 4
         assert adapter.frame_samples == 160
         assert adapter.window_samples == 3200
