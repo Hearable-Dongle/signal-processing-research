@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import Callable
 
 import numpy as np
-from scipy.signal import butter, iirnotch, resample_poly, sosfilt, sosfiltfilt, tf2sos
+from scipy.signal import butter, iirnotch, sosfilt, tf2sos
 from scipy.special import exp1
 
 try:
@@ -1439,18 +1439,23 @@ class _RNNoisePostFilter:
         if PyRNNoise is None:
             raise RuntimeError("RNNoise postfilter requested but pyrnnoise is unavailable.")
         self.cfg = cfg
-        self._backend_sample_rate_hz = 48000
         self._input_sample_rate_hz = int(cfg.sample_rate_hz)
-        self._backend = PyRNNoise(self._backend_sample_rate_hz)
-        self._frame_size = 480
-        self._pending_in = np.zeros((0,), dtype=np.float32)
+        self._backend = PyRNNoise(self._input_sample_rate_hz)
+        self._frame_size = max(1, int(round(self._input_sample_rate_hz * (float(cfg.fast_frame_ms) / 1000.0))))
         self._pending_out = np.zeros((0,), dtype=np.float32)
         self._pending_vad = np.zeros((0,), dtype=np.float32)
+        self._pending_ref = np.zeros((0,), dtype=np.float32)
         self._prev_backend_chunk = np.zeros((0,), dtype=np.float32)
         self._last_good_backend_chunk = np.zeros((0,), dtype=np.float32)
+        self._last_output_sample = 0.0
         self._residual_ema_state = np.zeros((0,), dtype=np.float32)
         self._residual_jump_prev_band_rms = 0.0
         self._declick_prev_output_sample = 0.0
+        self._backend_emission_count = 0
+        self._backend_emission_samples = 0
+        self._output_underflow_count = 0
+        self._output_underflow_samples = 0
+        self._output_fifo_max = 0
         self._backend.channels = 1
         self._backend.dtype = np.int16
         self._boundary_jump_window = 16
@@ -1535,6 +1540,9 @@ class _RNNoisePostFilter:
             if cutoff_hz <= 0.0 or cutoff_hz >= 0.5 * float(self._input_sample_rate_hz)
             else butter(6, cutoff_hz, btype="lowpass", fs=float(self._input_sample_rate_hz), output="sos")
         )
+        self._output_lowpass_zi = (
+            None if self._output_lowpass_sos is None else np.zeros((self._output_lowpass_sos.shape[0], 2), dtype=np.float32)
+        )
         notch_freq_hz = float(max(getattr(cfg, "rnnoise_output_notch_freq_hz", 0.0), 0.0))
         notch_q = float(max(getattr(cfg, "rnnoise_output_notch_q", 0.0), 0.0))
         if 0.0 < notch_freq_hz < 0.5 * float(self._input_sample_rate_hz) and notch_q > 0.0:
@@ -1586,12 +1594,12 @@ class _RNNoisePostFilter:
             if warm_frames > 0:
                 silence_i16 = np.zeros((1, self._frame_size), dtype=np.int16)
                 for _ in range(warm_frames):
-                    _vad_prob, den = self._backend.denoise_frame(silence_i16, partial=False)
-                    den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
-                    if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
-                        den_arr = den_arr / 32768.0
-                    self._prev_backend_chunk = den_arr.astype(np.float32, copy=False)
-                    self._last_good_backend_chunk = self._prev_backend_chunk.copy()
+                    for _vad_prob, den in self._backend.denoise_chunk(silence_i16, partial=False):
+                        den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
+                        if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
+                            den_arr = den_arr / 32768.0
+                        self._prev_backend_chunk = den_arr.astype(np.float32, copy=False)
+                        self._last_good_backend_chunk = self._prev_backend_chunk.copy()
 
     def _record_backend_chunk_diagnostics(self, *, input_chunk: np.ndarray, output_chunk: np.ndarray) -> None:
         in_chunk = np.asarray(input_chunk, dtype=np.float32).reshape(-1)
@@ -1669,6 +1677,11 @@ class _RNNoisePostFilter:
             "rnnoise_output_input_peak_ratio_max": float(self._output_input_peak_ratio_max),
             "rnnoise_output_input_rms_ratio_max": float(self._output_input_rms_ratio_max),
             "rnnoise_suspect_frame_count": int(self._suspect_frame_count),
+            "rnnoise_backend_emission_count": int(self._backend_emission_count),
+            "rnnoise_backend_emission_samples": int(self._backend_emission_samples),
+            "rnnoise_output_underflow_count": int(self._output_underflow_count),
+            "rnnoise_output_underflow_samples": int(self._output_underflow_samples),
+            "rnnoise_output_fifo_max_samples": int(self._output_fifo_max),
         }
 
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
@@ -1680,85 +1693,79 @@ class _RNNoisePostFilter:
             x_for_rnnoise = np.asarray(x_for_rnnoise, dtype=np.float32)
         gain = float(10.0 ** (float(self.cfg.rnnoise_input_gain_db) / 20.0))
         x_in = (x_for_rnnoise * gain).astype(np.float32, copy=False)
-        if self._input_sample_rate_hz != self._backend_sample_rate_hz:
-            x_in = np.asarray(
-                resample_poly(x_in, up=self._backend_sample_rate_hz, down=self._input_sample_rate_hz),
-                dtype=np.float32,
-            )
-        expected_backend_samples = int(x_in.shape[0])
-        self._pending_in = np.concatenate([self._pending_in, x_in], axis=0)
+        expected_output_samples = int(x.shape[0])
+        self._pending_ref = np.concatenate([self._pending_ref, x_in], axis=0)
         parts: list[np.ndarray] = []
-        while self._pending_in.shape[0] >= self._frame_size:
-            chunk = self._pending_in[: self._frame_size]
-            self._pending_in = self._pending_in[self._frame_size :]
-            chunk_i16 = np.clip(np.round(chunk * 32768.0), -32768.0, 32767.0).astype(np.int16, copy=False)
-            vad_prob, den = self._backend.denoise_frame(np.atleast_2d(chunk_i16), partial=False)
+        vad_parts: list[np.ndarray] = []
+        chunk_i16 = np.clip(np.round(x_in * 32768.0), -32768.0, 32767.0).astype(np.int16, copy=False)
+        for vad_prob, den in self._backend.denoise_chunk(np.atleast_2d(chunk_i16), partial=False):
             den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
             if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
                 den_arr = den_arr / 32768.0
             den_arr = np.asarray(den_arr, dtype=np.float32)
-            self._record_backend_chunk_diagnostics(input_chunk=chunk, output_chunk=den_arr)
+            if den_arr.size == 0:
+                continue
+            ref_len = min(int(den_arr.shape[0]), int(self._pending_ref.shape[0]))
+            if ref_len > 0:
+                ref_chunk = self._pending_ref[:ref_len]
+                self._pending_ref = self._pending_ref[ref_len:]
+                if ref_len < den_arr.shape[0]:
+                    ref_chunk = np.pad(ref_chunk, (0, den_arr.shape[0] - ref_len))
+            else:
+                ref_chunk = np.zeros((den_arr.shape[0],), dtype=np.float32)
+            self._record_backend_chunk_diagnostics(input_chunk=ref_chunk, output_chunk=den_arr)
             if bool(getattr(self.cfg, "rnnoise_corruption_guard_enabled", False)):
-                in_peak = float(np.max(np.abs(chunk))) if chunk.size else 0.0
+                in_peak = float(np.max(np.abs(ref_chunk))) if ref_chunk.size else 0.0
                 out_peak = float(np.max(np.abs(den_arr))) if den_arr.size else 0.0
-                in_rms = float(np.sqrt(np.mean(np.asarray(chunk, dtype=np.float64) ** 2) + 1e-12))
+                in_rms = float(np.sqrt(np.mean(np.asarray(ref_chunk, dtype=np.float64) ** 2) + 1e-12))
                 out_rms = float(np.sqrt(np.mean(np.asarray(den_arr, dtype=np.float64) ** 2) + 1e-12))
                 bad_rms = out_rms > float(getattr(self.cfg, "rnnoise_corruption_guard_rms_ratio_threshold", 2.0)) * max(in_rms, 1e-6)
                 bad_peak = out_peak > float(getattr(self.cfg, "rnnoise_corruption_guard_peak_ratio_threshold", 3.0)) * max(in_peak, 1e-6)
                 if bad_rms or bad_peak:
                     mode = str(getattr(self.cfg, "rnnoise_corruption_guard_mode", "hold_previous")).strip().lower()
                     if mode == "use_input":
-                        den_arr = np.asarray(chunk, dtype=np.float32).copy()
+                        den_arr = np.asarray(ref_chunk, dtype=np.float32).copy()
                     elif mode == "mute":
                         den_arr = np.zeros_like(den_arr)
                     else:
                         den_arr = (
                             self._last_good_backend_chunk.copy()
                             if self._last_good_backend_chunk.shape == den_arr.shape and self._last_good_backend_chunk.size
-                            else np.asarray(chunk, dtype=np.float32).copy()
+                            else np.asarray(ref_chunk, dtype=np.float32).copy()
                         )
             den_arr = self._apply_backend_crossfade(den_arr)
             parts.append(den_arr)
             self._prev_backend_chunk = den_arr.copy()
             self._last_good_backend_chunk = den_arr.copy()
+            self._backend_emission_count += 1
+            self._backend_emission_samples += int(den_arr.shape[0])
             vad_arr = np.asarray(vad_prob, dtype=np.float32).reshape(-1)
             vad_scalar = float(vad_arr[0]) if vad_arr.size else 0.0
             vad_scalar = float(np.clip(vad_scalar, 0.0, 1.0))
-            self._pending_vad = np.concatenate(
-                [self._pending_vad, np.full((self._frame_size,), vad_scalar, dtype=np.float32)],
-                axis=0,
-            )
+            vad_parts.append(np.full((den_arr.shape[0],), vad_scalar, dtype=np.float32))
         if parts:
             self._pending_out = np.concatenate([self._pending_out, np.concatenate(parts, axis=0)], axis=0)
-        if self._pending_out.shape[0] < expected_backend_samples:
-            out = np.pad(self._pending_out, (0, expected_backend_samples - self._pending_out.shape[0]))
+            self._output_fifo_max = max(self._output_fifo_max, int(self._pending_out.shape[0]))
+        if vad_parts:
+            self._pending_vad = np.concatenate([self._pending_vad, np.concatenate(vad_parts, axis=0)], axis=0)
+        if self._pending_out.shape[0] < expected_output_samples:
+            shortfall = expected_output_samples - self._pending_out.shape[0]
+            pad_value = float(self._last_output_sample)
+            out = np.pad(self._pending_out, (0, shortfall), constant_values=pad_value)
             self._pending_out = np.zeros((0,), dtype=np.float32)
+            self._output_underflow_count += 1
+            self._output_underflow_samples += int(shortfall)
         else:
-            out = self._pending_out[: expected_backend_samples]
-            self._pending_out = self._pending_out[expected_backend_samples :]
-        if self._pending_vad.shape[0] < expected_backend_samples:
-            vad_env = np.pad(self._pending_vad, (0, expected_backend_samples - self._pending_vad.shape[0]), constant_values=0.0)
+            out = self._pending_out[: expected_output_samples]
+            self._pending_out = self._pending_out[expected_output_samples :]
+        if self._pending_vad.shape[0] < expected_output_samples:
+            vad_env = np.pad(self._pending_vad, (0, expected_output_samples - self._pending_vad.shape[0]), constant_values=0.0)
             self._pending_vad = np.zeros((0,), dtype=np.float32)
         else:
-            vad_env = self._pending_vad[: expected_backend_samples]
-            self._pending_vad = self._pending_vad[expected_backend_samples :]
-        if self._input_sample_rate_hz != self._backend_sample_rate_hz:
-            out = np.asarray(
-                resample_poly(out, up=self._input_sample_rate_hz, down=self._backend_sample_rate_hz),
-                dtype=np.float32,
-            )
-            if out.shape[0] > x.shape[0]:
-                out = out[: x.shape[0]]
-            elif out.shape[0] < x.shape[0]:
-                out = np.pad(out, (0, x.shape[0] - out.shape[0]))
-            vad_env = np.asarray(
-                resample_poly(vad_env, up=self._input_sample_rate_hz, down=self._backend_sample_rate_hz),
-                dtype=np.float32,
-            )
-            if vad_env.shape[0] > x.shape[0]:
-                vad_env = vad_env[: x.shape[0]]
-            elif vad_env.shape[0] < x.shape[0]:
-                vad_env = np.pad(vad_env, (0, x.shape[0] - vad_env.shape[0]), constant_values=0.0)
+            vad_env = self._pending_vad[: expected_output_samples]
+            self._pending_vad = self._pending_vad[expected_output_samples :]
+        if out.shape[0] > 0:
+            self._last_output_sample = float(out[-1])
         if self._residual_ema_state.shape[0] != x.shape[0]:
             self._residual_ema_state = np.zeros((x.shape[0],), dtype=np.float32)
         residual = np.asarray(out - x, dtype=np.float32)
@@ -1814,8 +1821,9 @@ class _RNNoisePostFilter:
         if self._output_highpass_sos is not None and self._output_highpass_zi is not None and mixed.shape[0] > 0:
             mixed, self._output_highpass_zi = sosfilt(self._output_highpass_sos, mixed, zi=self._output_highpass_zi)
             mixed = np.asarray(mixed, dtype=np.float32)
-        if self._output_lowpass_sos is not None and mixed.shape[0] > 8:
-            mixed = np.asarray(sosfiltfilt(self._output_lowpass_sos, mixed), dtype=np.float32)
+        if self._output_lowpass_sos is not None and self._output_lowpass_zi is not None and mixed.shape[0] > 0:
+            mixed, self._output_lowpass_zi = sosfilt(self._output_lowpass_sos, mixed, zi=self._output_lowpass_zi)
+            mixed = np.asarray(mixed, dtype=np.float32)
         if self._output_notch_sos is not None and self._output_notch_zi is not None and mixed.shape[0] > 0:
             mixed, self._output_notch_zi = sosfilt(self._output_notch_sos, mixed, zi=self._output_notch_zi)
             mixed = np.asarray(mixed, dtype=np.float32)
