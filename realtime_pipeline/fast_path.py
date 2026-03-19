@@ -2034,6 +2034,18 @@ class FastPathWorker(threading.Thread):
             capon_peak_min_sharpness=float(config.capon_peak_min_sharpness),
             capon_peak_min_margin=float(config.capon_peak_min_margin),
             capon_hold_frames=int(config.capon_hold_frames),
+            capon_freq_bin_subsample_stride=int(config.capon_freq_bin_subsample_stride),
+            capon_freq_bin_min_hz=(
+                None if config.capon_freq_bin_min_hz is None else int(config.capon_freq_bin_min_hz)
+            ),
+            capon_freq_bin_max_hz=(
+                None if config.capon_freq_bin_max_hz is None else int(config.capon_freq_bin_max_hz)
+            ),
+            capon_use_cholesky_solve=bool(config.capon_use_cholesky_solve),
+            capon_covariance_ema_alpha=float(config.capon_covariance_ema_alpha),
+            capon_full_scan_every_n_updates=int(config.capon_full_scan_every_n_updates),
+            capon_local_refine_enabled=bool(config.capon_local_refine_enabled),
+            capon_local_refine_half_width_deg=float(config.capon_local_refine_half_width_deg),
             max_tracks=config.localization_max_tracks,
             max_assoc_distance_deg=config.localization_max_assoc_distance_deg,
             track_hold_frames=config.localization_track_hold_frames,

@@ -16,6 +16,7 @@ class FastPathConfig(BaseModel):
     fast_frame_ms: int = 10
     localization_hop_ms: int = 10
     localization_window_ms: int = 160
+    localization_grid_size: int = 72
     input_downsample_rate_hz: int | None = None
     overlap: float = 0.2
     freq_low_hz: int = 200
@@ -95,7 +96,16 @@ class FastPathConfig(BaseModel):
     capon_peak_min_sharpness: float = 0.12
     capon_peak_min_margin: float = 0.04
     capon_hold_frames: int = 2
+    capon_freq_bin_subsample_stride: int = 1
+    capon_freq_bin_min_hz: int | None = None
+    capon_freq_bin_max_hz: int | None = None
+    capon_use_cholesky_solve: bool = False
+    capon_covariance_ema_alpha: float = 0.0
+    capon_full_scan_every_n_updates: int = 1
+    capon_local_refine_enabled: bool = False
+    capon_local_refine_half_width_deg: float = 30.0
     localization_track_hold_frames: int = 5
+    localization_max_assoc_distance_deg: float = 20.0
     localization_velocity_alpha: float = 0.35
     localization_angle_alpha: float = 0.30
     srp_peak_ema_alpha: float = 0.35
@@ -222,6 +232,10 @@ class SessionStartRequest(BaseModel):
     @property
     def localization_window_ms(self) -> int:
         return int(self.fast_path.localization_window_ms)
+
+    @property
+    def localization_grid_size(self) -> int:
+        return int(self.fast_path.localization_grid_size)
 
     @property
     def input_downsample_rate_hz(self) -> int | None:
@@ -436,6 +450,10 @@ class SessionStartRequest(BaseModel):
         return int(self.fast_path.localization_track_hold_frames)
 
     @property
+    def localization_max_assoc_distance_deg(self) -> float:
+        return float(self.fast_path.localization_max_assoc_distance_deg)
+
+    @property
     def localization_velocity_alpha(self) -> float:
         return float(self.fast_path.localization_velocity_alpha)
 
@@ -466,6 +484,40 @@ class SessionStartRequest(BaseModel):
     @property
     def capon_hold_frames(self) -> int:
         return int(self.fast_path.capon_hold_frames)
+
+    @property
+    def capon_freq_bin_subsample_stride(self) -> int:
+        return int(self.fast_path.capon_freq_bin_subsample_stride)
+
+    @property
+    def capon_freq_bin_min_hz(self) -> int | None:
+        value = self.fast_path.capon_freq_bin_min_hz
+        return None if value is None else int(value)
+
+    @property
+    def capon_freq_bin_max_hz(self) -> int | None:
+        value = self.fast_path.capon_freq_bin_max_hz
+        return None if value is None else int(value)
+
+    @property
+    def capon_use_cholesky_solve(self) -> bool:
+        return bool(self.fast_path.capon_use_cholesky_solve)
+
+    @property
+    def capon_covariance_ema_alpha(self) -> float:
+        return float(self.fast_path.capon_covariance_ema_alpha)
+
+    @property
+    def capon_full_scan_every_n_updates(self) -> int:
+        return int(self.fast_path.capon_full_scan_every_n_updates)
+
+    @property
+    def capon_local_refine_enabled(self) -> bool:
+        return bool(self.fast_path.capon_local_refine_enabled)
+
+    @property
+    def capon_local_refine_half_width_deg(self) -> float:
+        return float(self.fast_path.capon_local_refine_half_width_deg)
 
     @property
     def enhancement_tier(self) -> str:

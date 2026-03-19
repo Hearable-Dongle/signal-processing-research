@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from scipy.signal import resample_poly
 
 from simulation.simulation_config import SimulationConfig
 from simulation.simulator import run_simulation
@@ -25,6 +26,20 @@ def _frame_iter(mic_audio: np.ndarray, frame_samples: int):
         if frame.shape[0] < frame_samples:
             frame = np.pad(frame, ((0, frame_samples - frame.shape[0]), (0, 0)))
         yield frame.astype(np.float32, copy=False)
+
+
+def _resample_multichannel_audio(
+    audio: np.ndarray,
+    *,
+    in_sample_rate_hz: int,
+    out_sample_rate_hz: int,
+) -> np.ndarray:
+    if int(in_sample_rate_hz) == int(out_sample_rate_hz):
+        return np.asarray(audio, dtype=np.float32, copy=False)
+    return np.asarray(
+        resample_poly(audio, up=int(out_sample_rate_hz), down=int(in_sample_rate_hz), axis=0),
+        dtype=np.float32,
+    )
 
 
 def run_simulation_pipeline(
@@ -48,6 +63,33 @@ def run_simulation_pipeline(
     control_mode: str = "spatial_peak_mode",
     localization_window_ms: int = 160,
     localization_hop_ms: int = 50,
+    localization_grid_size: int = 72,
+    srp_overlap: float = 0.2,
+    srp_freq_min_hz: int = 1200,
+    srp_freq_max_hz: int = 5400,
+    localization_track_hold_frames: int = 5,
+    localization_max_assoc_distance_deg: float = 20.0,
+    localization_velocity_alpha: float = 0.35,
+    localization_angle_alpha: float = 0.30,
+    localization_snr_gating_enabled: bool = True,
+    localization_snr_threshold_db: float = 3.0,
+    localization_msc_variance_enabled: bool = True,
+    localization_msc_history_frames: int = 6,
+    localization_hsda_enabled: bool = True,
+    localization_hsda_window_frames: int = 5,
+    capon_spectrum_ema_alpha: float = 0.78,
+    capon_peak_min_sharpness: float = 0.12,
+    capon_peak_min_margin: float = 0.04,
+    capon_hold_frames: int = 2,
+    capon_freq_bin_subsample_stride: int = 1,
+    capon_freq_bin_min_hz: int | None = None,
+    capon_freq_bin_max_hz: int | None = None,
+    capon_use_cholesky_solve: bool = False,
+    capon_covariance_ema_alpha: float = 0.0,
+    capon_full_scan_every_n_updates: int = 1,
+    capon_local_refine_enabled: bool = False,
+    capon_local_refine_half_width_deg: float = 30.0,
+    input_downsample_rate_hz: int | None = None,
     direction_long_memory_enabled: bool = True,
     direction_long_memory_window_ms: float = 60000.0,
     direction_history_window_chunks: int = 4,
@@ -72,19 +114,38 @@ def run_simulation_pipeline(
 ) -> dict:
     sim_cfg = SimulationConfig.from_file(scene_config_path)
     mic_audio, mic_pos, _source_signals = run_simulation(sim_cfg)
+    processing_sample_rate_hz = int(sim_cfg.audio.fs)
+    if input_downsample_rate_hz is not None and int(input_downsample_rate_hz) > 0 and int(input_downsample_rate_hz) != int(sim_cfg.audio.fs):
+        processing_sample_rate_hz = int(input_downsample_rate_hz)
+        mic_audio = _resample_multichannel_audio(
+            mic_audio,
+            in_sample_rate_hz=int(sim_cfg.audio.fs),
+            out_sample_rate_hz=processing_sample_rate_hz,
+        )
     default_cfg = PipelineConfig()
 
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
     cfg = PipelineConfig(
-        sample_rate_hz=sim_cfg.audio.fs,
+        sample_rate_hz=int(processing_sample_rate_hz),
+        input_sample_rate_hz=int(sim_cfg.audio.fs),
+        input_downsample_rate_hz=(None if input_downsample_rate_hz is None else int(input_downsample_rate_hz)),
         fast_frame_ms=int(fast_frame_ms),
         slow_chunk_ms=int(slow_chunk_ms),
         slow_chunk_hop_ms=None if slow_chunk_hop_ms is None else int(slow_chunk_hop_ms),
         fast_path_reference_mode=str(fast_path_reference_mode),
         localization_window_ms=int(localization_window_ms),
         localization_hop_ms=int(localization_hop_ms),
+        localization_grid_size=max(8, int(localization_grid_size)),
+        single_source_grid_size=max(8, int(localization_grid_size)),
+        srp_overlap=float(srp_overlap),
+        srp_freq_min_hz=int(srp_freq_min_hz),
+        srp_freq_max_hz=int(srp_freq_max_hz),
+        localization_track_hold_frames=max(1, int(localization_track_hold_frames)),
+        localization_max_assoc_distance_deg=float(localization_max_assoc_distance_deg),
+        localization_velocity_alpha=float(localization_velocity_alpha),
+        localization_angle_alpha=float(localization_angle_alpha),
         convtasnet_model_name=str(convtasnet_model_name),
         convtasnet_model_sample_rate_hz=int(convtasnet_model_sample_rate_hz),
         convtasnet_input_sample_rate_hz=int(convtasnet_input_sample_rate_hz),
@@ -103,6 +164,18 @@ def run_simulation_pipeline(
         ),
         localization_backend=str(localization_backend),
         localization_vad_enabled=bool(localization_vad_enabled),
+        capon_spectrum_ema_alpha=float(capon_spectrum_ema_alpha),
+        capon_peak_min_sharpness=float(capon_peak_min_sharpness),
+        capon_peak_min_margin=float(capon_peak_min_margin),
+        capon_hold_frames=int(capon_hold_frames),
+        capon_freq_bin_subsample_stride=max(1, int(capon_freq_bin_subsample_stride)),
+        capon_freq_bin_min_hz=(None if capon_freq_bin_min_hz is None else int(capon_freq_bin_min_hz)),
+        capon_freq_bin_max_hz=(None if capon_freq_bin_max_hz is None else int(capon_freq_bin_max_hz)),
+        capon_use_cholesky_solve=bool(capon_use_cholesky_solve),
+        capon_covariance_ema_alpha=float(capon_covariance_ema_alpha),
+        capon_full_scan_every_n_updates=max(1, int(capon_full_scan_every_n_updates)),
+        capon_local_refine_enabled=bool(capon_local_refine_enabled),
+        capon_local_refine_half_width_deg=float(capon_local_refine_half_width_deg),
         tracking_mode=str(tracking_mode),
         control_mode=str(control_mode),
         direction_long_memory_enabled=bool(direction_long_memory_enabled),
@@ -123,6 +196,8 @@ def run_simulation_pipeline(
         max_speakers_hint=max(1, len(list(iter_target_source_indices(sim_cfg)))),
         beamforming_mode=str(beamforming_mode),
         target_activity_rnn_update_mode="estimated_target_activity" if str(beamforming_mode).strip().lower() in {"mvdr_fd", "lcmv_target_band"} else None,
+        target_activity_detector_mode="localization_peak_confidence",
+        target_activity_detector_backend="webrtc_fused",
         output_normalization_enabled=bool(output_normalization_enabled),
         output_allow_amplification=bool(output_allow_amplification),
         srp_prior_enabled=bool(robust_mode),

@@ -1,7 +1,7 @@
 import numpy as np
 import pyroomacoustics as pra
 import scipy.signal as signal
-from scipy.linalg import eigh
+from scipy.linalg import cho_factor, cho_solve, eigh
 
 
 def _circular_local_maxima(
@@ -843,10 +843,21 @@ class CaponLocalization:
         self.peak_min_sharpness = float(kwargs.get("capon_peak_min_sharpness", 0.12))
         self.peak_min_margin = float(kwargs.get("capon_peak_min_margin", 0.04))
         self.hold_frames = int(kwargs.get("capon_hold_frames", 2))
+        self.freq_bin_subsample_stride = int(max(1, kwargs.get("capon_freq_bin_subsample_stride", 1)))
+        self.freq_bin_min_hz = kwargs.get("capon_freq_bin_min_hz", None)
+        self.freq_bin_max_hz = kwargs.get("capon_freq_bin_max_hz", None)
+        self.use_cholesky_solve = bool(kwargs.get("capon_use_cholesky_solve", False))
+        self.covariance_ema_alpha = float(np.clip(kwargs.get("capon_covariance_ema_alpha", 0.0), 0.0, 0.999))
+        self.full_scan_every_n_updates = int(max(1, kwargs.get("capon_full_scan_every_n_updates", 1)))
+        self.local_refine_enabled = bool(kwargs.get("capon_local_refine_enabled", False))
+        self.local_refine_half_width_deg = float(max(1.0, kwargs.get("capon_local_refine_half_width_deg", 30.0)))
         self._spectrum_accum: np.ndarray | None = None
+        self._covariance_accum: np.ndarray | None = None
+        self._covariance_freqs_hz: np.ndarray | None = None
         self._last_accepted_angle: float | None = None
         self._last_accepted_score: float = 0.0
         self._hold_remaining = 0
+        self._update_counter = 0
         self.last_debug: dict[str, float | int | str | bool] = {}
         self.last_peak_scores: list[float] = []
         self.refine_window_deg = float(kwargs.get("capon_refine_window_deg", 20.0))
@@ -897,37 +908,107 @@ class CaponLocalization:
         )
 
         f_min, f_max = self.freq_range
+        if self.freq_bin_min_hz is not None:
+            f_min = max(f_min, int(self.freq_bin_min_hz))
+        if self.freq_bin_max_hz is not None:
+            f_max = min(f_max, int(self.freq_bin_max_hz))
         f_mask = (f_vec >= f_min) & (f_vec <= f_max)
-        relevant_freqs = f_vec[f_mask].astype(float)
-        Zxx_roi = Zxx[:, f_mask, :]
+        eligible_idx = np.flatnonzero(f_mask)
+        if eligible_idx.size == 0:
+            return None
+        eligible_idx = eligible_idx[:: self.freq_bin_subsample_stride]
+        relevant_freqs = f_vec[eligible_idx].astype(float)
+        Zxx_roi = Zxx[:, eligible_idx, :]
         if Zxx_roi.shape[1] == 0 or Zxx_roi.shape[2] == 0:
             return None
         return relevant_freqs, Zxx_roi
+
+    def _search_angles_for_update(self) -> tuple[np.ndarray, bool]:
+        self._update_counter += 1
+        full_scan = (
+            (not self.local_refine_enabled)
+            or self._last_accepted_angle is None
+            or self.full_scan_every_n_updates <= 1
+            or ((self._update_counter - 1) % self.full_scan_every_n_updates == 0)
+        )
+        if full_scan:
+            return np.linspace(0, 2 * np.pi, self.grid_size, endpoint=False), True
+        step_deg = max(360.0 / max(self.grid_size, 1), 0.5)
+        offsets_deg = np.arange(
+            -self.local_refine_half_width_deg,
+            self.local_refine_half_width_deg + (0.5 * step_deg),
+            step_deg,
+            dtype=np.float64,
+        )
+        center_deg = float(np.degrees(float(self._last_accepted_angle)) % 360.0)
+        local_angles_deg = (center_deg + offsets_deg) % 360.0
+        return np.deg2rad(local_angles_deg), False
+
+    def _update_covariance_bank(self, relevant_freqs: np.ndarray, Zxx_roi: np.ndarray) -> np.ndarray:
+        m_mics = int(Zxx_roi.shape[0])
+        freq_count = int(Zxx_roi.shape[1])
+        if (
+            self._covariance_accum is None
+            or self._covariance_accum.shape != (freq_count, m_mics, m_mics)
+            or self._covariance_freqs_hz is None
+            or self._covariance_freqs_hz.shape != relevant_freqs.shape
+            or not np.allclose(self._covariance_freqs_hz, relevant_freqs)
+        ):
+            self._covariance_accum = np.zeros((freq_count, m_mics, m_mics), dtype=np.complex128)
+            self._covariance_freqs_hz = np.asarray(relevant_freqs, dtype=np.float64).copy()
+
+        out = np.zeros_like(self._covariance_accum)
+        use_ema = self.covariance_ema_alpha > 0.0
+        for f_idx in range(freq_count):
+            snapshots = np.asarray(Zxx_roi[:, f_idx, :], dtype=np.complex128)
+            if snapshots.ndim != 2 or snapshots.shape[1] == 0:
+                continue
+            cov_inst = (snapshots @ snapshots.conj().T) / max(1, snapshots.shape[1])
+            if use_ema:
+                prev = self._covariance_accum[f_idx]
+                cov = (self.covariance_ema_alpha * prev) + ((1.0 - self.covariance_ema_alpha) * cov_inst)
+            else:
+                cov = cov_inst
+            self._covariance_accum[f_idx] = cov
+            out[f_idx] = cov
+        return out
 
     def _capon_spectrum_from_roi(self, relevant_freqs: np.ndarray, Zxx_roi: np.ndarray, search_angles: np.ndarray) -> np.ndarray:
         m_mics = int(Zxx_roi.shape[0])
         dirs = np.stack([np.cos(search_angles), np.sin(search_angles), np.zeros_like(search_angles)], axis=1)
         spectrum = np.zeros(search_angles.shape[0], dtype=np.float64)
         eye = np.eye(m_mics, dtype=np.complex128)
+        covariances = self._update_covariance_bank(relevant_freqs, Zxx_roi)
 
         for f_idx, freq_hz in enumerate(relevant_freqs):
-            snapshots = np.asarray(Zxx_roi[:, f_idx, :], dtype=np.complex128)
-            if snapshots.ndim != 2 or snapshots.shape[1] == 0:
+            cov = covariances[f_idx]
+            if not np.any(cov):
                 continue
-            cov = (snapshots @ snapshots.conj().T) / max(1, snapshots.shape[1])
             trace_scale = float(np.real(np.trace(cov))) / max(1, m_mics)
             load = max(self.diagonal_loading * max(trace_scale, 1e-8), 1e-8)
             cov_loaded = cov + load * eye
-            try:
-                cov_inv = np.linalg.pinv(cov_loaded, hermitian=True)
-            except TypeError:
-                cov_inv = np.linalg.pinv(cov_loaded)
 
             mic_projections = self.mic_pos.T @ dirs.T  # (M, A)
             tau = mic_projections / float(self.c)
             tau = tau - np.mean(tau, axis=0, keepdims=True)
             steering = np.exp(-1j * 2.0 * np.pi * float(freq_hz) * tau)  # (M, A)
-            numerators = np.einsum("ma,mn,na->a", steering.conj(), cov_inv, steering, optimize=True)
+            solved = None
+            if self.use_cholesky_solve:
+                try:
+                    chol = cho_factor(cov_loaded, lower=False, check_finite=False, overwrite_a=False)
+                    solved = cho_solve(chol, steering, check_finite=False)
+                except Exception:
+                    solved = None
+            if solved is None:
+                try:
+                    solved = np.linalg.solve(cov_loaded, steering)
+                except np.linalg.LinAlgError:
+                    try:
+                        cov_inv = np.linalg.pinv(cov_loaded, hermitian=True)
+                    except TypeError:
+                        cov_inv = np.linalg.pinv(cov_loaded)
+                    solved = cov_inv @ steering
+            numerators = np.einsum("ma,ma->a", steering.conj(), solved, optimize=True)
             denom = np.maximum(np.real(numerators), 1e-10)
             spectrum += 1.0 / denom
 
@@ -1021,7 +1102,7 @@ class CaponLocalization:
             return [], np.zeros(self.grid_size), []
         relevant_freqs, Zxx_roi = roi
 
-        search_angles = np.linspace(0, 2 * np.pi, self.grid_size, endpoint=False)
+        search_angles, used_full_scan = self._search_angles_for_update()
         spectrum = self._capon_spectrum_from_roi(relevant_freqs, Zxx_roi, search_angles)
         smooth_spectrum = self._smooth_spectrum(spectrum)
 
@@ -1039,6 +1120,9 @@ class CaponLocalization:
         accepted = bool(peak_eval["accepted"])
         self.last_debug.update(
             {
+                "capon_used_full_scan": bool(used_full_scan),
+                "capon_search_angle_count": int(search_angles.size),
+                "capon_freq_bin_count": int(relevant_freqs.size),
                 "capon_peak_index": int(best_idx),
                 "capon_peak_score": float(best_score),
                 "capon_second_peak_index": None if second_idx is None else int(second_idx),
