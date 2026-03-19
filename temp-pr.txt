@@ -17,6 +17,9 @@ Current default stack:
 - output notch `500 Hz`, `Q = 20`
 
 Main changes on this branch:
+- migrated RNNoise to the backend's streaming `denoise_chunk(...)` path at the pipeline sample rate
+- removed manual per-frame outer `resample_poly(...)` around RNNoise
+- replaced RNNoise output `sosfiltfilt(...)` with stateful causal `sosfilt(...)`
 - RNNoise input/output HPF defaults
 - RNNoise continuity diagnostics in `summary.json`
 - corruption guard for bad RNNoise frames
@@ -25,6 +28,10 @@ Main changes on this branch:
 
 Useful example output:
 - `beamforming/benchmark/_gt_delay_sum_rnnoise_behind_poster_8k_hop200_default_guard_tests/presence_boost_25db`
+- streaming migration sanity:
+  - `beamforming/benchmark/_rnnoise_streaming_src_migration_sanity`
+- streaming migration sanity with corruption guard forced on:
+  - `beamforming/benchmark/_rnnoise_streaming_src_migration_sanity_guard`
 
 Example command:
 ```bash
@@ -41,7 +48,9 @@ env PYTHONPATH=. python beamforming/benchmark/data_collection_benchmark.py \
   --localization-window-ms 200 \
   --postfilter-method rnnoise \
   --postfilter-input-source beamformed_mono \
-  --target-activity-detector-backend webrtc_fused
+  --target-activity-detector-backend webrtc_fused \
+  --rnnoise-corruption-guard-enabled \
+  --rnnoise-corruption-guard-mode hold_previous
 ```
 
 Relevant commits:
