@@ -1492,7 +1492,7 @@ class _RNNoisePostFilter:
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
         x = np.asarray(frame, dtype=np.float32).reshape(-1)
-        x_for_rnnoise = np.asarray(x, dtype=np.float32, copy=False)
+        x_for_rnnoise = np.asarray(x, dtype=np.float32)
         if self._input_highpass_sos is not None and self._input_highpass_zi is not None and x_for_rnnoise.shape[0] > 0:
             x_for_rnnoise, self._input_highpass_zi = sosfilt(self._input_highpass_sos, x_for_rnnoise, zi=self._input_highpass_zi)
             x_for_rnnoise = np.asarray(x_for_rnnoise, dtype=np.float32)
