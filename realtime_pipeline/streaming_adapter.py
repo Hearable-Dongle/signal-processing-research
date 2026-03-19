@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
+import time
 from collections.abc import Sequence
 
 import numpy as np
@@ -11,6 +13,10 @@ from mic_array_forwarder.models import SessionStartRequest
 from realtime_pipeline.orchestrator import RealtimeSpeakerPipeline
 from realtime_pipeline.session_runtime import build_pipeline_config_from_request, build_separation_backend_for_request
 from simulation.mic_array_profiles import mic_positions_xyz
+
+logger = logging.getLogger(__name__)
+_SLOW_PROCESS_CHUNK_MS = 5.0
+_SLOW_WAIT_MS = 2.0
 
 
 def _normalize_mic_geometry_xyz(mic_geometry_xyz: np.ndarray) -> np.ndarray:
@@ -76,13 +82,13 @@ class RealtimeIntelligibilityAdapter:
 
     Default processing mirrors the current realtime path the benchmark uses, with
     these requested defaults:
-    - localization backend: `gcc_vote_median_doa`
+    - localization backend: `capon_1src`
     - beamforming mode: `delay_sum`
     - postfilter: `rnnoise`
     - mic profile: `respeaker_xvf3800_0650`
     - benchmark-style algorithm selection: `speaker_tracking_single_active`
     - localization VAD: `False` to avoid an extra `webrtcvad` runtime dependency
-    - localization window: `200 ms` by default
+    - localization hop/window: `200 ms` by default
 
     To change behavior, override constructor arguments such as:
     - `localization_backend="srp_phat_localization"`
@@ -108,12 +114,12 @@ class RealtimeIntelligibilityAdapter:
         input_sample_rate_hz: int = 16000,
         processing_sample_rate_hz: int = 16000,
         enable_resample: bool = False,
-        localization_backend: str = "gcc_vote_median_doa",
+        localization_backend: str = "capon_1src",
         beamforming_mode: str = "delay_sum",
         postfilter_method: str = "rnnoise",
         postfilter_enabled: bool = True,
         fast_frame_ms: int = 10,
-        localization_hop_ms: int = 10,
+        localization_hop_ms: int = 200,
         localization_window_ms: int = 200,
         localization_grid_size: int = 72,
         localization_vad_enabled: bool = False,
@@ -227,7 +233,13 @@ class RealtimeIntelligibilityAdapter:
             yield np.asarray(frame, dtype=np.float32)
 
     def _on_output_chunk(self, frame_mono: np.ndarray) -> None:
-        self._output_queue.put(np.asarray(frame_mono, dtype=np.float32).reshape(-1).copy())
+        chunk = np.asarray(frame_mono, dtype=np.float32).reshape(-1).copy()
+        self._output_queue.put(chunk)
+        logger.info(
+            "streaming_adapter_timing output_chunk samples=%d output_q=%d",
+            int(chunk.shape[0]),
+            int(self._output_queue.qsize()),
+        )
 
     def _mono_passthrough(self, audio: np.ndarray) -> np.ndarray:
         if audio.shape[0] == 0:
@@ -267,14 +279,27 @@ class RealtimeIntelligibilityAdapter:
     def _collect_expected_outputs(self, expected_output_samples: int) -> None:
         target = int(max(0, expected_output_samples))
         while int(self._pending_output.shape[0]) < target:
+            pending_before = int(self._pending_output.shape[0])
+            wait_started = time.perf_counter()
             try:
                 part = self._output_queue.get(timeout=self._process_timeout_s)
             except queue.Empty as exc:
                 raise TimeoutError("timed out waiting for processed audio from realtime pipeline") from exc
+            wait_ms = (time.perf_counter() - wait_started) * 1000.0
             if self._pending_output.size == 0:
                 self._pending_output = np.asarray(part, dtype=np.float32)
             else:
                 self._pending_output = np.concatenate([self._pending_output, np.asarray(part, dtype=np.float32)], axis=0)
+            if wait_ms >= _SLOW_WAIT_MS:
+                logger.info(
+                    "streaming_adapter_timing wait_output ms=%.2f target=%d pending_before=%d received=%d pending_after=%d output_q=%d",
+                    wait_ms,
+                    target,
+                    pending_before,
+                    int(np.asarray(part).shape[0]),
+                    int(self._pending_output.shape[0]),
+                    int(self._output_queue.qsize()),
+                )
 
     def _return_enhanced_chunk(self, expected_samples: int) -> np.ndarray:
         self._consume_discarded_outputs()
@@ -308,7 +333,13 @@ class RealtimeIntelligibilityAdapter:
     def process_chunk(self, channels: Sequence[np.ndarray]) -> np.ndarray:
         with self._lock:
             self._ensure_open()
+            process_started = time.perf_counter()
+            wait_ms = 0.0
+            expected_output_samples = 0
+            frames_enqueued = 0
+            prepare_started = time.perf_counter()
             audio = self._prepare_chunk(channels)
+            prepare_ms = (time.perf_counter() - prepare_started) * 1000.0
             callback_samples = int(audio.shape[0])
             passthrough = self._mono_passthrough(audio)
             self._append_history(audio)
@@ -322,11 +353,29 @@ class RealtimeIntelligibilityAdapter:
             while self._pending_input.shape[0] >= int(self._frame_samples):
                 frames_to_process.append(self._pending_input[: self._frame_samples, :].copy())
                 self._pending_input = self._pending_input[self._frame_samples :, :]
+            frames_enqueued = int(len(frames_to_process))
 
             if not frames_to_process:
                 if warmup_active:
                     self._discard_output_samples += int(callback_samples)
                     self._consume_discarded_outputs()
+                    total_ms = (time.perf_counter() - process_started) * 1000.0
+                    if total_ms >= _SLOW_PROCESS_CHUNK_MS:
+                        logger.info(
+                            "streaming_adapter_timing process_chunk ms=%.2f prepare_ms=%.2f wait_ms=%.2f callback_samples=%d expected=%d warmup=%s frames=%d pending_input=%d pending_output=%d discard=%d frame_q=%d output_q=%d mode=warmup_no_frames",
+                            total_ms,
+                            prepare_ms,
+                            wait_ms,
+                            callback_samples,
+                            expected_output_samples,
+                            bool(warmup_active),
+                            frames_enqueued,
+                            int(self._pending_input.shape[0]),
+                            int(self._pending_output.shape[0]),
+                            int(self._discard_output_samples),
+                            int(self._frame_queue.qsize()),
+                            int(self._output_queue.qsize()),
+                        )
                     return passthrough
                 raise ValueError(
                     f"callback must supply at least one full processing frame after warm-up; "
@@ -338,14 +387,53 @@ class RealtimeIntelligibilityAdapter:
 
             expected_output_samples = int(len(frames_to_process) * self._frame_samples)
             if warmup_active:
+                wait_started = time.perf_counter()
                 self._warmup_frames_enqueued += int(len(frames_to_process))
                 self._discard_output_samples += int(expected_output_samples)
                 self._consume_discarded_outputs()
                 self._collect_expected_outputs(int(expected_output_samples))
                 self._consume_discarded_outputs()
+                wait_ms = (time.perf_counter() - wait_started) * 1000.0
+                total_ms = (time.perf_counter() - process_started) * 1000.0
+                if total_ms >= _SLOW_PROCESS_CHUNK_MS:
+                    logger.info(
+                        "streaming_adapter_timing process_chunk ms=%.2f prepare_ms=%.2f wait_ms=%.2f callback_samples=%d expected=%d warmup=%s frames=%d pending_input=%d pending_output=%d discard=%d frame_q=%d output_q=%d mode=warmup",
+                        total_ms,
+                        prepare_ms,
+                        wait_ms,
+                        callback_samples,
+                        expected_output_samples,
+                        bool(warmup_active),
+                        frames_enqueued,
+                        int(self._pending_input.shape[0]),
+                        int(self._pending_output.shape[0]),
+                        int(self._discard_output_samples),
+                        int(self._frame_queue.qsize()),
+                        int(self._output_queue.qsize()),
+                    )
                 return passthrough
 
-            return self._return_enhanced_chunk(int(callback_samples))
+            wait_started = time.perf_counter()
+            out = self._return_enhanced_chunk(int(callback_samples))
+            wait_ms = (time.perf_counter() - wait_started) * 1000.0
+            total_ms = (time.perf_counter() - process_started) * 1000.0
+            if total_ms >= _SLOW_PROCESS_CHUNK_MS:
+                logger.info(
+                    "streaming_adapter_timing process_chunk ms=%.2f prepare_ms=%.2f wait_ms=%.2f callback_samples=%d expected=%d warmup=%s frames=%d pending_input=%d pending_output=%d discard=%d frame_q=%d output_q=%d mode=enhanced",
+                    total_ms,
+                    prepare_ms,
+                    wait_ms,
+                    callback_samples,
+                    expected_output_samples,
+                    bool(warmup_active),
+                    frames_enqueued,
+                    int(self._pending_input.shape[0]),
+                    int(self._pending_output.shape[0]),
+                    int(self._discard_output_samples),
+                    int(self._frame_queue.qsize()),
+                    int(self._output_queue.qsize()),
+                )
+            return out
 
     def flush(self) -> np.ndarray:
         with self._lock:
