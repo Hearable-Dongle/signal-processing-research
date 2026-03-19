@@ -31,6 +31,7 @@ class FastPathConfig(BaseModel):
         "capon_multisrc",
         "capon_mvdr_refine_1src",
         "music_1src",
+        "gcc_vote_median_doa",
     ] = "srp_phat_localization"
     beamforming_mode: Literal["mvdr_fd", "sd_mvdr_fd", "gsc_fd", "delay_sum", "delay_sum_subtractive", "delay_sum_subtractive_multi", "delay_sum_differential", "lcmv_top2_tracked", "lcmv_target_band"] = "delay_sum"
     mvdr_hop_ms: int | None = None

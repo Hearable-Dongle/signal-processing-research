@@ -4,16 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from beamforming.localization_bridge import normalize_doa_list
-from localization.algo import (
-    CaponLocalization,
-    CaponMVDRRefineLocalization,
-    CaponMultiSourceLocalization,
-    MUSICLocalization,
-    SRPPHATLocalization,
-)
-
-
 SUPPORTED_LOCALIZATION_BACKENDS = (
     "srp_phat_legacy",
     "srp_phat_localization",
@@ -21,11 +11,16 @@ SUPPORTED_LOCALIZATION_BACKENDS = (
     "capon_multisrc",
     "capon_mvdr_refine_1src",
     "music_1src",
+    "gcc_vote_median_doa",
 )
 
 
 def _pair_indices(n_mics: int) -> list[tuple[int, int]]:
     return [(i, j) for i in range(n_mics) for j in range(i + 1, n_mics)]
+
+
+def _grid_angles_deg(n: int) -> np.ndarray:
+    return np.linspace(0.0, 360.0, int(n), endpoint=False, dtype=np.float64)
 
 
 def _local_maxima(values: np.ndarray, min_separation_bins: int, max_peaks: int) -> tuple[list[int], list[float]]:
@@ -64,6 +59,39 @@ def _normalize_spectrum(values: np.ndarray | None) -> np.ndarray | None:
     if vmax <= 0.0:
         return np.zeros_like(arr)
     return arr / vmax
+
+
+def _normalize_deg(angle_deg: float) -> float:
+    return float(angle_deg % 360.0)
+
+
+def _angular_distance_deg(a: float, b: float) -> float:
+    diff = abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
+    return float(diff)
+
+
+def normalize_doa_list(doas_deg: list[float], merge_threshold_deg: float = 6.0, max_targets: int | None = None) -> list[float]:
+    if not doas_deg:
+        return []
+
+    vals = sorted(_normalize_deg(d) for d in doas_deg)
+    merged: list[list[float]] = []
+
+    for d in vals:
+        if not merged:
+            merged.append([d])
+            continue
+        cluster_mean = float(np.mean(merged[-1]))
+        if _angular_distance_deg(d, cluster_mean) <= merge_threshold_deg:
+            merged[-1].append(d)
+        else:
+            merged.append([d])
+
+    out = [float(np.mean(c)) % 360.0 for c in merged]
+    out.sort()
+    if max_targets is not None and max_targets > 0:
+        out = out[:max_targets]
+    return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,26 +235,36 @@ class _LocalizationAlgoAdapter(LocalizationBackendBase):
 
 class LegacySRPBackend(_LocalizationAlgoAdapter):
     def __init__(self, *, backend_name: str = "srp_phat_legacy", **kwargs):
+        from localization.algo import SRPPHATLocalization
+
         super().__init__(backend_name=backend_name, algo_cls=SRPPHATLocalization, **kwargs)
 
 
 class Music1SrcBackend(_LocalizationAlgoAdapter):
     def __init__(self, *, backend_name: str = "music_1src", **kwargs):
+        from localization.algo import MUSICLocalization
+
         super().__init__(backend_name=backend_name, algo_cls=MUSICLocalization, **kwargs)
 
 
 class Capon1SrcBackend(_LocalizationAlgoAdapter):
     def __init__(self, *, backend_name: str = "capon_1src", **kwargs):
+        from localization.algo import CaponLocalization
+
         super().__init__(backend_name=backend_name, algo_cls=CaponLocalization, **kwargs)
 
 
 class CaponMultiSrcBackend(_LocalizationAlgoAdapter):
     def __init__(self, *, backend_name: str = "capon_multisrc", **kwargs):
+        from localization.algo import CaponMultiSourceLocalization
+
         super().__init__(backend_name=backend_name, algo_cls=CaponMultiSourceLocalization, **kwargs)
 
 
 class CaponMVDRRefine1SrcBackend(_LocalizationAlgoAdapter):
     def __init__(self, *, backend_name: str = "capon_mvdr_refine_1src", **kwargs):
+        from localization.algo import CaponMVDRRefineLocalization
+
         super().__init__(backend_name=backend_name, algo_cls=CaponMVDRRefineLocalization, **kwargs)
 
 
@@ -295,6 +333,10 @@ def build_localization_backend(
         return CaponMVDRRefine1SrcBackend(backend_name=name, **common)
     if name == "music_1src":
         return Music1SrcBackend(backend_name=name, **common)
+    if name == "gcc_vote_median_doa":
+        from realtime_pipeline.localization_strategies.gcc_vote_median_doa import GCCVoteMedianDOABackend
+
+        return GCCVoteMedianDOABackend(backend_name=name, **common)
     supported = ", ".join(SUPPORTED_LOCALIZATION_BACKENDS)
     raise ValueError(
         f"Unsupported localization backend '{name}'. "
