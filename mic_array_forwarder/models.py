@@ -135,7 +135,7 @@ class FastPathConfig(BaseModel):
     rnnoise_output_lowpass_cutoff_hz: float = 7500.0
     rnnoise_output_notch_freq_hz: float = 500.0
     rnnoise_output_notch_q: float = 20.0
-    rnnoise_vad_adaptive_blend_enabled: bool = True
+    rnnoise_vad_adaptive_blend_enabled: bool = False
     rnnoise_vad_blend_gamma: float = 0.5
     rnnoise_vad_min_speech_preserve: float = 0.15
     rnnoise_vad_max_speech_preserve: float = 0.95
