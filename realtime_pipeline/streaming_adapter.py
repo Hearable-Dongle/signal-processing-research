@@ -94,6 +94,7 @@ class RealtimeIntelligibilityAdapter:
     - `localization_backend="srp_phat_localization"`
     - `beamforming_mode="mvdr_fd"` or `"delay_sum_subtractive"`
     - `postfilter_method="off"`
+    - `own_voice_suppression_enabled=True, own_voice_suppression_doa_deg=0.0`
     - `enable_resample=True, input_sample_rate_hz=48000, processing_sample_rate_hz=16000`
 
     Notes:
@@ -125,6 +126,8 @@ class RealtimeIntelligibilityAdapter:
         localization_vad_enabled: bool = False,
         separation_mode: str = "single_dominant_no_separator",
         algorithm_mode: str = "speaker_tracking_single_active",
+        own_voice_suppression_enabled: bool = False,
+        own_voice_suppression_doa_deg: float | None = None,
         delay_sum_subtractive_alpha: float = 0.5,
         delay_sum_subtractive_interferer_doa_deg: float | None = None,
         delay_sum_subtractive_multi_offset_deg: float = 10.0,
@@ -149,6 +152,8 @@ class RealtimeIntelligibilityAdapter:
         self._mic_geometry_xyz = _normalize_mic_geometry_xyz(np.asarray(geometry, dtype=np.float64))
         self._mic_geometry_xy = _mic_geometry_xy_from_xyz(self._mic_geometry_xyz)
         self._channel_count = _mic_count_from_geometry(self._mic_geometry_xyz)
+        ovp_mode = "lcmv_null_hysteresis" if bool(own_voice_suppression_enabled) and own_voice_suppression_doa_deg is not None else "off"
+        ovp_doa_deg = None if ovp_mode == "off" else float(own_voice_suppression_doa_deg)
 
         self.request = SessionStartRequest(
             input_source="respeaker_live",
@@ -171,6 +176,8 @@ class RealtimeIntelligibilityAdapter:
                 "beamforming_mode": str(beamforming_mode),
                 "postfilter_enabled": bool(postfilter_enabled),
                 "postfilter_method": str(postfilter_method),
+                "own_voice_suppression_mode": str(ovp_mode),
+                "suppressed_user_voice_doa_deg": ovp_doa_deg,
                 "target_activity_rnn_update_mode": None,
                 "delay_sum_subtractive_alpha": float(delay_sum_subtractive_alpha),
                 "delay_sum_subtractive_interferer_doa_deg": (
