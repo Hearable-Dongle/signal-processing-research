@@ -128,9 +128,17 @@ class FastPathConfig(BaseModel):
     postfilter_gain_max_step_db: float = 2.5
     rnnoise_wet_mix: float = 0.9
     rnnoise_input_gain_db: float = 0.0
+    rnnoise_input_highpass_enabled: bool = True
+    rnnoise_input_highpass_cutoff_hz: float = 80.0
+    rnnoise_output_highpass_enabled: bool = True
+    rnnoise_output_highpass_cutoff_hz: float = 70.0
     rnnoise_output_lowpass_cutoff_hz: float = 7500.0
     rnnoise_output_notch_freq_hz: float = 500.0
     rnnoise_output_notch_q: float = 20.0
+    rnnoise_vad_adaptive_blend_enabled: bool = True
+    rnnoise_vad_blend_gamma: float = 0.5
+    rnnoise_vad_min_speech_preserve: float = 0.15
+    rnnoise_vad_max_speech_preserve: float = 0.95
     rnnoise_residual_ema_enabled: bool = False
     rnnoise_residual_ema_alpha: float = 0.0
     coherence_wiener_gain_floor: float = 0.12
@@ -636,6 +644,22 @@ class SessionStartRequest(BaseModel):
         return float(self.fast_path.rnnoise_input_gain_db)
 
     @property
+    def rnnoise_input_highpass_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_input_highpass_enabled)
+
+    @property
+    def rnnoise_input_highpass_cutoff_hz(self) -> float:
+        return float(self.fast_path.rnnoise_input_highpass_cutoff_hz)
+
+    @property
+    def rnnoise_output_highpass_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_output_highpass_enabled)
+
+    @property
+    def rnnoise_output_highpass_cutoff_hz(self) -> float:
+        return float(self.fast_path.rnnoise_output_highpass_cutoff_hz)
+
+    @property
     def rnnoise_output_lowpass_cutoff_hz(self) -> float:
         return float(self.fast_path.rnnoise_output_lowpass_cutoff_hz)
 
@@ -646,6 +670,22 @@ class SessionStartRequest(BaseModel):
     @property
     def rnnoise_output_notch_q(self) -> float:
         return float(self.fast_path.rnnoise_output_notch_q)
+
+    @property
+    def rnnoise_vad_adaptive_blend_enabled(self) -> bool:
+        return bool(self.fast_path.rnnoise_vad_adaptive_blend_enabled)
+
+    @property
+    def rnnoise_vad_blend_gamma(self) -> float:
+        return float(self.fast_path.rnnoise_vad_blend_gamma)
+
+    @property
+    def rnnoise_vad_min_speech_preserve(self) -> float:
+        return float(self.fast_path.rnnoise_vad_min_speech_preserve)
+
+    @property
+    def rnnoise_vad_max_speech_preserve(self) -> float:
+        return float(self.fast_path.rnnoise_vad_max_speech_preserve)
 
     @property
     def rnnoise_residual_ema_enabled(self) -> bool:

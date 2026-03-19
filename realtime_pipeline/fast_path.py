@@ -1422,9 +1422,38 @@ class _RNNoisePostFilter:
         self._frame_size = 480
         self._pending_in = np.zeros((0,), dtype=np.float32)
         self._pending_out = np.zeros((0,), dtype=np.float32)
+        self._pending_vad = np.zeros((0,), dtype=np.float32)
         self._residual_ema_state = np.zeros((0,), dtype=np.float32)
         self._backend.channels = 1
         self._backend.dtype = np.int16
+        input_highpass_cutoff_hz = float(max(getattr(cfg, "rnnoise_input_highpass_cutoff_hz", 0.0), 0.0))
+        self._input_highpass_enabled = bool(getattr(cfg, "rnnoise_input_highpass_enabled", True))
+        self._input_highpass_sos = (
+            None
+            if (
+                (not self._input_highpass_enabled)
+                or input_highpass_cutoff_hz <= 0.0
+                or input_highpass_cutoff_hz >= 0.5 * float(self._input_sample_rate_hz)
+            )
+            else butter(2, input_highpass_cutoff_hz, btype="highpass", fs=float(self._input_sample_rate_hz), output="sos")
+        )
+        self._input_highpass_zi = (
+            None if self._input_highpass_sos is None else np.zeros((self._input_highpass_sos.shape[0], 2), dtype=np.float32)
+        )
+        output_highpass_cutoff_hz = float(max(getattr(cfg, "rnnoise_output_highpass_cutoff_hz", 0.0), 0.0))
+        self._output_highpass_enabled = bool(getattr(cfg, "rnnoise_output_highpass_enabled", True))
+        self._output_highpass_sos = (
+            None
+            if (
+                (not self._output_highpass_enabled)
+                or output_highpass_cutoff_hz <= 0.0
+                or output_highpass_cutoff_hz >= 0.5 * float(self._input_sample_rate_hz)
+            )
+            else butter(2, output_highpass_cutoff_hz, btype="highpass", fs=float(self._input_sample_rate_hz), output="sos")
+        )
+        self._output_highpass_zi = (
+            None if self._output_highpass_sos is None else np.zeros((self._output_highpass_sos.shape[0], 2), dtype=np.float32)
+        )
         cutoff_hz = float(max(getattr(cfg, "rnnoise_output_lowpass_cutoff_hz", 0.0), 0.0))
         self._output_lowpass_cutoff_hz = cutoff_hz
         self._output_lowpass_sos = (
@@ -1463,8 +1492,12 @@ class _RNNoisePostFilter:
     def process(self, frame: np.ndarray, speech_activity: float = 0.0) -> np.ndarray:
         del speech_activity
         x = np.asarray(frame, dtype=np.float32).reshape(-1)
+        x_for_rnnoise = np.asarray(x, dtype=np.float32, copy=False)
+        if self._input_highpass_sos is not None and self._input_highpass_zi is not None and x_for_rnnoise.shape[0] > 0:
+            x_for_rnnoise, self._input_highpass_zi = sosfilt(self._input_highpass_sos, x_for_rnnoise, zi=self._input_highpass_zi)
+            x_for_rnnoise = np.asarray(x_for_rnnoise, dtype=np.float32)
         gain = float(10.0 ** (float(self.cfg.rnnoise_input_gain_db) / 20.0))
-        x_in = (x * gain).astype(np.float32, copy=False)
+        x_in = (x_for_rnnoise * gain).astype(np.float32, copy=False)
         if self._input_sample_rate_hz != self._backend_sample_rate_hz:
             x_in = np.asarray(
                 resample_poly(x_in, up=self._backend_sample_rate_hz, down=self._input_sample_rate_hz),
@@ -1477,11 +1510,18 @@ class _RNNoisePostFilter:
             chunk = self._pending_in[: self._frame_size]
             self._pending_in = self._pending_in[self._frame_size :]
             chunk_i16 = np.clip(np.round(chunk * 32768.0), -32768.0, 32767.0).astype(np.int16, copy=False)
-            _vad, den = self._backend.denoise_frame(np.atleast_2d(chunk_i16), partial=False)
+            vad_prob, den = self._backend.denoise_frame(np.atleast_2d(chunk_i16), partial=False)
             den_arr = np.asarray(den, dtype=np.float32).reshape(-1)
             if den_arr.dtype.kind in {"i", "u"} or float(np.max(np.abs(den_arr))) > 1.5:
                 den_arr = den_arr / 32768.0
             parts.append(den_arr)
+            vad_arr = np.asarray(vad_prob, dtype=np.float32).reshape(-1)
+            vad_scalar = float(vad_arr[0]) if vad_arr.size else 0.0
+            vad_scalar = float(np.clip(vad_scalar, 0.0, 1.0))
+            self._pending_vad = np.concatenate(
+                [self._pending_vad, np.full((self._frame_size,), vad_scalar, dtype=np.float32)],
+                axis=0,
+            )
         if parts:
             self._pending_out = np.concatenate([self._pending_out, np.concatenate(parts, axis=0)], axis=0)
         if self._pending_out.shape[0] < expected_backend_samples:
@@ -1490,6 +1530,12 @@ class _RNNoisePostFilter:
         else:
             out = self._pending_out[: expected_backend_samples]
             self._pending_out = self._pending_out[expected_backend_samples :]
+        if self._pending_vad.shape[0] < expected_backend_samples:
+            vad_env = np.pad(self._pending_vad, (0, expected_backend_samples - self._pending_vad.shape[0]), constant_values=0.0)
+            self._pending_vad = np.zeros((0,), dtype=np.float32)
+        else:
+            vad_env = self._pending_vad[: expected_backend_samples]
+            self._pending_vad = self._pending_vad[expected_backend_samples :]
         if self._input_sample_rate_hz != self._backend_sample_rate_hz:
             out = np.asarray(
                 resample_poly(out, up=self._input_sample_rate_hz, down=self._backend_sample_rate_hz),
@@ -1499,6 +1545,14 @@ class _RNNoisePostFilter:
                 out = out[: x.shape[0]]
             elif out.shape[0] < x.shape[0]:
                 out = np.pad(out, (0, x.shape[0] - out.shape[0]))
+            vad_env = np.asarray(
+                resample_poly(vad_env, up=self._input_sample_rate_hz, down=self._backend_sample_rate_hz),
+                dtype=np.float32,
+            )
+            if vad_env.shape[0] > x.shape[0]:
+                vad_env = vad_env[: x.shape[0]]
+            elif vad_env.shape[0] < x.shape[0]:
+                vad_env = np.pad(vad_env, (0, x.shape[0] - vad_env.shape[0]), constant_values=0.0)
         if self._residual_ema_state.shape[0] != x.shape[0]:
             self._residual_ema_state = np.zeros((x.shape[0],), dtype=np.float32)
         residual = np.asarray(out - x, dtype=np.float32)
@@ -1513,7 +1567,19 @@ class _RNNoisePostFilter:
         else:
             self._residual_ema_state = residual.astype(np.float32, copy=False)
         wet = float(np.clip(self.cfg.rnnoise_wet_mix, 0.0, 1.0))
-        mixed = ((wet * out) + ((1.0 - wet) * x)).astype(np.float32, copy=False)
+        if bool(getattr(self.cfg, "rnnoise_vad_adaptive_blend_enabled", True)):
+            gamma = float(max(getattr(self.cfg, "rnnoise_vad_blend_gamma", 0.5), 1e-6))
+            min_preserve = float(np.clip(getattr(self.cfg, "rnnoise_vad_min_speech_preserve", 0.15), 0.0, 1.0))
+            max_preserve = float(np.clip(getattr(self.cfg, "rnnoise_vad_max_speech_preserve", 0.95), min_preserve, 1.0))
+            vad_env = np.asarray(np.clip(vad_env, 0.0, 1.0), dtype=np.float32)
+            speech_preserve = np.clip(np.power(vad_env, gamma), min_preserve, max_preserve).astype(np.float32, copy=False)
+            effective_preserve = np.clip(speech_preserve + (1.0 - wet), 0.0, 1.0).astype(np.float32, copy=False)
+        else:
+            effective_preserve = np.full((x.shape[0],), 1.0 - wet, dtype=np.float32)
+        mixed = ((effective_preserve * x) + ((1.0 - effective_preserve) * out)).astype(np.float32, copy=False)
+        if self._output_highpass_sos is not None and self._output_highpass_zi is not None and mixed.shape[0] > 0:
+            mixed, self._output_highpass_zi = sosfilt(self._output_highpass_sos, mixed, zi=self._output_highpass_zi)
+            mixed = np.asarray(mixed, dtype=np.float32)
         if self._output_lowpass_sos is not None and mixed.shape[0] > 8:
             mixed = np.asarray(sosfiltfilt(self._output_lowpass_sos, mixed), dtype=np.float32)
         if self._output_notch_sos is not None and self._output_notch_zi is not None and mixed.shape[0] > 0:
