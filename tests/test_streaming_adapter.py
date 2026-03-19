@@ -19,7 +19,7 @@ def _mono_passthrough(samples: int, channels: int = 4, sample_rate_hz: int = 160
 def test_streaming_adapter_defaults_match_requested_realtime_shape() -> None:
     adapter = RealtimeIntelligibilityAdapter()
     try:
-        assert adapter.request.localization_backend == "gcc_vote_median_doa"
+        assert adapter.request.localization_backend == "capon_1src"
         assert adapter.request.beamforming_mode == "delay_sum"
         assert adapter.request.postfilter_method == "rnnoise"
         assert adapter.request.separation_mode == "single_dominant_no_separator"
