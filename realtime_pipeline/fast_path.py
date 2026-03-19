@@ -68,6 +68,29 @@ def _angular_dist_deg(a: float, b: float) -> float:
     return abs(_wrap_to_180(float(a) - float(b)))
 
 
+def _peaking_eq_sos(*, center_hz: float, q: float, gain_db: float, fs_hz: float) -> np.ndarray | None:
+    center = float(center_hz)
+    fs = float(fs_hz)
+    quality = float(max(q, 1e-3))
+    gain = float(gain_db)
+    if abs(gain) <= 1e-6 or center <= 0.0 or center >= 0.5 * fs:
+        return None
+    a = float(10.0 ** (gain / 40.0))
+    w0 = float(2.0 * np.pi * center / fs)
+    alpha = float(np.sin(w0) / (2.0 * quality))
+    cos_w0 = float(np.cos(w0))
+    b0 = 1.0 + (alpha * a)
+    b1 = -2.0 * cos_w0
+    b2 = 1.0 - (alpha * a)
+    a0 = 1.0 + (alpha / a)
+    a1 = -2.0 * cos_w0
+    a2 = 1.0 - (alpha / a)
+    return tf2sos(
+        np.asarray([b0 / a0, b1 / a0, b2 / a0], dtype=np.float64),
+        np.asarray([1.0, a1 / a0, a2 / a0], dtype=np.float64),
+    )
+
+
 def _step_limited_angle(prev_deg: float, next_deg: float, max_step_deg: float) -> float:
     delta = _wrap_to_180(next_deg - prev_deg)
     step = float(np.clip(delta, -max_step_deg, max_step_deg))
@@ -1523,6 +1546,25 @@ class _RNNoisePostFilter:
             self._output_notch_sos = None
             self._output_notch_zi = None
             self._inverse_notch_zi = None
+        self._voice_eq_enabled = bool(getattr(cfg, "rnnoise_voice_eq_enabled", False))
+        self._voice_eq_presence_sos = _peaking_eq_sos(
+            center_hz=float(getattr(cfg, "rnnoise_voice_eq_presence_center_hz", 3000.0)),
+            q=float(getattr(cfg, "rnnoise_voice_eq_presence_q", 0.9)),
+            gain_db=float(getattr(cfg, "rnnoise_voice_eq_presence_gain_db", 0.0)),
+            fs_hz=float(self._input_sample_rate_hz),
+        )
+        self._voice_eq_presence_zi = (
+            None if self._voice_eq_presence_sos is None else np.zeros((self._voice_eq_presence_sos.shape[0], 2), dtype=np.float32)
+        )
+        self._voice_eq_lowmid_sos = _peaking_eq_sos(
+            center_hz=float(getattr(cfg, "rnnoise_voice_eq_lowmid_center_hz", 300.0)),
+            q=float(getattr(cfg, "rnnoise_voice_eq_lowmid_q", 0.8)),
+            gain_db=float(getattr(cfg, "rnnoise_voice_eq_lowmid_gain_db", 0.0)),
+            fs_hz=float(self._input_sample_rate_hz),
+        )
+        self._voice_eq_lowmid_zi = (
+            None if self._voice_eq_lowmid_sos is None else np.zeros((self._voice_eq_lowmid_sos.shape[0], 2), dtype=np.float32)
+        )
         inverse_band_low_hz = 300.0
         inverse_band_high_hz = 3400.0
         nyquist_hz = 0.5 * float(self._input_sample_rate_hz)
@@ -1777,6 +1819,13 @@ class _RNNoisePostFilter:
         if self._output_notch_sos is not None and self._output_notch_zi is not None and mixed.shape[0] > 0:
             mixed, self._output_notch_zi = sosfilt(self._output_notch_sos, mixed, zi=self._output_notch_zi)
             mixed = np.asarray(mixed, dtype=np.float32)
+        if self._voice_eq_enabled and mixed.shape[0] > 0:
+            if self._voice_eq_lowmid_sos is not None and self._voice_eq_lowmid_zi is not None:
+                mixed, self._voice_eq_lowmid_zi = sosfilt(self._voice_eq_lowmid_sos, mixed, zi=self._voice_eq_lowmid_zi)
+                mixed = np.asarray(mixed, dtype=np.float32)
+            if self._voice_eq_presence_sos is not None and self._voice_eq_presence_zi is not None:
+                mixed, self._voice_eq_presence_zi = sosfilt(self._voice_eq_presence_sos, mixed, zi=self._voice_eq_presence_zi)
+                mixed = np.asarray(mixed, dtype=np.float32)
         if bool(getattr(self.cfg, "rnnoise_output_clip_guard_enabled", False)) and mixed.shape[0] > 0:
             abs_max = float(max(getattr(self.cfg, "rnnoise_output_clip_guard_abs_max", 0.95), 0.0))
             mixed = np.clip(mixed, -abs_max, abs_max).astype(np.float32, copy=False)

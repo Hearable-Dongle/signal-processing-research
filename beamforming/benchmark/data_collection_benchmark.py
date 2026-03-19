@@ -1212,6 +1212,13 @@ def _run_recording_method_job(
     rnnoise_corruption_guard_rms_ratio_threshold: float,
     rnnoise_corruption_guard_peak_ratio_threshold: float,
     rnnoise_corruption_guard_mode: str,
+    rnnoise_voice_eq_enabled: bool,
+    rnnoise_voice_eq_presence_gain_db: float,
+    rnnoise_voice_eq_presence_center_hz: float,
+    rnnoise_voice_eq_presence_q: float,
+    rnnoise_voice_eq_lowmid_gain_db: float,
+    rnnoise_voice_eq_lowmid_center_hz: float,
+    rnnoise_voice_eq_lowmid_q: float,
     rnnoise_residual_highband_enabled: bool,
     rnnoise_residual_highband_cutoff_hz: float,
     rnnoise_residual_highband_gain: float,
@@ -1372,6 +1379,13 @@ def _run_recording_method_job(
             "rnnoise_corruption_guard_rms_ratio_threshold": float(rnnoise_corruption_guard_rms_ratio_threshold),
             "rnnoise_corruption_guard_peak_ratio_threshold": float(rnnoise_corruption_guard_peak_ratio_threshold),
             "rnnoise_corruption_guard_mode": str(rnnoise_corruption_guard_mode),
+            "rnnoise_voice_eq_enabled": bool(rnnoise_voice_eq_enabled),
+            "rnnoise_voice_eq_presence_gain_db": float(rnnoise_voice_eq_presence_gain_db),
+            "rnnoise_voice_eq_presence_center_hz": float(rnnoise_voice_eq_presence_center_hz),
+            "rnnoise_voice_eq_presence_q": float(rnnoise_voice_eq_presence_q),
+            "rnnoise_voice_eq_lowmid_gain_db": float(rnnoise_voice_eq_lowmid_gain_db),
+            "rnnoise_voice_eq_lowmid_center_hz": float(rnnoise_voice_eq_lowmid_center_hz),
+            "rnnoise_voice_eq_lowmid_q": float(rnnoise_voice_eq_lowmid_q),
             "rnnoise_residual_highband_enabled": bool(rnnoise_residual_highband_enabled),
             "rnnoise_residual_highband_cutoff_hz": float(rnnoise_residual_highband_cutoff_hz),
             "rnnoise_residual_highband_gain": float(rnnoise_residual_highband_gain),
@@ -1847,6 +1861,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rnnoise-corruption-guard-rms-ratio-threshold", type=float, default=2.0)
     parser.add_argument("--rnnoise-corruption-guard-peak-ratio-threshold", type=float, default=3.0)
     parser.add_argument("--rnnoise-corruption-guard-mode", choices=["hold_previous", "use_input", "mute"], default="hold_previous")
+    parser.add_argument("--rnnoise-voice-eq-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--rnnoise-voice-eq-presence-gain-db", type=float, default=0.0)
+    parser.add_argument("--rnnoise-voice-eq-presence-center-hz", type=float, default=3000.0)
+    parser.add_argument("--rnnoise-voice-eq-presence-q", type=float, default=0.9)
+    parser.add_argument("--rnnoise-voice-eq-lowmid-gain-db", type=float, default=0.0)
+    parser.add_argument("--rnnoise-voice-eq-lowmid-center-hz", type=float, default=300.0)
+    parser.add_argument("--rnnoise-voice-eq-lowmid-q", type=float, default=0.8)
     parser.add_argument("--rnnoise-residual-highband-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--rnnoise-residual-highband-cutoff-hz", type=float, default=3000.0)
     parser.add_argument("--rnnoise-residual-highband-gain", type=float, default=0.5)
@@ -2077,6 +2098,13 @@ def main() -> None:
                 rnnoise_corruption_guard_rms_ratio_threshold=float(args.rnnoise_corruption_guard_rms_ratio_threshold),
                 rnnoise_corruption_guard_peak_ratio_threshold=float(args.rnnoise_corruption_guard_peak_ratio_threshold),
                 rnnoise_corruption_guard_mode=str(args.rnnoise_corruption_guard_mode),
+                rnnoise_voice_eq_enabled=bool(args.rnnoise_voice_eq_enabled),
+                rnnoise_voice_eq_presence_gain_db=float(args.rnnoise_voice_eq_presence_gain_db),
+                rnnoise_voice_eq_presence_center_hz=float(args.rnnoise_voice_eq_presence_center_hz),
+                rnnoise_voice_eq_presence_q=float(args.rnnoise_voice_eq_presence_q),
+                rnnoise_voice_eq_lowmid_gain_db=float(args.rnnoise_voice_eq_lowmid_gain_db),
+                rnnoise_voice_eq_lowmid_center_hz=float(args.rnnoise_voice_eq_lowmid_center_hz),
+                rnnoise_voice_eq_lowmid_q=float(args.rnnoise_voice_eq_lowmid_q),
                 rnnoise_residual_highband_enabled=bool(args.rnnoise_residual_highband_enabled),
                 rnnoise_residual_highband_cutoff_hz=float(args.rnnoise_residual_highband_cutoff_hz),
                 rnnoise_residual_highband_gain=float(args.rnnoise_residual_highband_gain),
@@ -2305,6 +2333,13 @@ def main() -> None:
             "rnnoise_corruption_guard_rms_ratio_threshold": float(args.rnnoise_corruption_guard_rms_ratio_threshold),
             "rnnoise_corruption_guard_peak_ratio_threshold": float(args.rnnoise_corruption_guard_peak_ratio_threshold),
             "rnnoise_corruption_guard_mode": str(args.rnnoise_corruption_guard_mode),
+            "rnnoise_voice_eq_enabled": bool(args.rnnoise_voice_eq_enabled),
+            "rnnoise_voice_eq_presence_gain_db": float(args.rnnoise_voice_eq_presence_gain_db),
+            "rnnoise_voice_eq_presence_center_hz": float(args.rnnoise_voice_eq_presence_center_hz),
+            "rnnoise_voice_eq_presence_q": float(args.rnnoise_voice_eq_presence_q),
+            "rnnoise_voice_eq_lowmid_gain_db": float(args.rnnoise_voice_eq_lowmid_gain_db),
+            "rnnoise_voice_eq_lowmid_center_hz": float(args.rnnoise_voice_eq_lowmid_center_hz),
+            "rnnoise_voice_eq_lowmid_q": float(args.rnnoise_voice_eq_lowmid_q),
             "rnnoise_residual_highband_enabled": bool(args.rnnoise_residual_highband_enabled),
             "rnnoise_residual_highband_cutoff_hz": float(args.rnnoise_residual_highband_cutoff_hz),
             "rnnoise_residual_highband_gain": float(args.rnnoise_residual_highband_gain),
