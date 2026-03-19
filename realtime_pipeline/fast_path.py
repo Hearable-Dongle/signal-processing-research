@@ -2478,23 +2478,25 @@ class FastPathWorker(threading.Thread):
         )
         self._beamformer_snapshot_target_set = set(self._beamformer_snapshot_targets)
         self._delay_sum_snapshot_trace: list[dict] = []
-        backend = str(getattr(config, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
-        if backend == "silero_fused":
-            self._target_activity_vad = SileroVADGate(
-                sample_rate_hz=int(config.sample_rate_hz),
-                frame_ms=max(10, int(config.fast_frame_ms)),
-                hangover_frames=max(0, int(config.target_activity_vad_hangover_frames)),
-            )
-        else:
-            self._target_activity_vad = WebRTCVADGate(
-                sample_rate_hz=int(config.sample_rate_hz),
-                mode=max(0, min(3, int(config.target_activity_vad_mode))),
-                frame_ms=max(10, int(config.fast_frame_ms)),
-                hangover_frames=max(0, int(config.target_activity_vad_hangover_frames)),
-            )
-
         mode = self._target_activity_mode()
         beamforming_mode = str(self._cfg.beamforming_mode).strip().lower()
+        detector_mode = self._target_activity_detector_mode_name()
+        self._target_activity_vad = None
+        if mode == "estimated_target_activity" and detector_mode == "target_blocker_calibrated":
+            backend = str(getattr(config, "target_activity_detector_backend", "webrtc_fused")).strip().lower()
+            if backend == "silero_fused":
+                self._target_activity_vad = SileroVADGate(
+                    sample_rate_hz=int(config.sample_rate_hz),
+                    frame_ms=max(10, int(config.fast_frame_ms)),
+                    hangover_frames=max(0, int(config.target_activity_vad_hangover_frames)),
+                )
+            else:
+                self._target_activity_vad = WebRTCVADGate(
+                    sample_rate_hz=int(config.sample_rate_hz),
+                    mode=max(0, min(3, int(config.target_activity_vad_mode))),
+                    frame_ms=max(10, int(config.fast_frame_ms)),
+                    hangover_frames=max(0, int(config.target_activity_vad_hangover_frames)),
+                )
         if beamforming_mode in {"mvdr_fd", "lcmv_top2_tracked", "lcmv_target_band"} and mode is None:
             raise ValueError("Covariance beamforming requires target_activity_rnn_update_mode to be configured.")
         if mode == "oracle_target_activity" and self._target_activity_override_provider is None:
@@ -2879,6 +2881,8 @@ class FastPathWorker(threading.Thread):
         detector_mode = self._target_activity_detector_mode_name()
         if detector_mode == "localization_peak_confidence":
             return self._estimate_target_activity_from_localization(doa_deg)
+        if self._target_activity_vad is None:
+            raise RuntimeError("target activity VAD is unavailable for target_blocker_calibrated estimated activity mode")
         target_ref, blocker_ref, blocker_doa = self._target_activity_beams(frame_mc, doa_deg)
         target_rms = float(np.sqrt(np.mean(np.asarray(target_ref, dtype=np.float64) ** 2) + 1e-12))
         blocker_rms = float(np.sqrt(np.mean(np.asarray(blocker_ref, dtype=np.float64) ** 2) + 1e-12))

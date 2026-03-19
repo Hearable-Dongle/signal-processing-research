@@ -6,8 +6,6 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from beamforming.localization_bridge import normalize_doa_list
-
 from .localization_backends import _normalize_spectrum, build_localization_backend
 
 
@@ -17,6 +15,34 @@ def _angular_diff_deg(a: float, b: float) -> float:
 
 def _angular_dist_deg(a: float, b: float) -> float:
     return abs(_angular_diff_deg(a, b))
+
+
+def _normalize_deg(angle_deg: float) -> float:
+    return float(angle_deg % 360.0)
+
+
+def normalize_doa_list(doas_deg: list[float], merge_threshold_deg: float = 6.0, max_targets: int | None = None) -> list[float]:
+    if not doas_deg:
+        return []
+
+    vals = sorted(_normalize_deg(d) for d in doas_deg)
+    merged: list[list[float]] = []
+
+    for d in vals:
+        if not merged:
+            merged.append([d])
+            continue
+        cluster_mean = float(np.mean(merged[-1]))
+        if _angular_dist_deg(d, cluster_mean) <= merge_threshold_deg:
+            merged[-1].append(d)
+        else:
+            merged.append([d])
+
+    out = [float(np.mean(c)) % 360.0 for c in merged]
+    out.sort()
+    if max_targets is not None and max_targets > 0:
+        out = out[:max_targets]
+    return out
 
 
 def _grid_angles_deg(n: int) -> np.ndarray:

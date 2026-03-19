@@ -76,7 +76,7 @@ class RealtimeIntelligibilityAdapter:
 
     Default processing mirrors the current realtime path the benchmark uses, with
     these requested defaults:
-    - localization backend: `capon_1src`
+    - localization backend: `gcc_vote_median_doa`
     - beamforming mode: `delay_sum`
     - postfilter: `rnnoise`
     - mic profile: `respeaker_xvf3800_0650`
@@ -108,7 +108,7 @@ class RealtimeIntelligibilityAdapter:
         input_sample_rate_hz: int = 16000,
         processing_sample_rate_hz: int = 16000,
         enable_resample: bool = False,
-        localization_backend: str = "capon_1src",
+        localization_backend: str = "gcc_vote_median_doa",
         beamforming_mode: str = "delay_sum",
         postfilter_method: str = "rnnoise",
         postfilter_enabled: bool = True,
@@ -131,6 +131,7 @@ class RealtimeIntelligibilityAdapter:
         self._pending_input = np.zeros((0, 0), dtype=np.float32)
         self._pending_output = np.zeros((0,), dtype=np.float32)
         self._discard_output_samples = 0
+        self._warmup_frames_enqueued = 0
         self._history_mc = np.zeros((0, 0), dtype=np.float32)
         self._process_timeout_s = float(process_timeout_s)
         self._input_sample_rate_hz = int(input_sample_rate_hz)
@@ -164,6 +165,7 @@ class RealtimeIntelligibilityAdapter:
                 "beamforming_mode": str(beamforming_mode),
                 "postfilter_enabled": bool(postfilter_enabled),
                 "postfilter_method": str(postfilter_method),
+                "target_activity_rnn_update_mode": None,
                 "delay_sum_subtractive_alpha": float(delay_sum_subtractive_alpha),
                 "delay_sum_subtractive_interferer_doa_deg": (
                     None
@@ -336,6 +338,7 @@ class RealtimeIntelligibilityAdapter:
 
             expected_output_samples = int(len(frames_to_process) * self._frame_samples)
             if warmup_active:
+                self._warmup_frames_enqueued += int(len(frames_to_process))
                 self._discard_output_samples += int(expected_output_samples)
                 self._consume_discarded_outputs()
                 self._collect_expected_outputs(int(expected_output_samples))
@@ -351,6 +354,9 @@ class RealtimeIntelligibilityAdapter:
             if pending_samples <= 0:
                 return np.zeros(0, dtype=np.float32)
             if not self.warmup_ready:
+                if int(self._warmup_frames_enqueued) > 0:
+                    self._pending_input = np.zeros((0, self._channel_count), dtype=np.float32)
+                    return np.zeros(0, dtype=np.float32)
                 out = self._mono_passthrough(self._pending_input)
                 self._pending_input = np.zeros((0, self._channel_count), dtype=np.float32)
                 return out
