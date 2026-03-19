@@ -76,7 +76,7 @@ class RealtimeIntelligibilityAdapter:
 
     Default processing mirrors the current realtime path the benchmark uses, with
     these requested defaults:
-    - localization backend: `gcc_vote_median_doa`
+    - localization backend: `capon_1src`
     - beamforming mode: `delay_sum`
     - postfilter: `rnnoise`
     - mic profile: `respeaker_xvf3800_0650`
@@ -108,7 +108,7 @@ class RealtimeIntelligibilityAdapter:
         input_sample_rate_hz: int = 16000,
         processing_sample_rate_hz: int = 16000,
         enable_resample: bool = False,
-        localization_backend: str = "gcc_vote_median_doa",
+        localization_backend: str = "capon_1src",
         beamforming_mode: str = "delay_sum",
         postfilter_method: str = "rnnoise",
         postfilter_enabled: bool = True,
