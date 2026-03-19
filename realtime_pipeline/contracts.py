@@ -233,7 +233,7 @@ class PipelineConfig:
     speaker_match_window_deg: float = 25.0
     single_active_min_observation_score: float = 0.65
     focus_direction_match_window_deg: float = 30.0
-    focus_target_hold_frames: int = 8
+    focus_target_hold_frames: int = 16
     multi_target_max_speakers: int = 2
     multi_target_hold_frames: int = 12
     multi_target_min_confidence: float = 0.2
