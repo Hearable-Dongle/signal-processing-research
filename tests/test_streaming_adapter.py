@@ -26,6 +26,18 @@ def test_streaming_adapter_defaults_match_requested_realtime_shape() -> None:
         adapter.close()
 
 
+def test_streaming_adapter_default_path_processes_audio() -> None:
+    adapter = RealtimeIntelligibilityAdapter()
+    try:
+        emitted = 0
+        for samples in (73, 211, 160, 97, 401, 120):
+            emitted += int(adapter.process_chunk(_int16_multichannel(samples)).shape[0])
+        emitted += int(adapter.flush().shape[0])
+        assert emitted == sum((73, 211, 160, 97, 401, 120))
+    finally:
+        adapter.close()
+
+
 def test_streaming_adapter_buffers_short_callback_until_frame_ready() -> None:
     adapter = RealtimeIntelligibilityAdapter(postfilter_method="off", postfilter_enabled=False)
     try:
