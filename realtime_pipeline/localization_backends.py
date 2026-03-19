@@ -94,6 +94,14 @@ class LocalizationBackendBase:
         capon_peak_min_sharpness: float = 0.12,
         capon_peak_min_margin: float = 0.04,
         capon_hold_frames: int = 2,
+        capon_freq_bin_subsample_stride: int = 1,
+        capon_freq_bin_min_hz: int | None = None,
+        capon_freq_bin_max_hz: int | None = None,
+        capon_use_cholesky_solve: bool = False,
+        capon_covariance_ema_alpha: float = 0.0,
+        capon_full_scan_every_n_updates: int = 1,
+        capon_local_refine_enabled: bool = False,
+        capon_local_refine_half_width_deg: float = 30.0,
     ):
         self.mic_pos = np.asarray(mic_pos, dtype=np.float64)
         self.fs = int(fs)
@@ -111,6 +119,14 @@ class LocalizationBackendBase:
         self.capon_peak_min_sharpness = float(capon_peak_min_sharpness)
         self.capon_peak_min_margin = float(capon_peak_min_margin)
         self.capon_hold_frames = int(capon_hold_frames)
+        self.capon_freq_bin_subsample_stride = int(capon_freq_bin_subsample_stride)
+        self.capon_freq_bin_min_hz = None if capon_freq_bin_min_hz is None else int(capon_freq_bin_min_hz)
+        self.capon_freq_bin_max_hz = None if capon_freq_bin_max_hz is None else int(capon_freq_bin_max_hz)
+        self.capon_use_cholesky_solve = bool(capon_use_cholesky_solve)
+        self.capon_covariance_ema_alpha = float(capon_covariance_ema_alpha)
+        self.capon_full_scan_every_n_updates = int(capon_full_scan_every_n_updates)
+        self.capon_local_refine_enabled = bool(capon_local_refine_enabled)
+        self.capon_local_refine_half_width_deg = float(capon_local_refine_half_width_deg)
 
     def process(self, audio: np.ndarray) -> LocalizationBackendResult:
         raise NotImplementedError
@@ -145,12 +161,21 @@ class _LocalizationAlgoAdapter(LocalizationBackendBase):
             overlap=self.overlap,
             freq_range=self.freq_range,
             max_sources=self.max_sources,
+            grid_size=self.grid_size,
             pair_selection_mode=self.pair_selection_mode,
             vad_enabled=self.vad_enabled,
             capon_spectrum_ema_alpha=self.capon_spectrum_ema_alpha,
             capon_peak_min_sharpness=self.capon_peak_min_sharpness,
             capon_peak_min_margin=self.capon_peak_min_margin,
             capon_hold_frames=self.capon_hold_frames,
+            capon_freq_bin_subsample_stride=self.capon_freq_bin_subsample_stride,
+            capon_freq_bin_min_hz=self.capon_freq_bin_min_hz,
+            capon_freq_bin_max_hz=self.capon_freq_bin_max_hz,
+            capon_use_cholesky_solve=self.capon_use_cholesky_solve,
+            capon_covariance_ema_alpha=self.capon_covariance_ema_alpha,
+            capon_full_scan_every_n_updates=self.capon_full_scan_every_n_updates,
+            capon_local_refine_enabled=self.capon_local_refine_enabled,
+            capon_local_refine_half_width_deg=self.capon_local_refine_half_width_deg,
         )
 
     def process(self, audio: np.ndarray) -> LocalizationBackendResult:
@@ -224,6 +249,14 @@ def build_localization_backend(
     capon_peak_min_sharpness: float = 0.12,
     capon_peak_min_margin: float = 0.04,
     capon_hold_frames: int = 2,
+    capon_freq_bin_subsample_stride: int = 1,
+    capon_freq_bin_min_hz: int | None = None,
+    capon_freq_bin_max_hz: int | None = None,
+    capon_use_cholesky_solve: bool = False,
+    capon_covariance_ema_alpha: float = 0.0,
+    capon_full_scan_every_n_updates: int = 1,
+    capon_local_refine_enabled: bool = False,
+    capon_local_refine_half_width_deg: float = 30.0,
 ) -> LocalizationBackendBase:
     common = dict(
         mic_pos=mic_pos,
@@ -242,6 +275,14 @@ def build_localization_backend(
         capon_peak_min_sharpness=capon_peak_min_sharpness,
         capon_peak_min_margin=capon_peak_min_margin,
         capon_hold_frames=capon_hold_frames,
+        capon_freq_bin_subsample_stride=capon_freq_bin_subsample_stride,
+        capon_freq_bin_min_hz=capon_freq_bin_min_hz,
+        capon_freq_bin_max_hz=capon_freq_bin_max_hz,
+        capon_use_cholesky_solve=capon_use_cholesky_solve,
+        capon_covariance_ema_alpha=capon_covariance_ema_alpha,
+        capon_full_scan_every_n_updates=capon_full_scan_every_n_updates,
+        capon_local_refine_enabled=capon_local_refine_enabled,
+        capon_local_refine_half_width_deg=capon_local_refine_half_width_deg,
     )
     name = str(name)
     if name in {"srp_phat_legacy", "srp_phat_localization"}:

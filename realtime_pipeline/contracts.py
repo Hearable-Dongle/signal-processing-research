@@ -73,8 +73,8 @@ class FastPathAudioPacket:
     target_activity_score: float = 0.0
     target_activity_state: bool = False
     speech_activity: float = 0.0
-    beamforming_mode: str = "mvdr_fd"
-    postfilter_method: str = "off"
+    beamforming_mode: str = "delay_sum"
+    postfilter_method: str = "rnnoise"
     capture_t_monotonic: float = 0.0
     beamform_start_t: float = 0.0
     beamform_end_t: float = 0.0
@@ -215,6 +215,14 @@ class PipelineConfig:
     capon_peak_min_sharpness: float = 0.12
     capon_peak_min_margin: float = 0.04
     capon_hold_frames: int = 2
+    capon_freq_bin_subsample_stride: int = 1
+    capon_freq_bin_min_hz: int | None = None
+    capon_freq_bin_max_hz: int | None = None
+    capon_use_cholesky_solve: bool = False
+    capon_covariance_ema_alpha: float = 0.0
+    capon_full_scan_every_n_updates: int = 1
+    capon_local_refine_enabled: bool = False
+    capon_local_refine_half_width_deg: float = 30.0
     own_voice_suppression_mode: str = "off"  # one of: off, lcmv_null_hysteresis, soft_output_gate
     suppressed_user_voice_doa_deg: float | None = None
     suppressed_user_match_window_deg: float = 33.0
@@ -315,7 +323,7 @@ class PipelineConfig:
     speaker_map_confidence_decay: float = 0.9
     speaker_map_activity_decay: float = 0.92
     # Beamformer mode
-    beamforming_mode: str = "mvdr_fd"  # one of: mvdr_fd, gsc_fd, delay_sum, delay_sum_subtractive, delay_sum_subtractive_multi, delay_sum_differential, lcmv_top2_tracked, lcmv_target_band
+    beamforming_mode: str = "delay_sum"  # one of: mvdr_fd, gsc_fd, delay_sum, delay_sum_subtractive, delay_sum_subtractive_multi, delay_sum_differential, lcmv_top2_tracked, lcmv_target_band
     mvdr_hop_ms: int | None = None
     # DOA/gain smoothing to reduce steering chatter
     doa_ema_alpha: float = 0.2
@@ -379,7 +387,7 @@ class PipelineConfig:
     fd_speech_cov_update_scale: float = 0.25
     # Optional postfilter (mild, speech-preserving)
     postfilter_enabled: bool = True
-    postfilter_method: str = "off"  # one of: off, wiener_dd, log_mmse, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass, rnnoise_then_voice_bandpass, wiener_then_voice_bandpass
+    postfilter_method: str = "rnnoise"  # one of: off, wiener_dd, log_mmse, rnnoise, coherence_wiener, wiener_then_rnnoise, voice_bandpass, rnnoise_then_voice_bandpass, wiener_then_voice_bandpass
     postfilter_noise_source: str = "tracked_mono"  # one of: tracked_mono, beamformer_rnn_output
     postfilter_input_source: str = "beamformed_mono"  # one of: beamformed_mono, raw_mix_mono
     postfilter_noise_ema_alpha: float = 0.02

@@ -310,7 +310,7 @@ def _plot_timeline(out_path: Path, time_s: list[float], active_truth_deg: list[f
 def _strategy_run_config(strategy: str) -> dict[str, object]:
     return {
         "localization_backend": str(strategy),
-        "beamforming_mode": "mvdr_fd",
+        "beamforming_mode": "delay_sum",
         "control_mode": "spatial_peak_mode",
         "fast_path_reference_mode": "srp_peak",
         "direction_long_memory_enabled": False,
@@ -329,6 +329,7 @@ def _run_job(
     slow_chunk_ms: int,
     localization_window_ms: int,
     localization_hop_ms: int,
+    localization_grid_size: int,
     srp_overlap: float,
     srp_freq_min_hz: int,
     srp_freq_max_hz: int,
@@ -339,6 +340,23 @@ def _run_job(
     localization_msc_history_frames: int,
     localization_hsda_enabled: bool,
     localization_hsda_window_frames: int,
+    input_downsample_rate_hz: int | None,
+    localization_track_hold_frames: int,
+    localization_max_assoc_distance_deg: float,
+    localization_velocity_alpha: float,
+    localization_angle_alpha: float,
+    capon_spectrum_ema_alpha: float,
+    capon_peak_min_sharpness: float,
+    capon_peak_min_margin: float,
+    capon_hold_frames: int,
+    capon_freq_bin_subsample_stride: int,
+    capon_freq_bin_min_hz: int | None,
+    capon_freq_bin_max_hz: int | None,
+    capon_use_cholesky_solve: bool,
+    capon_covariance_ema_alpha: float,
+    capon_full_scan_every_n_updates: int,
+    capon_local_refine_enabled: bool,
+    capon_local_refine_half_width_deg: float,
 ) -> JobResult:
     scene_cfg_path = Path(scene_path)
     bench_root = Path(out_root)
@@ -366,10 +384,28 @@ def _run_job(
         slow_chunk_ms=int(slow_chunk_ms),
         localization_window_ms=int(localization_window_ms),
         localization_hop_ms=int(localization_hop_ms),
+        localization_grid_size=int(localization_grid_size),
         srp_overlap=float(srp_overlap),
         srp_freq_min_hz=int(srp_freq_min_hz),
         srp_freq_max_hz=int(srp_freq_max_hz),
         localization_vad_enabled=bool(localization_vad_enabled),
+        localization_track_hold_frames=int(localization_track_hold_frames),
+        localization_max_assoc_distance_deg=float(localization_max_assoc_distance_deg),
+        localization_velocity_alpha=float(localization_velocity_alpha),
+        localization_angle_alpha=float(localization_angle_alpha),
+        capon_spectrum_ema_alpha=float(capon_spectrum_ema_alpha),
+        capon_peak_min_sharpness=float(capon_peak_min_sharpness),
+        capon_peak_min_margin=float(capon_peak_min_margin),
+        capon_hold_frames=int(capon_hold_frames),
+        capon_freq_bin_subsample_stride=int(capon_freq_bin_subsample_stride),
+        capon_freq_bin_min_hz=(None if capon_freq_bin_min_hz is None else int(capon_freq_bin_min_hz)),
+        capon_freq_bin_max_hz=(None if capon_freq_bin_max_hz is None else int(capon_freq_bin_max_hz)),
+        capon_use_cholesky_solve=bool(capon_use_cholesky_solve),
+        capon_covariance_ema_alpha=float(capon_covariance_ema_alpha),
+        capon_full_scan_every_n_updates=int(capon_full_scan_every_n_updates),
+        capon_local_refine_enabled=bool(capon_local_refine_enabled),
+        capon_local_refine_half_width_deg=float(capon_local_refine_half_width_deg),
+        input_downsample_rate_hz=(None if input_downsample_rate_hz is None else int(input_downsample_rate_hz)),
         localization_snr_gating_enabled=bool(localization_snr_gating_enabled),
         localization_snr_threshold_db=float(localization_snr_threshold_db),
         localization_msc_variance_enabled=bool(localization_msc_variance_enabled),
@@ -427,9 +463,27 @@ def _run_job(
         "slow_chunk_ms": int(slow_chunk_ms),
         "localization_window_ms": int(localization_window_ms),
         "localization_hop_ms": int(localization_hop_ms),
+        "localization_grid_size": int(localization_grid_size),
         "srp_overlap": float(srp_overlap),
         "srp_freq_min_hz": int(srp_freq_min_hz),
         "srp_freq_max_hz": int(srp_freq_max_hz),
+        "input_downsample_rate_hz": (None if input_downsample_rate_hz is None else int(input_downsample_rate_hz)),
+        "localization_track_hold_frames": int(localization_track_hold_frames),
+        "localization_max_assoc_distance_deg": float(localization_max_assoc_distance_deg),
+        "localization_velocity_alpha": float(localization_velocity_alpha),
+        "localization_angle_alpha": float(localization_angle_alpha),
+        "capon_spectrum_ema_alpha": float(capon_spectrum_ema_alpha),
+        "capon_peak_min_sharpness": float(capon_peak_min_sharpness),
+        "capon_peak_min_margin": float(capon_peak_min_margin),
+        "capon_hold_frames": int(capon_hold_frames),
+        "capon_freq_bin_subsample_stride": int(capon_freq_bin_subsample_stride),
+        "capon_freq_bin_min_hz": (None if capon_freq_bin_min_hz is None else int(capon_freq_bin_min_hz)),
+        "capon_freq_bin_max_hz": (None if capon_freq_bin_max_hz is None else int(capon_freq_bin_max_hz)),
+        "capon_use_cholesky_solve": bool(capon_use_cholesky_solve),
+        "capon_covariance_ema_alpha": float(capon_covariance_ema_alpha),
+        "capon_full_scan_every_n_updates": int(capon_full_scan_every_n_updates),
+        "capon_local_refine_enabled": bool(capon_local_refine_enabled),
+        "capon_local_refine_half_width_deg": float(capon_local_refine_half_width_deg),
         "localization_vad_enabled": bool(localization_vad_enabled),
         "localization_snr_gating_enabled": bool(localization_snr_gating_enabled),
         "localization_snr_threshold_db": float(localization_snr_threshold_db),
@@ -560,9 +614,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--slow-chunk-ms", type=int, default=200)
     parser.add_argument("--localization-window-ms", type=int, default=160)
     parser.add_argument("--localization-hop-ms", type=int, default=50)
+    parser.add_argument("--localization-grid-size", type=int, default=72)
     parser.add_argument("--srp-overlap", type=float, default=0.2)
     parser.add_argument("--srp-freq-min-hz", type=int, default=1200)
     parser.add_argument("--srp-freq-max-hz", type=int, default=5400)
+    parser.add_argument("--input-downsample-rate-hz", type=int, default=None)
     parser.add_argument("--localization-vad-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--localization-snr-gating-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--localization-snr-threshold-db", type=float, default=3.0)
@@ -570,6 +626,22 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--localization-msc-history-frames", type=int, default=6)
     parser.add_argument("--localization-hsda-enabled", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--localization-hsda-window-frames", type=int, default=5)
+    parser.add_argument("--localization-track-hold-frames", type=int, default=5)
+    parser.add_argument("--localization-max-assoc-distance-deg", type=float, default=20.0)
+    parser.add_argument("--localization-velocity-alpha", type=float, default=0.35)
+    parser.add_argument("--localization-angle-alpha", type=float, default=0.30)
+    parser.add_argument("--capon-spectrum-ema-alpha", type=float, default=0.78)
+    parser.add_argument("--capon-peak-min-sharpness", type=float, default=0.12)
+    parser.add_argument("--capon-peak-min-margin", type=float, default=0.04)
+    parser.add_argument("--capon-hold-frames", type=int, default=2)
+    parser.add_argument("--capon-freq-bin-subsample-stride", type=int, default=1)
+    parser.add_argument("--capon-freq-bin-min-hz", type=int, default=None)
+    parser.add_argument("--capon-freq-bin-max-hz", type=int, default=None)
+    parser.add_argument("--capon-use-cholesky-solve", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--capon-covariance-ema-alpha", type=float, default=0.0)
+    parser.add_argument("--capon-full-scan-every-n-updates", type=int, default=1)
+    parser.add_argument("--capon-local-refine-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--capon-local-refine-half-width-deg", type=float, default=30.0)
     parser.add_argument("--noise-gain-scale", type=float, default=1.0)
     return parser.parse_args()
 
@@ -599,9 +671,11 @@ def main() -> None:
             "slow_chunk_ms": int(args.slow_chunk_ms),
             "localization_window_ms": int(args.localization_window_ms),
             "localization_hop_ms": int(args.localization_hop_ms),
+            "localization_grid_size": int(args.localization_grid_size),
             "srp_overlap": float(args.srp_overlap),
             "srp_freq_min_hz": int(args.srp_freq_min_hz),
             "srp_freq_max_hz": int(args.srp_freq_max_hz),
+            "input_downsample_rate_hz": (None if args.input_downsample_rate_hz is None else int(args.input_downsample_rate_hz)),
             "localization_vad_enabled": bool(args.localization_vad_enabled),
             "localization_snr_gating_enabled": bool(args.localization_snr_gating_enabled),
             "localization_snr_threshold_db": float(args.localization_snr_threshold_db),
@@ -609,6 +683,22 @@ def main() -> None:
             "localization_msc_history_frames": int(args.localization_msc_history_frames),
             "localization_hsda_enabled": bool(args.localization_hsda_enabled),
             "localization_hsda_window_frames": int(args.localization_hsda_window_frames),
+            "localization_track_hold_frames": int(args.localization_track_hold_frames),
+            "localization_max_assoc_distance_deg": float(args.localization_max_assoc_distance_deg),
+            "localization_velocity_alpha": float(args.localization_velocity_alpha),
+            "localization_angle_alpha": float(args.localization_angle_alpha),
+            "capon_spectrum_ema_alpha": float(args.capon_spectrum_ema_alpha),
+            "capon_peak_min_sharpness": float(args.capon_peak_min_sharpness),
+            "capon_peak_min_margin": float(args.capon_peak_min_margin),
+            "capon_hold_frames": int(args.capon_hold_frames),
+            "capon_freq_bin_subsample_stride": int(args.capon_freq_bin_subsample_stride),
+            "capon_freq_bin_min_hz": (None if args.capon_freq_bin_min_hz is None else int(args.capon_freq_bin_min_hz)),
+            "capon_freq_bin_max_hz": (None if args.capon_freq_bin_max_hz is None else int(args.capon_freq_bin_max_hz)),
+            "capon_use_cholesky_solve": bool(args.capon_use_cholesky_solve),
+            "capon_covariance_ema_alpha": float(args.capon_covariance_ema_alpha),
+            "capon_full_scan_every_n_updates": int(args.capon_full_scan_every_n_updates),
+            "capon_local_refine_enabled": bool(args.capon_local_refine_enabled),
+            "capon_local_refine_half_width_deg": float(args.capon_local_refine_half_width_deg),
         }
         for strategy in strategies
         for scene in scenes
@@ -646,9 +736,11 @@ def main() -> None:
         "slow_chunk_ms": int(args.slow_chunk_ms),
         "localization_window_ms": int(args.localization_window_ms),
         "localization_hop_ms": int(args.localization_hop_ms),
+        "localization_grid_size": int(args.localization_grid_size),
         "srp_overlap": float(args.srp_overlap),
         "srp_freq_min_hz": int(args.srp_freq_min_hz),
         "srp_freq_max_hz": int(args.srp_freq_max_hz),
+        "input_downsample_rate_hz": (None if args.input_downsample_rate_hz is None else int(args.input_downsample_rate_hz)),
         "localization_vad_enabled": bool(args.localization_vad_enabled),
         "localization_snr_gating_enabled": bool(args.localization_snr_gating_enabled),
         "localization_snr_threshold_db": float(args.localization_snr_threshold_db),
@@ -656,6 +748,22 @@ def main() -> None:
         "localization_msc_history_frames": int(args.localization_msc_history_frames),
         "localization_hsda_enabled": bool(args.localization_hsda_enabled),
         "localization_hsda_window_frames": int(args.localization_hsda_window_frames),
+        "localization_track_hold_frames": int(args.localization_track_hold_frames),
+        "localization_max_assoc_distance_deg": float(args.localization_max_assoc_distance_deg),
+        "localization_velocity_alpha": float(args.localization_velocity_alpha),
+        "localization_angle_alpha": float(args.localization_angle_alpha),
+        "capon_spectrum_ema_alpha": float(args.capon_spectrum_ema_alpha),
+        "capon_peak_min_sharpness": float(args.capon_peak_min_sharpness),
+        "capon_peak_min_margin": float(args.capon_peak_min_margin),
+        "capon_hold_frames": int(args.capon_hold_frames),
+        "capon_freq_bin_subsample_stride": int(args.capon_freq_bin_subsample_stride),
+        "capon_freq_bin_min_hz": (None if args.capon_freq_bin_min_hz is None else int(args.capon_freq_bin_min_hz)),
+        "capon_freq_bin_max_hz": (None if args.capon_freq_bin_max_hz is None else int(args.capon_freq_bin_max_hz)),
+        "capon_use_cholesky_solve": bool(args.capon_use_cholesky_solve),
+        "capon_covariance_ema_alpha": float(args.capon_covariance_ema_alpha),
+        "capon_full_scan_every_n_updates": int(args.capon_full_scan_every_n_updates),
+        "capon_local_refine_enabled": bool(args.capon_local_refine_enabled),
+        "capon_local_refine_half_width_deg": float(args.capon_local_refine_half_width_deg),
         "noise_gain_scale": float(args.noise_gain_scale),
         "eval_mode": str(args.eval_mode),
         "aggregates": aggregates,

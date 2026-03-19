@@ -67,6 +67,7 @@ class SRPPeakTracker:
         overlap: float,
         freq_range: tuple[int, int],
         max_sources: int,
+        hop_ms: int | None = None,
         prior_enabled: bool = True,
         min_score: float = 0.05,
         ema_alpha: float = 0.35,
@@ -87,6 +88,14 @@ class SRPPeakTracker:
         capon_peak_min_sharpness: float = 0.12,
         capon_peak_min_margin: float = 0.08,
         capon_hold_frames: int = 2,
+        capon_freq_bin_subsample_stride: int = 1,
+        capon_freq_bin_min_hz: int | None = None,
+        capon_freq_bin_max_hz: int | None = None,
+        capon_use_cholesky_solve: bool = False,
+        capon_covariance_ema_alpha: float = 0.0,
+        capon_full_scan_every_n_updates: int = 1,
+        capon_local_refine_enabled: bool = False,
+        capon_local_refine_half_width_deg: float = 30.0,
         max_tracks: int | None = None,
         max_assoc_distance_deg: float = 20.0,
         track_hold_frames: int = 5,
@@ -144,7 +153,8 @@ class SRPPeakTracker:
         self._min_relative_peak_score = float(min_relative_peak_score)
         self._min_peak_contrast = float(min_peak_contrast)
         self._min_peak_separation_deg = float(min_peak_separation_deg)
-        self._update_interval_s = max(1e-3, float(window_ms) / 1000.0)
+        effective_hop_ms = int(window_ms if hop_ms is None else hop_ms)
+        self._update_interval_s = max(1e-3, float(effective_hop_ms) / 1000.0)
         self._backend = build_localization_backend(
             self._backend_name,
             mic_pos=np.asarray(mic_pos, dtype=float),
@@ -163,6 +173,14 @@ class SRPPeakTracker:
             capon_peak_min_sharpness=capon_peak_min_sharpness,
             capon_peak_min_margin=capon_peak_min_margin,
             capon_hold_frames=capon_hold_frames,
+            capon_freq_bin_subsample_stride=capon_freq_bin_subsample_stride,
+            capon_freq_bin_min_hz=capon_freq_bin_min_hz,
+            capon_freq_bin_max_hz=capon_freq_bin_max_hz,
+            capon_use_cholesky_solve=capon_use_cholesky_solve,
+            capon_covariance_ema_alpha=capon_covariance_ema_alpha,
+            capon_full_scan_every_n_updates=capon_full_scan_every_n_updates,
+            capon_local_refine_enabled=capon_local_refine_enabled,
+            capon_local_refine_half_width_deg=capon_local_refine_half_width_deg,
         )
         self._max_sources = int(max_sources)
         self._single_source_backends = {
