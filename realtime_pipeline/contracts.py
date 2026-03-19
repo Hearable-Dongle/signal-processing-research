@@ -337,6 +337,23 @@ class PipelineConfig:
     delay_sum_subtractive_multi_offset_deg: float = 10.0
     delay_sum_subtractive_use_suppressed_user_doa: bool = True
     delay_sum_subtractive_output_clip_guard: bool = True
+    delay_sum_subtractive_silence_guard_enabled: bool = True
+    delay_sum_subtractive_silence_guard_ratio_threshold: float = 0.15
+    delay_sum_subtractive_silence_guard_target_rms_floor: float = 0.005
+    delay_sum_subtractive_spike_guard_enabled: bool = True
+    delay_sum_subtractive_spike_guard_rms_ratio_threshold: float = 2.0
+    delay_sum_subtractive_spike_guard_peak_ratio_threshold: float = 3.0
+    delay_sum_subtractive_spike_guard_sample_jump_threshold: float = 0.15
+    delay_sum_subtractive_output_crossfade_enabled: bool = False
+    delay_sum_subtractive_output_crossfade_samples: int = 16
+    delay_sum_subtractive_declick_enabled: bool = False
+    delay_sum_subtractive_declick_alpha: float = 0.9
+    delay_sum_subtractive_declick_spike_threshold: float = 0.08
+    delay_sum_subtractive_interferer_ema_enabled: bool = False
+    delay_sum_subtractive_interferer_ema_alpha: float = 0.7
+    delay_sum_subtractive_adaptive_alpha_enabled: bool = False
+    delay_sum_subtractive_adaptive_alpha_min: float = 0.2
+    delay_sum_subtractive_adaptive_alpha_delta_scale: float = 1.0
     # Frequency-domain covariance smoothing
     fd_analysis_window_ms: float = 20.0
     # Defaults track the sensitivity-tuned Silero preset from
