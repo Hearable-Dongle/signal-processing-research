@@ -1236,6 +1236,17 @@ def _run_recording_method_job(
     delay_sum_subtractive_multi_offset_deg: float,
     delay_sum_subtractive_use_suppressed_user_doa: bool,
     delay_sum_subtractive_output_clip_guard: bool,
+    delay_sum_subtractive_spike_guard_sample_jump_threshold: float,
+    delay_sum_subtractive_output_crossfade_enabled: bool,
+    delay_sum_subtractive_output_crossfade_samples: int,
+    delay_sum_subtractive_declick_enabled: bool,
+    delay_sum_subtractive_declick_alpha: float,
+    delay_sum_subtractive_declick_spike_threshold: float,
+    delay_sum_subtractive_interferer_ema_enabled: bool,
+    delay_sum_subtractive_interferer_ema_alpha: float,
+    delay_sum_subtractive_adaptive_alpha_enabled: bool,
+    delay_sum_subtractive_adaptive_alpha_min: float,
+    delay_sum_subtractive_adaptive_alpha_delta_scale: float,
     slow_chunk_ms: int,
     slow_chunk_hop_ms: int,
     fast_path_reference_mode: str,
@@ -1421,6 +1432,17 @@ def _run_recording_method_job(
             "delay_sum_subtractive_multi_offset_deg": float(delay_sum_subtractive_multi_offset_deg),
             "delay_sum_subtractive_use_suppressed_user_doa": bool(delay_sum_subtractive_use_suppressed_user_doa),
             "delay_sum_subtractive_output_clip_guard": bool(delay_sum_subtractive_output_clip_guard),
+            "delay_sum_subtractive_spike_guard_sample_jump_threshold": float(delay_sum_subtractive_spike_guard_sample_jump_threshold),
+            "delay_sum_subtractive_output_crossfade_enabled": bool(delay_sum_subtractive_output_crossfade_enabled),
+            "delay_sum_subtractive_output_crossfade_samples": int(delay_sum_subtractive_output_crossfade_samples),
+            "delay_sum_subtractive_declick_enabled": bool(delay_sum_subtractive_declick_enabled),
+            "delay_sum_subtractive_declick_alpha": float(delay_sum_subtractive_declick_alpha),
+            "delay_sum_subtractive_declick_spike_threshold": float(delay_sum_subtractive_declick_spike_threshold),
+            "delay_sum_subtractive_interferer_ema_enabled": bool(delay_sum_subtractive_interferer_ema_enabled),
+            "delay_sum_subtractive_interferer_ema_alpha": float(delay_sum_subtractive_interferer_ema_alpha),
+            "delay_sum_subtractive_adaptive_alpha_enabled": bool(delay_sum_subtractive_adaptive_alpha_enabled),
+            "delay_sum_subtractive_adaptive_alpha_min": float(delay_sum_subtractive_adaptive_alpha_min),
+            "delay_sum_subtractive_adaptive_alpha_delta_scale": float(delay_sum_subtractive_adaptive_alpha_delta_scale),
             "fd_analysis_window_ms": float(fd_analysis_window_ms),
             "fd_noise_covariance_mode": str(fd_noise_covariance_mode),
             "target_activity_rnn_update_mode": (str(target_activity_rnn_update_mode) if is_mvdr else None),
@@ -1584,6 +1606,17 @@ def _run_recording_method_job(
         "delay_sum_subtractive_multi_offset_deg": float(delay_sum_subtractive_multi_offset_deg),
         "delay_sum_subtractive_use_suppressed_user_doa": bool(delay_sum_subtractive_use_suppressed_user_doa),
         "delay_sum_subtractive_output_clip_guard": bool(delay_sum_subtractive_output_clip_guard),
+        "delay_sum_subtractive_spike_guard_sample_jump_threshold": float(delay_sum_subtractive_spike_guard_sample_jump_threshold),
+        "delay_sum_subtractive_output_crossfade_enabled": bool(delay_sum_subtractive_output_crossfade_enabled),
+        "delay_sum_subtractive_output_crossfade_samples": int(delay_sum_subtractive_output_crossfade_samples),
+        "delay_sum_subtractive_declick_enabled": bool(delay_sum_subtractive_declick_enabled),
+        "delay_sum_subtractive_declick_alpha": float(delay_sum_subtractive_declick_alpha),
+        "delay_sum_subtractive_declick_spike_threshold": float(delay_sum_subtractive_declick_spike_threshold),
+        "delay_sum_subtractive_interferer_ema_enabled": bool(delay_sum_subtractive_interferer_ema_enabled),
+        "delay_sum_subtractive_interferer_ema_alpha": float(delay_sum_subtractive_interferer_ema_alpha),
+        "delay_sum_subtractive_adaptive_alpha_enabled": bool(delay_sum_subtractive_adaptive_alpha_enabled),
+        "delay_sum_subtractive_adaptive_alpha_min": float(delay_sum_subtractive_adaptive_alpha_min),
+        "delay_sum_subtractive_adaptive_alpha_delta_scale": float(delay_sum_subtractive_adaptive_alpha_delta_scale),
         "localization_track_hold_frames": int(localization_track_hold_frames),
         "localization_velocity_alpha": float(localization_velocity_alpha),
         "localization_angle_alpha": float(localization_angle_alpha),
@@ -1886,6 +1919,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--delay-sum-subtractive-multi-offset-deg", type=float, default=10.0)
     parser.add_argument("--delay-sum-subtractive-use-suppressed-user-doa", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--delay-sum-subtractive-output-clip-guard", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--delay-sum-subtractive-spike-guard-sample-jump-threshold", type=float, default=0.15)
+    parser.add_argument("--delay-sum-subtractive-output-crossfade-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--delay-sum-subtractive-output-crossfade-samples", type=int, default=16)
+    parser.add_argument("--delay-sum-subtractive-declick-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--delay-sum-subtractive-declick-alpha", type=float, default=0.9)
+    parser.add_argument("--delay-sum-subtractive-declick-spike-threshold", type=float, default=0.08)
+    parser.add_argument("--delay-sum-subtractive-interferer-ema-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--delay-sum-subtractive-interferer-ema-alpha", type=float, default=0.7)
+    parser.add_argument("--delay-sum-subtractive-adaptive-alpha-enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--delay-sum-subtractive-adaptive-alpha-min", type=float, default=0.2)
+    parser.add_argument("--delay-sum-subtractive-adaptive-alpha-delta-scale", type=float, default=1.0)
     parser.add_argument("--fd-analysis-window-ms", type=float, default=120.0)
     parser.add_argument("--robust-target-band-width-deg", type=float, default=10.0)
     parser.add_argument("--robust-target-band-max-freq-hz", type=float, default=0.0)
@@ -2126,6 +2170,17 @@ def main() -> None:
                 delay_sum_subtractive_multi_offset_deg=float(args.delay_sum_subtractive_multi_offset_deg),
                 delay_sum_subtractive_use_suppressed_user_doa=bool(args.delay_sum_subtractive_use_suppressed_user_doa),
                 delay_sum_subtractive_output_clip_guard=bool(args.delay_sum_subtractive_output_clip_guard),
+                delay_sum_subtractive_spike_guard_sample_jump_threshold=float(args.delay_sum_subtractive_spike_guard_sample_jump_threshold),
+                delay_sum_subtractive_output_crossfade_enabled=bool(args.delay_sum_subtractive_output_crossfade_enabled),
+                delay_sum_subtractive_output_crossfade_samples=int(args.delay_sum_subtractive_output_crossfade_samples),
+                delay_sum_subtractive_declick_enabled=bool(args.delay_sum_subtractive_declick_enabled),
+                delay_sum_subtractive_declick_alpha=float(args.delay_sum_subtractive_declick_alpha),
+                delay_sum_subtractive_declick_spike_threshold=float(args.delay_sum_subtractive_declick_spike_threshold),
+                delay_sum_subtractive_interferer_ema_enabled=bool(args.delay_sum_subtractive_interferer_ema_enabled),
+                delay_sum_subtractive_interferer_ema_alpha=float(args.delay_sum_subtractive_interferer_ema_alpha),
+                delay_sum_subtractive_adaptive_alpha_enabled=bool(args.delay_sum_subtractive_adaptive_alpha_enabled),
+                delay_sum_subtractive_adaptive_alpha_min=float(args.delay_sum_subtractive_adaptive_alpha_min),
+                delay_sum_subtractive_adaptive_alpha_delta_scale=float(args.delay_sum_subtractive_adaptive_alpha_delta_scale),
                 slow_chunk_ms=int(args.slow_chunk_ms),
                 slow_chunk_hop_ms=int(args.slow_chunk_hop_ms),
                 fast_path_reference_mode=str(args.fast_path_reference_mode),

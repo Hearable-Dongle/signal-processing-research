@@ -2461,6 +2461,10 @@ class FastPathWorker(threading.Thread):
         self._multi_target_hold_remaining_frames: int = 0
         self._focus_hold_remaining_frames: int = 0
         self._delay_sum_state_by_key: dict[str, dict[str, float | int | None]] = {}
+        self._subtractive_last_good_by_key: dict[str, np.ndarray] = {}
+        self._subtractive_prev_output_by_key: dict[str, np.ndarray] = {}
+        self._subtractive_prev_interferer_by_key: dict[str, np.ndarray] = {}
+        self._subtractive_prev_declick_sample_by_key: dict[str, float] = {}
         self._beamformer_snapshot_targets = tuple(
             int(v) for v in getattr(config, "beamformer_snapshot_frame_indices", ()) if int(v) > 0
         )
@@ -2656,18 +2660,101 @@ class FastPathWorker(threading.Thread):
             return None
         return float(explicit)
 
+    def _apply_subtractive_output_guards(self, *, state_key: str, target: np.ndarray, out: np.ndarray) -> np.ndarray:
+        guarded = np.asarray(out, dtype=np.float32)
+        target_rms = float(np.sqrt(np.mean(np.asarray(target, dtype=np.float64) ** 2) + 1e-12))
+        out_rms = float(np.sqrt(np.mean(np.asarray(guarded, dtype=np.float64) ** 2) + 1e-12))
+        target_peak = float(np.max(np.abs(np.asarray(target, dtype=np.float32)))) if np.asarray(target).size else 0.0
+        out_peak = float(np.max(np.abs(guarded))) if guarded.size else 0.0
+        prev = self._subtractive_last_good_by_key.get(state_key)
+        silence_bad = False
+        if bool(getattr(self._cfg, "delay_sum_subtractive_silence_guard_enabled", True)):
+            target_floor = float(max(getattr(self._cfg, "delay_sum_subtractive_silence_guard_target_rms_floor", 0.005), 0.0))
+            ratio_threshold = float(max(getattr(self._cfg, "delay_sum_subtractive_silence_guard_ratio_threshold", 0.15), 0.0))
+            silence_bad = target_rms >= target_floor and out_rms <= (ratio_threshold * target_rms)
+        spike_bad = False
+        if bool(getattr(self._cfg, "delay_sum_subtractive_spike_guard_enabled", True)):
+            if prev is not None and prev.shape == guarded.shape and prev.size and guarded.size:
+                sample_jump_threshold = float(max(getattr(self._cfg, "delay_sum_subtractive_spike_guard_sample_jump_threshold", 0.25), 0.0))
+                sample_jump = float(guarded[0]) - float(prev[-1])
+                spike_bad = sample_jump > sample_jump_threshold
+        if (silence_bad or spike_bad) and prev is not None and prev.shape == guarded.shape:
+            return prev.copy()
+        if guarded.size:
+            self._subtractive_last_good_by_key[state_key] = guarded.copy()
+        return guarded
+
+    def _stabilize_subtractive_interferer(self, *, state_key: str, interferer: np.ndarray) -> tuple[np.ndarray, float]:
+        cur = np.asarray(interferer, dtype=np.float32)
+        prev = self._subtractive_prev_interferer_by_key.get(state_key)
+        delta = 0.0
+        if prev is not None and prev.shape == cur.shape and prev.size:
+            denom = float(np.sqrt(np.mean(np.asarray(prev, dtype=np.float64) ** 2) + 1e-12))
+            delta = float(np.sqrt(np.mean(np.asarray(cur - prev, dtype=np.float64) ** 2) + 1e-12)) / max(denom, 1e-6)
+            if bool(getattr(self._cfg, "delay_sum_subtractive_interferer_ema_enabled", False)):
+                alpha = float(np.clip(getattr(self._cfg, "delay_sum_subtractive_interferer_ema_alpha", 0.7), 0.0, 1.0))
+                cur = (((1.0 - alpha) * prev.astype(np.float32)) + (alpha * cur)).astype(np.float32, copy=False)
+        self._subtractive_prev_interferer_by_key[state_key] = cur.copy()
+        return cur, float(delta)
+
+    def _adaptive_subtractive_alpha(self, *, base_alpha: float, delta: float) -> float:
+        alpha = float(base_alpha)
+        if not bool(getattr(self._cfg, "delay_sum_subtractive_adaptive_alpha_enabled", False)):
+            return alpha
+        min_alpha = float(np.clip(getattr(self._cfg, "delay_sum_subtractive_adaptive_alpha_min", 0.2), 0.0, alpha))
+        delta_scale = float(max(getattr(self._cfg, "delay_sum_subtractive_adaptive_alpha_delta_scale", 1.0), 1e-6))
+        shrink = 1.0 / (1.0 + (delta_scale * max(delta, 0.0)))
+        return float(np.clip(alpha * shrink, min_alpha, alpha))
+
+    def _apply_subtractive_declick(self, *, state_key: str, out: np.ndarray) -> np.ndarray:
+        y = np.asarray(out, dtype=np.float32).copy()
+        if not bool(getattr(self._cfg, "delay_sum_subtractive_declick_enabled", False)):
+            if y.size:
+                self._subtractive_prev_declick_sample_by_key[state_key] = float(y[-1])
+            return y
+        alpha = float(np.clip(getattr(self._cfg, "delay_sum_subtractive_declick_alpha", 0.9), 0.0, 0.9999))
+        threshold = float(max(getattr(self._cfg, "delay_sum_subtractive_declick_spike_threshold", 0.08), 0.0))
+        prev = float(self._subtractive_prev_declick_sample_by_key.get(state_key, 0.0))
+        for i in range(y.shape[0]):
+            cur = float(y[i])
+            if abs(cur - prev) > threshold:
+                cur = float((alpha * prev) + ((1.0 - alpha) * cur))
+                y[i] = cur
+            prev = cur
+        self._subtractive_prev_declick_sample_by_key[state_key] = prev
+        return y
+
+    def _apply_subtractive_output_crossfade(self, *, state_key: str, out: np.ndarray) -> np.ndarray:
+        y = np.asarray(out, dtype=np.float32).copy()
+        prev = self._subtractive_prev_output_by_key.get(state_key)
+        if not bool(getattr(self._cfg, "delay_sum_subtractive_output_crossfade_enabled", False)) or prev is None or prev.shape != y.shape or y.size == 0:
+            self._subtractive_prev_output_by_key[state_key] = y.copy()
+            return y
+        fade_len = max(0, int(getattr(self._cfg, "delay_sum_subtractive_output_crossfade_samples", 16)))
+        fade_len = min(fade_len, y.shape[0] // 4, prev.shape[0], y.shape[0])
+        if fade_len > 0:
+            fade_out = np.linspace(1.0, 0.0, fade_len, endpoint=True, dtype=np.float32)
+            fade_in = np.linspace(0.0, 1.0, fade_len, endpoint=True, dtype=np.float32)
+            y[:fade_len] = (prev[-fade_len:] * fade_out) + (y[:fade_len] * fade_in)
+        self._subtractive_prev_output_by_key[state_key] = y.copy()
+        return y
+
     def _delay_sum_subtractive(self, x: np.ndarray, *, target_doa_deg: float) -> np.ndarray:
         target = self._delay_sum_with_state(x, doa_deg=float(target_doa_deg), state_key="subtractive_target")
         interferer_doa = self._delay_sum_subtractive_interferer_doa()
         if interferer_doa is None:
             return target.astype(np.float32, copy=False)
         interferer = self._delay_sum_with_state(x, doa_deg=float(interferer_doa), state_key="subtractive_interferer")
-        alpha = float(max(0.0, getattr(self._cfg, "delay_sum_subtractive_alpha", 0.5)))
+        interferer, delta = self._stabilize_subtractive_interferer(state_key="subtractive_interferer", interferer=interferer)
+        alpha = self._adaptive_subtractive_alpha(base_alpha=float(max(0.0, getattr(self._cfg, "delay_sum_subtractive_alpha", 0.5))), delta=delta)
         out = np.asarray(target, dtype=np.float32) - (alpha * np.asarray(interferer, dtype=np.float32))
         if bool(getattr(self._cfg, "delay_sum_subtractive_output_clip_guard", True)):
             peak = float(np.max(np.abs(out))) if out.size else 0.0
             if peak > 1.0:
                 out = out / peak
+        out = self._apply_subtractive_declick(state_key="subtractive_out", out=out)
+        out = self._apply_subtractive_output_crossfade(state_key="subtractive_out", out=out)
+        out = self._apply_subtractive_output_guards(state_key="subtractive_out", target=target, out=out)
         frame_idx = int(self._frame_idx) + 1
         if frame_idx in self._beamformer_snapshot_target_set:
             if not any(int(item.get("frame_index", -1)) == frame_idx for item in self._delay_sum_snapshot_trace):
@@ -2685,12 +2772,16 @@ class FastPathWorker(threading.Thread):
             for idx, offset in enumerate((-spread, 0.0, spread))
         ]
         interferer = np.mean(np.stack(interferer_beams, axis=0), axis=0).astype(np.float32, copy=False)
-        alpha = float(max(0.0, getattr(self._cfg, "delay_sum_subtractive_alpha", 0.5)))
+        interferer, delta = self._stabilize_subtractive_interferer(state_key="subtractive_multi_interferer", interferer=interferer)
+        alpha = self._adaptive_subtractive_alpha(base_alpha=float(max(0.0, getattr(self._cfg, "delay_sum_subtractive_alpha", 0.5))), delta=delta)
         out = np.asarray(target, dtype=np.float32) - (alpha * interferer)
         if bool(getattr(self._cfg, "delay_sum_subtractive_output_clip_guard", True)):
             peak = float(np.max(np.abs(out))) if out.size else 0.0
             if peak > 1.0:
                 out = out / peak
+        out = self._apply_subtractive_declick(state_key="subtractive_multi_out", out=out)
+        out = self._apply_subtractive_output_crossfade(state_key="subtractive_multi_out", out=out)
+        out = self._apply_subtractive_output_guards(state_key="subtractive_multi_out", target=target, out=out)
         frame_idx = int(self._frame_idx) + 1
         if frame_idx in self._beamformer_snapshot_target_set:
             if not any(int(item.get("frame_index", -1)) == frame_idx for item in self._delay_sum_snapshot_trace):
@@ -2703,11 +2794,16 @@ class FastPathWorker(threading.Thread):
         if interferer_doa is None:
             return target.astype(np.float32, copy=False)
         interferer = self._delay_sum_with_state(x, doa_deg=float(interferer_doa), state_key="differential_interferer")
-        out = np.asarray(target, dtype=np.float32) - np.asarray(interferer, dtype=np.float32)
+        interferer, delta = self._stabilize_subtractive_interferer(state_key="differential_interferer", interferer=interferer)
+        alpha = self._adaptive_subtractive_alpha(base_alpha=1.0, delta=delta)
+        out = np.asarray(target, dtype=np.float32) - (alpha * np.asarray(interferer, dtype=np.float32))
         if bool(getattr(self._cfg, "delay_sum_subtractive_output_clip_guard", True)):
             peak = float(np.max(np.abs(out))) if out.size else 0.0
             if peak > 1.0:
                 out = out / peak
+        out = self._apply_subtractive_declick(state_key="differential_out", out=out)
+        out = self._apply_subtractive_output_crossfade(state_key="differential_out", out=out)
+        out = self._apply_subtractive_output_guards(state_key="differential_out", target=target, out=out)
         frame_idx = int(self._frame_idx) + 1
         if frame_idx in self._beamformer_snapshot_target_set:
             if not any(int(item.get("frame_index", -1)) == frame_idx for item in self._delay_sum_snapshot_trace):

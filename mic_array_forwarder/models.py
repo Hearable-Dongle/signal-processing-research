@@ -44,6 +44,23 @@ class FastPathConfig(BaseModel):
     delay_sum_subtractive_multi_offset_deg: float = 10.0
     delay_sum_subtractive_use_suppressed_user_doa: bool = True
     delay_sum_subtractive_output_clip_guard: bool = True
+    delay_sum_subtractive_silence_guard_enabled: bool = True
+    delay_sum_subtractive_silence_guard_ratio_threshold: float = 0.15
+    delay_sum_subtractive_silence_guard_target_rms_floor: float = 0.005
+    delay_sum_subtractive_spike_guard_enabled: bool = True
+    delay_sum_subtractive_spike_guard_rms_ratio_threshold: float = 2.0
+    delay_sum_subtractive_spike_guard_peak_ratio_threshold: float = 3.0
+    delay_sum_subtractive_spike_guard_sample_jump_threshold: float = 0.15
+    delay_sum_subtractive_output_crossfade_enabled: bool = False
+    delay_sum_subtractive_output_crossfade_samples: int = 16
+    delay_sum_subtractive_declick_enabled: bool = False
+    delay_sum_subtractive_declick_alpha: float = 0.9
+    delay_sum_subtractive_declick_spike_threshold: float = 0.08
+    delay_sum_subtractive_interferer_ema_enabled: bool = False
+    delay_sum_subtractive_interferer_ema_alpha: float = 0.7
+    delay_sum_subtractive_adaptive_alpha_enabled: bool = False
+    delay_sum_subtractive_adaptive_alpha_min: float = 0.2
+    delay_sum_subtractive_adaptive_alpha_delta_scale: float = 1.0
     # Defaults track the sensitivity-tuned Silero preset from
     # `beamforming/benchmark/run_optuna_babble_bootstrap_mvdr.py`
     # (`beamforming/benchmark/_sens_tune_silero/best_params.json`).
@@ -350,6 +367,74 @@ class SessionStartRequest(BaseModel):
     @property
     def delay_sum_subtractive_output_clip_guard(self) -> bool:
         return bool(self.fast_path.delay_sum_subtractive_output_clip_guard)
+
+    @property
+    def delay_sum_subtractive_silence_guard_enabled(self) -> bool:
+        return bool(self.fast_path.delay_sum_subtractive_silence_guard_enabled)
+
+    @property
+    def delay_sum_subtractive_silence_guard_ratio_threshold(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_silence_guard_ratio_threshold)
+
+    @property
+    def delay_sum_subtractive_silence_guard_target_rms_floor(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_silence_guard_target_rms_floor)
+
+    @property
+    def delay_sum_subtractive_spike_guard_enabled(self) -> bool:
+        return bool(self.fast_path.delay_sum_subtractive_spike_guard_enabled)
+
+    @property
+    def delay_sum_subtractive_spike_guard_rms_ratio_threshold(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_spike_guard_rms_ratio_threshold)
+
+    @property
+    def delay_sum_subtractive_spike_guard_peak_ratio_threshold(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_spike_guard_peak_ratio_threshold)
+
+    @property
+    def delay_sum_subtractive_spike_guard_sample_jump_threshold(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_spike_guard_sample_jump_threshold)
+
+    @property
+    def delay_sum_subtractive_output_crossfade_enabled(self) -> bool:
+        return bool(self.fast_path.delay_sum_subtractive_output_crossfade_enabled)
+
+    @property
+    def delay_sum_subtractive_output_crossfade_samples(self) -> int:
+        return int(self.fast_path.delay_sum_subtractive_output_crossfade_samples)
+
+    @property
+    def delay_sum_subtractive_declick_enabled(self) -> bool:
+        return bool(self.fast_path.delay_sum_subtractive_declick_enabled)
+
+    @property
+    def delay_sum_subtractive_declick_alpha(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_declick_alpha)
+
+    @property
+    def delay_sum_subtractive_declick_spike_threshold(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_declick_spike_threshold)
+
+    @property
+    def delay_sum_subtractive_interferer_ema_enabled(self) -> bool:
+        return bool(self.fast_path.delay_sum_subtractive_interferer_ema_enabled)
+
+    @property
+    def delay_sum_subtractive_interferer_ema_alpha(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_interferer_ema_alpha)
+
+    @property
+    def delay_sum_subtractive_adaptive_alpha_enabled(self) -> bool:
+        return bool(self.fast_path.delay_sum_subtractive_adaptive_alpha_enabled)
+
+    @property
+    def delay_sum_subtractive_adaptive_alpha_min(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_adaptive_alpha_min)
+
+    @property
+    def delay_sum_subtractive_adaptive_alpha_delta_scale(self) -> float:
+        return float(self.fast_path.delay_sum_subtractive_adaptive_alpha_delta_scale)
 
     @property
     def fd_cov_ema_alpha(self) -> float:
