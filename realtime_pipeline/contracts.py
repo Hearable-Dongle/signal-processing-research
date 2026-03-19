@@ -400,7 +400,7 @@ class PipelineConfig:
     postfilter_spectral_floor_beta: float = 0.01
     postfilter_freq_smoothing_bins: int = 2
     postfilter_gain_max_step_db: float = 2.5
-    rnnoise_wet_mix: float = 0.8
+    rnnoise_wet_mix: float = 0.9
     rnnoise_input_gain_db: float = 0.0
     rnnoise_input_highpass_enabled: bool = True
     rnnoise_input_highpass_cutoff_hz: float = 80.0
@@ -427,8 +427,8 @@ class PipelineConfig:
     rnnoise_corruption_guard_rms_ratio_threshold: float = 2.0
     rnnoise_corruption_guard_peak_ratio_threshold: float = 3.0
     rnnoise_corruption_guard_mode: str = "hold_previous"  # one of: hold_previous, use_input, mute
-    rnnoise_voice_eq_enabled: bool = False
-    rnnoise_voice_eq_presence_gain_db: float = 0.0
+    rnnoise_voice_eq_enabled: bool = True
+    rnnoise_voice_eq_presence_gain_db: float = 2.5
     rnnoise_voice_eq_presence_center_hz: float = 3000.0
     rnnoise_voice_eq_presence_q: float = 0.9
     rnnoise_voice_eq_lowmid_gain_db: float = 0.0

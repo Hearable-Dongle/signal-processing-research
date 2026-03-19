@@ -1,0 +1,49 @@
+This branch tunes the RNNoise postfilter defaults for the realtime `delay_sum + rnnoise` path.
+
+Current default stack:
+- `rnnoise_wet_mix = 0.9`
+- input HPF enabled at `80 Hz`
+- output HPF enabled at `70 Hz`
+- VAD-adaptive blend disabled
+- corruption guard enabled with:
+  - `mode = hold_previous`
+  - `rms_ratio_threshold = 2.0`
+  - `peak_ratio_threshold = 3.0`
+- voice EQ enabled with:
+  - presence boost `+2.5 dB @ 3 kHz`
+  - `Q = 0.9`
+  - no low-mid cut by default
+- output low-pass `7500 Hz`
+- output notch `500 Hz`, `Q = 20`
+
+Main changes on this branch:
+- RNNoise input/output HPF defaults
+- RNNoise continuity diagnostics in `summary.json`
+- corruption guard for bad RNNoise frames
+- optional chunk crossfade / de-click / clip guard experiments
+- post-RNNoise voice EQ
+
+Useful example output:
+- `beamforming/benchmark/_gt_delay_sum_rnnoise_behind_poster_8k_hop200_default_guard_tests/presence_boost_25db`
+
+Example command:
+```bash
+env PYTHONPATH=. python beamforming/benchmark/data_collection_benchmark.py \
+  --input-path data-collection/nano-sympoium/nano-symposium-behind-poster/recordings/recording-3skyncgm \
+  --out-dir beamforming/benchmark/_gt_delay_sum_rnnoise_behind_poster_8k_hop200_default_guard_tests/manual_default_check \
+  --methods delay_sum \
+  --workers 1 \
+  --algorithm-mode speaker_tracking_single_active \
+  --use-ground-truth-doa-override \
+  --input-downsample-rate-hz 8000 \
+  --fast-frame-ms 10 \
+  --localization-hop-ms 200 \
+  --localization-window-ms 200 \
+  --postfilter-method rnnoise \
+  --postfilter-input-source beamformed_mono \
+  --target-activity-detector-backend webrtc_fused
+```
+
+Relevant commits:
+- `cba954a` `Add RNNoise continuity guards and spike diagnostics`
+- `43e8f95` `Add RNNoise voice EQ and lower default wet mix`
